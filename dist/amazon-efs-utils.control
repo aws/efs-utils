@@ -1,0 +1,9 @@
+Package: amazon-efs-utils
+Architecture: all
+Version: 1.0
+Section: utils
+Depends: python|python2, nfs-common, stunnel4 (>= 4.56)
+Priority: optional
+Copyright: MIT License
+Maintainer: Amazon.com, Inc. <efs-utils@amazon.com>
+Description: This package provides utilities for simplifying the use of EFS file systems

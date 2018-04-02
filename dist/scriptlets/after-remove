@@ -1,0 +1,3 @@
+if [ $(cat /proc/1/comm) = systemd ]; then
+    systemctl daemon-reload
+fi

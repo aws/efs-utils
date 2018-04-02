@@ -1,0 +1,5 @@
+if [ $(cat /proc/1/comm) = init ]; then
+    /sbin/restart amazon-efs-mount-watchdog &> /dev/null || true
+elif [ $(cat /proc/1/comm) = systemd ]; then
+    systemctl try-restart amazon-efs-mount-watchdog.service &> /dev/null || true
+fi

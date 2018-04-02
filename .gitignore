@@ -1,0 +1,12 @@
+amazon-efs-utils*
+!dist/amazon-efs-utils.control
+!dist/amazon-efs-utils.spec
+
+.coverage
+.pytest_cache
+
+*.pyc
+
+__pycache__/
+build/
+
