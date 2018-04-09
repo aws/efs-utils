@@ -65,7 +65,9 @@ LOG_FILE = 'mount.log'
 
 STATE_FILE_DIR = '/var/run/efs'
 
-FS_NAME_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)(?::(?P<path>/.*))?$')
+ip_pattern = '^(?:[0-9]{1,3}\.){3}[0-9]{1,3}'
+IP_RE = re.compile(ip_pattern)
+FS_NAME_RE = re.compile('^(?P<fs_id>(fs-[0-9a-f]+|' + ip_pattern + '))(?::(?P<path>/.*))?$')
 
 INSTANCE_METADATA_SERVICE_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document/'
 
@@ -499,6 +501,9 @@ def get_dns_name(config, fs_id):
     def _validate_replacement_field_count(format_str, expected_ct):
         if format_str.count('{') != expected_ct or format_str.count('}') != expected_ct:
             raise ValueError('DNS name format has an incorrect number of replacement fields')
+
+    if IP_RE.match(fs_id):  # Don't attempt to resolve raw IP
+        return fs_id
 
     dns_name_format = config.get(CONFIG_SECTION, 'dns_name_format')
 

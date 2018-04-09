@@ -97,6 +97,12 @@ To mount over TLS automatically, add an `/etc/fstab` entry like:
 file-system-id efs-mount-point efs _netdev,tls 0 0
 ```
 
+For cases where DNS isn't enabled, use an IP address in-place of file-system-id
+
+```
+$ sudo mount -t efs 1.2.3.4 efs-mount-point/
+```
+
 For more information on mounting with the mount helper, see the [documentation](https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html).
 
 #### amazon-efs-mount-watchdog

@@ -94,3 +94,19 @@ def test_parse_arguments():
     assert '/home' == path
     assert '/dir' == mountpoint
     assert {'foo': None, 'bar': 'baz', 'quux': None} == options
+
+def test_parse_arguments_ip_default_path(capsys):
+    fsid, path, mountpoint, options = mount_efs.parse_arguments(['mount', '10.1.2.3', '/dir'])
+
+    assert '10.1.2.3' == fsid
+    assert '/' == path
+    assert '/dir' == mountpoint
+    assert {} == options
+
+def test_parse_arguments_ip_custom_path(capsys):
+    fsid, path, mountpoint, options = mount_efs.parse_arguments(['mount', '10.1.2.3:/home', '/dir'])
+
+    assert '10.1.2.3' == fsid
+    assert '/home' == path
+    assert '/dir' == mountpoint
+    assert {} == options

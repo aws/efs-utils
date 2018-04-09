@@ -96,3 +96,11 @@ def test_get_dns_name_unresolvable(mocker, capsys):
 
     out, err = capsys.readouterr()
     assert 'Failed to resolve' in err
+
+def test_get_dns_name_ip_address(mocker):
+    ip_addr = '10.1.2.3'
+
+    config = _get_mock_config()
+
+    dns_name = mount_efs.get_dns_name(config, ip_addr)
+    assert dns_name == ip_addr
