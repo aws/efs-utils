@@ -36,7 +36,7 @@ def test_parse_arguments_version(capsys):
     assert 0 == ex.value.code
 
     out, err = capsys.readouterr()
-    assert 'Version: %.1f' % mount_efs.VERSION in out
+    assert 'Version: %s' % mount_efs.VERSION in out
 
 
 def test_parse_arguments_no_fs_id(capsys):

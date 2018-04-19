@@ -21,72 +21,24 @@ def create_temp_file(tmpdir, content=''):
     return temp_file
 
 
-def test_use_capath():
+def test_use_existing_cafile(tmpdir):
     efs_config = {}
-    options = {
-        'capath': CAPATH
-    }
+    stunnel_cafile = str(create_temp_file(tmpdir))
 
-    mount_efs.add_stunnel_ca_options(efs_config, options)
+    mount_efs.add_stunnel_ca_options(efs_config, stunnel_cafile)
 
-    assert CAPATH == efs_config.get('CApath')
-    assert 'CAfile' not in efs_config
-
-
-def test_use_cafile():
-    efs_config = {}
-    options = {
-        'cafile': CAFILE
-    }
-
-    mount_efs.add_stunnel_ca_options(efs_config, options)
-
-    assert CAFILE == efs_config.get('CAfile')
+    assert stunnel_cafile == efs_config.get('CAfile')
     assert 'CApath' not in efs_config
 
 
-def test_use_default_cafile_exists(tmpdir):
+def test_use_missing_cafile(capsys):
     efs_config = {}
-    ca_file = str(create_temp_file(tmpdir))
-    default_stunnel_cafile_paths = [
-        '/missing1',
-        ca_file,
-        '/missing2',
-    ]
-
-    mount_efs.add_stunnel_ca_options(efs_config, {}, default_stunnel_cafile_paths)
-
-    assert ca_file == efs_config.get('CAfile')
-    assert 'CApath' not in efs_config
-
-
-def test_use_default_cafile_multiple_exists(tmpdir):
-    efs_config = {}
-    ca_file_1 = str(create_temp_file(tmpdir))
-    ca_file_2 = str(create_temp_file(tmpdir))
-    default_stunnel_cafile_paths = [
-        ca_file_1,
-        ca_file_2,
-        '/missing',
-    ]
-
-    mount_efs.add_stunnel_ca_options(efs_config, {}, default_stunnel_cafile_paths)
-
-    assert ca_file_1 == efs_config.get('CAfile')
-    assert 'CApath' not in efs_config
-
-
-def test_use_default_cafile_missing(capsys):
-    efs_config = {}
-    default_stunnel_cafile_paths = [
-        '/missing1',
-        '/missing2',
-    ]
+    stunnel_cafile = '/missing1'
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.add_stunnel_ca_options(efs_config, {}, default_stunnel_cafile_paths)
+        mount_efs.add_stunnel_ca_options(efs_config, stunnel_cafile)
 
     assert 0 != ex.value.code
 
     out, err = capsys.readouterr()
-    assert 'Failed to find a certificate authority file for verification' in err
+    assert 'Failed to find the EFS certificate authority file for verification' in err

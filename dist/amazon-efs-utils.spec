@@ -8,14 +8,19 @@
 
 %if 0%{?amzn1}
 %global python_requires system-python
-%global with_systemd 0
+
 %else
 %global python_requires python2
+%endif
+
+%if 0%{?amzn1} || 0%{?rhel} == 6
+%global with_systemd 0
+%else
 %global with_systemd 1
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.1
+Version   : 1.2
 Release   : 1%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -64,6 +69,7 @@ mkdir -p %{buildroot}%{_bindir}
 mkdir -p %{buildroot}%{_localstatedir}/log/amazon/efs
 
 install -p -m 644 %{_builddir}/%{name}/dist/efs-utils.conf %{buildroot}%{_sysconfdir}/amazon/efs
+install -p -m 444 %{_builddir}/%{name}/dist/efs-utils.crt %{buildroot}%{_sysconfdir}/amazon/efs
 install -p -m 755 %{_builddir}/%{name}/src/mount_efs/__init__.py %{buildroot}/sbin/mount.efs
 install -p -m 755 %{_builddir}/%{name}/src/watchdog/__init__.py %{buildroot}%{_bindir}/amazon-efs-mount-watchdog
 
@@ -74,6 +80,7 @@ install -p -m 755 %{_builddir}/%{name}/src/watchdog/__init__.py %{buildroot}%{_b
 %else
 %config(noreplace) %{_sysconfdir}/init/amazon-efs-mount-watchdog.conf
 %endif
+%{_sysconfdir}/amazon/efs/efs-utils.crt
 /sbin/mount.efs
 %{_bindir}/amazon-efs-mount-watchdog
 /var/log/amazon

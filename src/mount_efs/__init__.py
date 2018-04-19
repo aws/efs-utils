@@ -30,7 +30,6 @@
 #
 # The script will add recommended mount options, if not provided in fstab.
 
-import getpass
 import json
 import logging
 import os
@@ -55,7 +54,7 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = 1.0
+VERSION = '1.2'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount'
@@ -70,12 +69,7 @@ FS_NAME_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)(?::(?P<path>/.*))?$')
 INSTANCE_METADATA_SERVICE_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document/'
 
 DEFAULT_STUNNEL_VERIFY_LEVEL = 2
-DEFAULT_STUNNEL_CAFILE_PATHS = [
-    '/etc/pki/tls/certs/ca-bundle.crt',
-    '/etc/ssl/certs/ca-certificates.crt',
-]
-
-TLS_TUNNEL_BUFFER_SIZE = 4096 + 1024 * 1024
+DEFAULT_STUNNEL_CAFILE = '/etc/amazon/efs/efs-utils.crt'
 
 EFS_ONLY_OPTIONS = [
     'cafile',
@@ -192,7 +186,7 @@ def choose_tls_port(config):
 
 
 def get_mount_specific_filename(fs_id, mountpoint, tls_port):
-    return '%s.%s.%d' % (fs_id,  os.path.abspath(mountpoint).replace(os.sep, '.').lstrip('.'), tls_port)
+    return '%s.%s.%d' % (fs_id, os.path.abspath(mountpoint).replace(os.sep, '.').lstrip('.'), tls_port)
 
 
 def serialize_stunnel_config(config, header=None):
@@ -211,22 +205,40 @@ def serialize_stunnel_config(config, header=None):
     return lines
 
 
-def add_stunnel_ca_options(efs_config, options, default_stunnel_cafile_paths=DEFAULT_STUNNEL_CAFILE_PATHS):
-    if 'capath' in options:
-        efs_config['CApath'] = options['capath']
-    elif 'cafile' in options:
-        efs_config['CAfile'] = options['cafile']
-    else:
-        for cafile_path in default_stunnel_cafile_paths:
-            if os.path.exists(cafile_path):
-                efs_config['CAfile'] = cafile_path
-                break
-        else:
-            fatal_error('Failed to find a certificate authority file for verification',
-                        'Failed to find a CAfile. defaults="%s"' % DEFAULT_STUNNEL_CAFILE_PATHS)
+def add_stunnel_ca_options(efs_config, stunnel_cafile=DEFAULT_STUNNEL_CAFILE):
+    if not os.path.exists(stunnel_cafile):
+        fatal_error('Failed to find the EFS certificate authority file for verification',
+                    'Failed to find the EFS CAfile "%s"' % stunnel_cafile)
+    efs_config['CAfile'] = stunnel_cafile
 
 
-def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, options, log_dir=LOG_DIR):
+def is_stunnel_option_supported(stunnel_output, stunnel_option_name):
+    supported = False
+    for line in stunnel_output:
+        if line.startswith(stunnel_option_name):
+            supported = True
+            break
+
+    if not supported:
+        logging.warn('stunnel does not support "%s"', stunnel_option_name)
+
+    return supported
+
+
+def get_version_specific_stunnel_options(config):
+    proc = subprocess.Popen(['stunnel', '-help'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc.wait()
+    _, err = proc.communicate()
+
+    stunnel_output = err.splitlines()
+
+    check_host_supported = is_stunnel_option_supported(stunnel_output, 'checkHost')
+    oscp_aia_supported = is_stunnel_option_supported(stunnel_output, 'OCSPaia')
+
+    return check_host_supported, oscp_aia_supported
+
+
+def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level, log_dir=LOG_DIR):
     """
     Serializes stunnel configuration to a file. Unfortunately this does not conform to Python's config file format, so we have to
     hand-serialize it.
@@ -242,15 +254,25 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
     efs_config = dict(STUNNEL_EFS_CONFIG)
     efs_config['accept'] = efs_config['accept'] % tls_port
     efs_config['connect'] = efs_config['connect'] % dns_name
-    efs_config['verify'] = options.get('verify', DEFAULT_STUNNEL_VERIFY_LEVEL)
-    if efs_config['verify'] > 0:
-        add_stunnel_ca_options(efs_config, options)
+    efs_config['verify'] = verify_level
+    if verify_level > 0:
+        add_stunnel_ca_options(efs_config)
 
-    if config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname'):
+    check_host, oscp_aia = get_version_specific_stunnel_options(config)
+
+    tls_controls_message = 'WARNING: Your client lacks sufficient controls to properly enforce TLS. Please upgrade stunnel, ' \
+        'or disable "%%s" in %s.\nSee %s for more detail.' % (CONFIG_FILE,
+                                                              'https://docs.aws.amazon.com/console/efs/troubleshooting-tls')
+
+    if check_host:
         efs_config['checkHost'] = dns_name
+    elif config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname'):
+        fatal_error(tls_controls_message % 'stunnel_check_cert_hostname')
 
-    if config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_validity'):
+    if oscp_aia:
         efs_config['OCSPaia'] = 'yes'
+    elif config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_validity'):
+        fatal_error(tls_controls_message % 'stunnel_check_cert_validity')
 
     stunnel_config = '\n'.join(serialize_stunnel_config(global_config) + serialize_stunnel_config(efs_config, 'efs'))
     logging.debug('Writing stunnel configuration:\n%s', stunnel_config)
@@ -331,8 +353,8 @@ def check_network_status(fs_id, init_system):
 
 def start_watchdog(init_system):
     if init_system == 'init':
-        p = subprocess.Popen(['/sbin/status', WATCHDOG_SERVICE], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        status, _ = p.communicate()
+        proc = subprocess.Popen(['/sbin/status', WATCHDOG_SERVICE], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        status, _ = proc.communicate()
         if 'stop' in status:
             with open(os.devnull, 'w') as devnull:
                 subprocess.Popen(['/sbin/start', WATCHDOG_SERVICE], stdout=devnull, stderr=devnull)
@@ -362,8 +384,10 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
 
     tls_port = choose_tls_port(config)
     options['tlsport'] = tls_port
+    verify_level = int(options.get('verify', DEFAULT_STUNNEL_VERIFY_LEVEL))
+    options['verify'] = verify_level
 
-    stunnel_config_file = write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, options)
+    stunnel_config_file = write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level)
 
     tunnel_args = ['stunnel', stunnel_config_file]
 
@@ -416,18 +440,18 @@ def mount_nfs(dns_name, path, mountpoint, options):
     else:
         mount_path = '%s:%s' % (dns_name, path)
 
-    command = ['/sbin/mount.nfs4', '-o', get_nfs_mount_options(options), mount_path, mountpoint]
+    command = ['/sbin/mount.nfs4', mount_path, mountpoint, '-o', get_nfs_mount_options(options)]
 
     logging.info('Executing: "%s"', ' '.join(command))
 
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    out, err = process.communicate()
+    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = proc.communicate()
 
-    if process.returncode == 0:
+    if proc.returncode == 0:
         logging.info('Successfully mounted %s at %s', dns_name, mountpoint)
     else:
-        message = 'Failed to mount %s at %s: returncode=%d, stderr="%s"' % (dns_name, mountpoint, process.returncode, err.strip())
-        fatal_error(err.strip(), message, process.returncode)
+        message = 'Failed to mount %s at %s: returncode=%d, stderr="%s"' % (dns_name, mountpoint, proc.returncode, err.strip())
+        fatal_error(err.strip(), message, proc.returncode)
 
 
 def parse_arguments(args=None):
@@ -443,7 +467,7 @@ def parse_arguments(args=None):
         usage(out=sys.stdout, exit_code=0)
 
     if '--version' in args[1:]:
-        sys.stdout.write('%s Version: %.1f\n' % (args[0], VERSION))
+        sys.stdout.write('%s Version: %s\n' % (args[0], VERSION))
         sys.exit(0)
 
     fsname = None
@@ -471,7 +495,7 @@ def parse_arguments(args=None):
 
 
 def assert_root():
-    if 'root' != getpass.getuser():
+    if os.geteuid() != 0:
         sys.stderr.write('only root can run mount.efs\n')
         sys.exit(1)
 
@@ -483,7 +507,22 @@ def read_config(config_file=CONFIG_FILE):
 
 
 def bootstrap_logging(config, log_dir=LOG_DIR):
-    level = config.get(CONFIG_SECTION, 'logging_level')
+    raw_level = config.get(CONFIG_SECTION, 'logging_level')
+    levels = {
+        'debug': logging.DEBUG,
+        'info': logging.INFO,
+        'warning': logging.WARNING,
+        'error': logging.ERROR,
+        'critical': logging.CRITICAL
+    }
+    level = levels.get(raw_level.lower())
+    level_error = False
+
+    if not level:
+        # delay logging error about malformed log level until after logging is configured
+        level_error = True
+        level = logging.INFO
+
     max_bytes = config.getint(CONFIG_SECTION, 'logging_max_bytes')
     file_count = config.getint(CONFIG_SECTION, 'logging_file_count')
 
@@ -493,6 +532,9 @@ def bootstrap_logging(config, log_dir=LOG_DIR):
     logger = logging.getLogger()
     logger.setLevel(level)
     logger.addHandler(handler)
+
+    if level_error:
+        logging.error('Malformed logging level "%s", setting logging level to %s', raw_level, level)
 
 
 def get_dns_name(config, fs_id):
@@ -519,7 +561,7 @@ def get_dns_name(config, fs_id):
         socket.gethostbyname(dns_name)
     except socket.gaierror:
         fatal_error('Failed to resolve "%s" - check that your file system ID is correct.\nSee %s for more detail.'
-                    % (dns_name, 'https://docs.aws.amazon.com/efs/latest/ug/mounting-fs-mount-cmd-dns-name.html'),
+                    % (dns_name, 'https://docs.aws.amazon.com/console/efs/mount-dns-name'),
                     'Failed to resolve "%s"' % dns_name)
 
     return dns_name
@@ -542,7 +584,7 @@ def main():
     config = read_config()
     bootstrap_logging(config)
 
-    logging.info('version=%.1f options=%s', VERSION, options)
+    logging.info('version=%s options=%s', VERSION, options)
 
     init_system = get_init_system()
     check_network_status(fs_id, init_system)

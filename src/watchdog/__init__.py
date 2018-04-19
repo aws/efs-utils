@@ -8,7 +8,6 @@
 #
 
 import errno
-import getpass
 import json
 import logging
 import logging.handlers
@@ -26,7 +25,7 @@ try:
 except ImportError:
     from configparser import ConfigParser
 
-VERSION = 1.0
+VERSION = '1.2'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount-watchdog'
@@ -49,7 +48,22 @@ def fatal_error(user_message, log_message=None):
 
 
 def bootstrap_logging(config, log_dir=LOG_DIR):
-    level = config.get(CONFIG_SECTION, 'logging_level')
+    raw_level = config.get(CONFIG_SECTION, 'logging_level')
+    levels = {
+        'debug': logging.DEBUG,
+        'info': logging.INFO,
+        'warning': logging.WARNING,
+        'error': logging.ERROR,
+        'critical': logging.CRITICAL
+    }
+    level = levels.get(raw_level.lower())
+    level_error = False
+
+    if not level:
+        # delay logging error about malformed log level until after logging is configured
+        level_error = True
+        level = logging.INFO
+
     max_bytes = config.getint(CONFIG_SECTION, 'logging_max_bytes')
     file_count = config.getint(CONFIG_SECTION, 'logging_file_count')
 
@@ -59,6 +73,9 @@ def bootstrap_logging(config, log_dir=LOG_DIR):
     logger = logging.getLogger()
     logger.setLevel(level)
     logger.addHandler(handler)
+
+    if level_error:
+        logging.error('Malformed logging level "%s", setting logging level to %s', raw_level, level)
 
 
 def get_file_safe_mountpoint(mountpoint):
@@ -231,12 +248,12 @@ def parse_arguments(args=None):
         sys.exit(0)
 
     if '--version' in args[1:]:
-        sys.stdout.write('%s Version: %.1f\n' % (args[0], VERSION))
+        sys.stdout.write('%s Version: %s\n' % (args[0], VERSION))
         sys.exit(0)
 
 
 def assert_root():
-    if 'root' != getpass.getuser():
+    if os.geteuid() != 0:
         sys.stderr.write('only root can run amazon-efs-mount-watchdog\n')
         sys.exit(1)
 

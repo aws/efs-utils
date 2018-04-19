@@ -36,4 +36,4 @@ def test_parse_arguments_version(capsys):
     assert 0 == ex.value.code
 
     out, err = capsys.readouterr()
-    assert 'Version: %.1f' % watchdog.VERSION in out
+    assert 'Version: %s' % watchdog.VERSION in out

@@ -88,3 +88,19 @@ def test_bootstrap_tls_non_default_port(mocker, tmpdir):
 
     assert 'stunnel' in args
     assert EXPECTED_STUNNEL_CONFIG_FILE in args
+
+
+def test_bootstrap_tls_non_default_verify_level(mocker, tmpdir):
+    popen_mock = _mock_popen(mocker)
+    mocker.patch('os.kill')
+    state_file_dir = str(tmpdir)
+
+    verify = 0
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'verify': verify}, state_file_dir):
+        pass
+
+    args, _ = popen_mock.call_args
+    args = args[0]
+
+    assert 'stunnel' in args
+    assert EXPECTED_STUNNEL_CONFIG_FILE in args

@@ -18,10 +18,10 @@ DEFAULT_OPTIONS = {'nfsvers': 4.1, 'rsize': 1048576, 'wsize': 1048576, 'hard': N
 
 # indices of different arguments to the NFS call
 NFS_BIN_ARG_IDX = 0
-NFS_OPTION_FLAG_IDX = 1
-NFS_OPTIONS_IDX = 2
-NFS_MOUNT_PATH_IDX = 3
-NFS_MOUNT_POINT_IDX = 4
+NFS_MOUNT_PATH_IDX = 1
+NFS_MOUNT_POINT_IDX = 2
+NFS_OPTION_FLAG_IDX = 3
+NFS_OPTIONS_IDX = 4
 
 
 def _mock_popen(mocker, returncode=0):

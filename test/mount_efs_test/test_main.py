@@ -25,9 +25,9 @@ def _test_main(mocker, tls=False, root=True):
         options = {}
 
     if root:
-        mocker.patch('getpass.getuser', return_value='root')
+        mocker.patch('os.geteuid', return_value=0)
     else:
-        mocker.patch('getpass.getuser', return_value='user')
+        mocker.patch('os.geteuid', return_value=100)
 
     bootstrap_logging_mock = mocker.patch('mount_efs.bootstrap_logging')
     get_dns_mock = mocker.patch('mount_efs.get_dns_name')

@@ -1,3 +1,5 @@
-if [ $(cat /proc/1/comm) = systemd ]; then
-    systemctl daemon-reload
+if [ -z "$2" ]; then
+    if [ $(cat /proc/1/comm) = systemd ]; then
+        systemctl daemon-reload
+    fi
 fi
