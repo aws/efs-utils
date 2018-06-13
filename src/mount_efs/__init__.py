@@ -264,15 +264,15 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
         'or disable "%%s" in %s.\nSee %s for more detail.' % (CONFIG_FILE,
                                                               'https://docs.aws.amazon.com/console/efs/troubleshooting-tls')
 
-    if check_host:
-        efs_config['checkHost'] = dns_name
-    elif config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname'):
-        fatal_error(tls_controls_message % 'stunnel_check_cert_hostname')
+    if config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname'):
+        if check_host:
+            efs_config['checkHost'] = dns_name
+        else: fatal_error(tls_controls_message % 'stunnel_check_cert_hostname')
 
-    if oscp_aia:
-        efs_config['OCSPaia'] = 'yes'
-    elif config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_validity'):
-        fatal_error(tls_controls_message % 'stunnel_check_cert_validity')
+    if config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_validity'):
+        if oscp_aia:
+            efs_config['OCSPaia'] = 'yes'
+        else: fatal_error(tls_controls_message % 'stunnel_check_cert_validity')
 
     stunnel_config = '\n'.join(serialize_stunnel_config(global_config) + serialize_stunnel_config(efs_config, 'efs'))
     logging.debug('Writing stunnel configuration:\n%s', stunnel_config)
