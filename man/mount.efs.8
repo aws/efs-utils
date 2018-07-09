@@ -1,0 +1,123 @@
+.TH "EFS" "8"
+.SH "NAME"
+\fBmount\&.efs\fR \- Mount helper for using Amazon EFS file systems\&.
+.SH "SYNOPSIS"
+.sp
+\fBmount\&.efs\fR \fIfile\-system\-id\fR \fImount-point\fR [\fB\-o\fR \fIoptions\fR]
+.SH "DESCRIPTION"
+.sp
+\fBmount\&.efs\fR is part of the \fBamazon\-efs\-utils\fR \
+package, which simplifies using EFS file systems\&.
+.sp
+\fBmount\&.efs\fR is meant to be used through the \
+\fBmount\fR(8) command for mounting EFS file systems\&.
+.sp
+\fIfile\-system\-id\fR is an EFS file system ID in the \
+form of "fs\-abcd1234", generated when the file system \
+is created\&. \fImount-point\fR is the local directory \
+on which the file system will be mounted\&.
+.sp
+\fBmount\&.efs\fR automatically applies the following NFS options:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+nfsvers=4\&.1
+rsize=1048576
+wsize=1048576
+hard
+timeo=600
+retrans=2
+noresvport
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+By default, when using the Amazon EFS mount helper with Transport \
+Layer Security (TLS), the mount helper enforces the use of Online \
+Certificate Status Protocol (OCSP) and certificate hostname checking\&. \
+These options can be configured in the config file located at \
+\fI/etc/amazon/efs/efs\-utils\&.conf\&\fR.
+.sp
+Additionally, the Amazon EFS mount helper has built\-in logging for \
+troubleshooting purposes\&. These logs are located at \fI/var/log/amazon/efs\fR\&.
+.sp
+It is possible to configure your Amazon EC2 instance to automatically \
+remount your Amazon EFS file system when it reboots. For more information, \
+see the online documentation at: \
+\fIhttps://docs\&.aws\&.amazon\&.com/efs/latest/ug/mount\-fs\-auto\-mount\-onreboot\&.html\fR\&.
+.SH "OPTIONS"
+.sp
+\fB\-o\fR, Options are specified with a \fB\-o\fR flag followed by a \
+comma separated string of options\&. All of the options specified in \
+\fBnfs(5)\fR are available, in addition to the following EFS-specific \
+options:
+.if n \{\
+.RS 4
+.\}
+.TP
+\fBtls\fR
+Mounts the EFS file system over TLS\&.
+.TP
+\fBtlsport=\fR\fIn\fR
+Configure the TLS relay to listen on the specified port\&.
+.TP
+\fBverify=\fR\fIn\fR
+Verify TLS certificates using the specified stunnel verify level\&. For \
+more information, see \fBstunnel(8)\fR\&.
+.if n \{\
+.RE
+.\}
+.SH "EXAMPLES"
+.TP
+sudo mount -t efs fs-abcd1234 /mnt/efs
+Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
+"/mnt/efs" without encryption of data in transit\&.
+.TP
+sudo mount -t efs fs-abcd1234:/child /mnt/efs
+Mount a non-root directory of an EFS file system with file system ID \
+"fs-abcd1234" at mount point "/mnt/efs" without encryption of data in transit\&.
+.TP
+sudo mount -t efs -o tls fs-abcd1234 /mnt/efs
+Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
+"/mnt/efs" using encryption of data in transit\&.
+.TP
+sudo mount -t efs -o tls,verify=0 fs-abcd1234 /mnt/efs
+Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
+"/mnt/efs" using encryption of data in transit and a verify level of 0\&.
+.SH "FILES"
+.TP
+\fI/sbin/mount.efs\fR
+The executable for the Amazon EFS mount helper\&.
+.TP
+\fI/usr/bin/amazon-efs-mount-watchdog\fR
+The executable for the supervisor process that monitors the network relay\&.
+.TP
+\fI/etc/amazon/efs/efs-utils.conf\fR
+The configuration file for the Amazon EFS mount helper\&.
+.TP
+\fI/etc/amazon/efs/efs-utils.crt\fR
+The default Certificate Authority file used by the Amazon EFS mount helper\&.
+.TP
+\fI/etc/init/amazon-efs-mount-watchdog.conf\fR
+The configuration file for the supervisor process\&.
+.TP
+\fI/var/log/amazon/efs/\fR
+The directory where logs for the Amazon EFS mount helper, the stunnel network \
+relay, and the supervisor process are stored\&.
+.TP
+\fI/usr/share/man/man8/mount.efs.8\fR
+The man page for the Amazon EFS mount helper\&.
+.SH "NOTES"
+.sp
+For more information on using the \fBamazon\-efs\-utils\fR package, see \
+\fIhttps://docs\&.aws\&.amazon\&.com/efs/latest/ug/using\-amazon\-efs\-utils\&.html\fR \
+in the Amazon EFS User Guide\&.
+.SH "SEE ALSO"
+.sp
+\fBnfs(8)\fR, \fBstunnel(8)\fR, \fBfstab(5)\fR
+.SH "COPYING"
+.sp
+Copyright 2017\-2018 Amazon\&.com, Inc\&. and its affiliates\&. All Rights Reserved\&.

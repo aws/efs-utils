@@ -25,7 +25,7 @@ try:
 except ImportError:
     from configparser import ConfigParser
 
-VERSION = '1.2'
+VERSION = '1.3'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount-watchdog'
@@ -78,17 +78,19 @@ def bootstrap_logging(config, log_dir=LOG_DIR):
         logging.error('Malformed logging level "%s", setting logging level to %s', raw_level, level)
 
 
-def get_file_safe_mountpoint(mountpoint):
-    mountpoint = os.path.abspath(mountpoint).replace(os.sep, '.')
+def get_file_safe_mountpoint(mount):
+    mountpoint = os.path.abspath(mount.mountpoint).replace(os.sep, '.')
     if mountpoint.startswith('.'):
         mountpoint = mountpoint[1:]
-    return mountpoint
+
+    port = mount.options[mount.options.find('port'):].split(',')[0].split('=')[1]
+    return mountpoint + '.' + port
 
 
 def get_current_local_nfs_mounts(mount_file='/proc/mounts'):
     """
-    Return a dict of the current NFS mounts for servers running on localhost, keyed by the mountpoint as it appears in EFS
-    watchdog state files.
+    Return a dict of the current NFS mounts for servers running on localhost, keyed by the mountpoint and port as it
+    appears in EFS watchdog state files.
     """
     mounts = []
 
@@ -100,13 +102,15 @@ def get_current_local_nfs_mounts(mount_file='/proc/mounts'):
 
     mount_dict = {}
     for m in mounts:
-        mount_dict[get_file_safe_mountpoint(m.mountpoint)] = m
+        mount_dict[get_file_safe_mountpoint(m)] = m
 
     return mount_dict
 
 
 def get_state_files(state_file_dir):
-    """Return a dict of the absolute path of state files in state_file_dir, keyed by the mountpoint portion of the filename."""
+    """
+    Return a dict of the absolute path of state files in state_file_dir, keyed by the mountpoint and port portion of the filename.
+    """
     state_files = {}
 
     if os.path.isdir(state_file_dir):
@@ -114,11 +118,12 @@ def get_state_files(state_file_dir):
             if not sf.startswith('fs-'):
                 continue
 
+            # This translates the state file name "fs-deadbeaf.home.user.mnt.12345"
+            # into file-safe mountpoint "home.user.mnt.12345"
             first_period = sf.find('.')
-            last_period = sf.rfind('.')
-            mount_point = sf[first_period + 1:last_period]
-            logging.debug('Translating "%s" into mount point "%s"', sf, mount_point)
-            state_files[mount_point] = sf
+            mount_point_and_port = sf[first_period + 1:]
+            logging.debug('Translating "%s" into mount point and port "%s"', sf, mount_point_and_port)
+            state_files[mount_point_and_port] = sf
 
     return state_files
 

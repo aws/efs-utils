@@ -33,6 +33,9 @@ tarball: clean
 	cp -rp src/mount_efs $(PACKAGE_NAME)/src
 	cp -rp src/watchdog $(PACKAGE_NAME)/src
 
+	mkdir -p ${PACKAGE_NAME}/man
+	cp -rp man/mount.efs.8 ${PACKAGE_NAME}/man
+
 	tar -czf $(SOURCE_TARBALL) $(PACKAGE_NAME)/*
 
 .PHONY: specfile

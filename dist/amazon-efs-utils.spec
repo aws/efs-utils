@@ -20,7 +20,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.2
+Version   : 1.3
 Release   : 1%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -67,11 +67,13 @@ install -p -m 644 %{_builddir}/%{name}/dist/amazon-efs-mount-watchdog.conf %{bui
 mkdir -p %{buildroot}/sbin
 mkdir -p %{buildroot}%{_bindir}
 mkdir -p %{buildroot}%{_localstatedir}/log/amazon/efs
+mkdir -p  %{buildroot}%{_mandir}/man8
 
 install -p -m 644 %{_builddir}/%{name}/dist/efs-utils.conf %{buildroot}%{_sysconfdir}/amazon/efs
 install -p -m 444 %{_builddir}/%{name}/dist/efs-utils.crt %{buildroot}%{_sysconfdir}/amazon/efs
 install -p -m 755 %{_builddir}/%{name}/src/mount_efs/__init__.py %{buildroot}/sbin/mount.efs
 install -p -m 755 %{_builddir}/%{name}/src/watchdog/__init__.py %{buildroot}%{_bindir}/amazon-efs-mount-watchdog
+install -p -m 644 %{_builddir}/%{name}/man/mount.efs.8 %{buildroot}%{_mandir}/man8
 
 %files
 %defattr(-,root,root,-)
@@ -84,6 +86,7 @@ install -p -m 755 %{_builddir}/%{name}/src/watchdog/__init__.py %{buildroot}%{_b
 /sbin/mount.efs
 %{_bindir}/amazon-efs-mount-watchdog
 /var/log/amazon
+%{_mandir}/man8/mount.efs.8.gz
 
 %config(noreplace) %{_sysconfdir}/amazon/efs/efs-utils.conf
 

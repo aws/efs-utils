@@ -9,7 +9,7 @@
 import watchdog
 
 
-MOUNT_FMT_LINE = '{address}:/ {mountpoint} {fs_type} rw 0 0'
+MOUNT_FMT_LINE = '{address}:/ {mountpoint} {fs_type} rw,port=12345 0 0'
 
 
 def _create_mount_file(tmpdir, lines):
@@ -48,4 +48,4 @@ def test_local_nfs_mount(tmpdir):
     mounts = watchdog.get_current_local_nfs_mounts(mount_file)
 
     assert 1 == len(mounts)
-    assert 'mnt' in mounts
+    assert 'mnt.12345' in mounts

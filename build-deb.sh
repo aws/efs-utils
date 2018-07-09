@@ -11,7 +11,7 @@ set -ex
 
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
-VERSION=1.2
+VERSION=1.3
 
 echo 'Cleaning deb build workspace'
 rm -rf ${BUILD_ROOT}
@@ -24,6 +24,7 @@ mkdir -p ${BUILD_ROOT}/etc/systemd/system
 mkdir -p ${BUILD_ROOT}/sbin
 mkdir -p ${BUILD_ROOT}/usr/bin
 mkdir -p ${BUILD_ROOT}/var/log/amazon/efs
+mkdir -p ${BUILD_ROOT}/usr/share/man/man8
 
 echo 'Copying application files'
 install -p -m 644 dist/amazon-efs-mount-watchdog.conf ${BUILD_ROOT}/etc/init
@@ -43,6 +44,9 @@ install -p -m 644 dist/amazon-efs-utils.control ${BUILD_ROOT}/control
 
 echo 'Copying conffiles'
 install -p -m 644 dist/amazon-efs-utils.conffiles ${BUILD_ROOT}/conffiles
+
+echo 'Copying manpages'
+install -p -m 644 man/mount.efs.8 ${BUILD_ROOT}/usr/share/man/man8/mount.efs.8
 
 echo 'Creating deb binary file'
 echo '2.0'> ${BUILD_ROOT}/debian-binary

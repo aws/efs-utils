@@ -1,5 +1,15 @@
-if [ -z "$2" ]; then
-    if [ $(cat /proc/1/comm) = systemd ]; then
+#!/bin/sh
+set -e
+
+reload() {
+    if [ "$(cat /proc/1/comm)" = "systemd" ]; then
         systemctl daemon-reload
     fi
+}
+
+if [ "$1" = "remove" ]; then
+    reload
+elif [ "$1" = "purge" ]; then
+    reload
+    rm -f /var/log/amazon/efs/*
 fi

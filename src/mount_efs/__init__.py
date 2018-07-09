@@ -54,7 +54,7 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.2'
+VERSION = '1.3'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount'
@@ -72,11 +72,14 @@ DEFAULT_STUNNEL_VERIFY_LEVEL = 2
 DEFAULT_STUNNEL_CAFILE = '/etc/amazon/efs/efs-utils.crt'
 
 EFS_ONLY_OPTIONS = [
-    'cafile',
-    'capath',
     'tls',
     'tlsport',
     'verify',
+]
+
+UNSUPPORTED_OPTIONS = [
+    'cafile',
+    'capath',
 ]
 
 STUNNEL_GLOBAL_CONFIG = {
@@ -130,7 +133,10 @@ def get_region():
 
         return instance_identity['region']
     except URLError as e:
-        _fatal_error('Unable to reach instance metadata service at %s: %s' % (INSTANCE_METADATA_SERVICE_URL, e))
+        _fatal_error('Unable to reach the instance metadata service at %s. If this is an on-premises instance, replace '
+                     '"{region}" in the "dns_name_format" option in %s with the region of the EFS file system you are mounting.\n'
+                     'See %s for more detail. %s'
+                     % (INSTANCE_METADATA_SERVICE_URL, CONFIG_FILE, 'https://docs.aws.amazon.com/console/efs/direct-connect', e))
     except ValueError as e:
         _fatal_error('Error parsing json: %s' % (e,))
     except KeyError as e:
@@ -233,9 +239,9 @@ def get_version_specific_stunnel_options(config):
     stunnel_output = err.splitlines()
 
     check_host_supported = is_stunnel_option_supported(stunnel_output, 'checkHost')
-    oscp_aia_supported = is_stunnel_option_supported(stunnel_output, 'OCSPaia')
+    ocsp_aia_supported = is_stunnel_option_supported(stunnel_output, 'OCSPaia')
 
-    return check_host_supported, oscp_aia_supported
+    return check_host_supported, ocsp_aia_supported
 
 
 def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level, log_dir=LOG_DIR):
@@ -258,21 +264,23 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
     if verify_level > 0:
         add_stunnel_ca_options(efs_config)
 
-    check_host, oscp_aia = get_version_specific_stunnel_options(config)
+    check_host_supported, ocsp_aia_supported = get_version_specific_stunnel_options(config)
 
     tls_controls_message = 'WARNING: Your client lacks sufficient controls to properly enforce TLS. Please upgrade stunnel, ' \
         'or disable "%%s" in %s.\nSee %s for more detail.' % (CONFIG_FILE,
                                                               'https://docs.aws.amazon.com/console/efs/troubleshooting-tls')
 
-    if check_host:
-        efs_config['checkHost'] = dns_name
-    elif config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname'):
-        fatal_error(tls_controls_message % 'stunnel_check_cert_hostname')
+    if config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname'):
+        if check_host_supported:
+            efs_config['checkHost'] = dns_name
+        else:
+            fatal_error(tls_controls_message % 'stunnel_check_cert_hostname')
 
-    if oscp_aia:
-        efs_config['OCSPaia'] = 'yes'
-    elif config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_validity'):
-        fatal_error(tls_controls_message % 'stunnel_check_cert_validity')
+    if config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_validity'):
+        if ocsp_aia_supported:
+            efs_config['OCSPaia'] = 'yes'
+        else:
+            fatal_error(tls_controls_message % 'stunnel_check_cert_validity')
 
     stunnel_config = '\n'.join(serialize_stunnel_config(global_config) + serialize_stunnel_config(efs_config, 'efs'))
     logging.debug('Writing stunnel configuration:\n%s', stunnel_config)
@@ -406,6 +414,7 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
 
 
 def get_nfs_mount_options(options):
+    # If you change these options, update the man page as well at man/mount.efs.8
     if 'nfsvers' not in options and 'vers' not in options:
         options['nfsvers'] = '4.1'
     if 'rsize' not in options:
@@ -418,6 +427,8 @@ def get_nfs_mount_options(options):
         options['timeo'] = '600'
     if 'retrans' not in options:
         options['retrans'] = '2'
+    if 'noresvport' not in options:
+        options['noresvport'] = None
 
     if 'tls' in options:
         if 'port' in options:
@@ -577,6 +588,16 @@ def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
         t.join()
 
 
+def check_unsupported_options(options):
+    for unsupported_option in UNSUPPORTED_OPTIONS:
+        if unsupported_option in options:
+            warn_message = 'The "%s" option is not supported and has been ignored, as amazon-efs-utils relies on a built-in ' \
+                           'trust store.' % unsupported_option
+            sys.stderr.write('WARN: %s\n' % warn_message)
+            logging.warn(warn_message)
+            del options[unsupported_option]
+
+
 def main():
     fs_id, path, mountpoint, options = parse_arguments()
     assert_root()
@@ -585,6 +606,7 @@ def main():
     bootstrap_logging(config)
 
     logging.info('version=%s options=%s', VERSION, options)
+    check_unsupported_options(options)
 
     init_system = get_init_system()
     check_network_status(fs_id, init_system)

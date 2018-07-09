@@ -39,4 +39,4 @@ def test_state_files(tmpdir):
     state_files = watchdog.get_state_files(str(tmpdir))
 
     assert 1 == len(state_files)
-    assert 'mount.dir' in state_files
+    assert 'mount.dir.12345' in state_files

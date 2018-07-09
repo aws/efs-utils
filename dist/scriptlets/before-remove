@@ -1,8 +1,13 @@
-if [ -z "$2" ]; then
-    if [ $(cat /proc/1/comm) = init ]; then
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if [ "$(cat /proc/1/comm)" = "init" ]; then
         /sbin/stop amazon-efs-mount-watchdog &> /dev/null || true
-    elif [ $(cat /proc/1/comm) = systemd ]; then
-        systemctl --no-reload disable amazon-efs-mount-watchdog.service &> /dev/null || true
-        systemctl stop amazon-efs-mount-watchdog.service &> /dev/null || true
+    elif [ "$(cat /proc/1/comm)" = "systemd" ]; then
+        if systemctl is-active --quiet amazon-efs-mount-watchdog; then
+            systemctl --no-reload disable amazon-efs-mount-watchdog.service &> /dev/null || true
+            systemctl stop amazon-efs-mount-watchdog.service &> /dev/null || true
+        fi
     fi
 fi

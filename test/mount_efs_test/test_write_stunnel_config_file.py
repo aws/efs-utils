@@ -81,7 +81,7 @@ def _validate_config(stunnel_config_file, expected_global_config, expected_efs_c
 
 
 def _get_expected_efs_config(port=PORT, dns_name=DNS_NAME, verify=mount_efs.DEFAULT_STUNNEL_VERIFY_LEVEL,
-                             check_cert_hostname=True, check_cert_status=True):
+                             check_cert_hostname=True, check_cert_validity=True):
 
     expected_efs_config = dict(mount_efs.STUNNEL_EFS_CONFIG)
     expected_efs_config['accept'] = expected_efs_config['accept'] % port
@@ -91,13 +91,43 @@ def _get_expected_efs_config(port=PORT, dns_name=DNS_NAME, verify=mount_efs.DEFA
     if check_cert_hostname:
         expected_efs_config['checkHost'] = dns_name
 
-    if check_cert_status:
+    if check_cert_validity:
         expected_efs_config['OCSPaia'] = 'yes'
 
     return expected_efs_config
 
 
-def test_write_stunnel_config_file(mocker, tmpdir):
+def _test_check_cert_hostname(mocker, tmpdir, stunnel_check_cert_hostname_supported, stunnel_check_cert_hostname,
+                              expected_check_cert_hostname_config_value):
+    ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
+
+    config_file = mount_efs.write_stunnel_config_file(
+        _get_config(mocker, stunnel_check_cert_hostname_supported=stunnel_check_cert_hostname_supported,
+                    stunnel_check_cert_hostname=stunnel_check_cert_hostname),
+        str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL)
+
+    ca_mocker.assert_called_once()
+
+    _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG,
+                     _get_expected_efs_config(check_cert_hostname=expected_check_cert_hostname_config_value))
+
+
+def _test_check_cert_validity(mocker, tmpdir, stunnel_check_cert_validity_supported, stunnel_check_cert_validity,
+                              expected_check_cert_validity_config_value):
+    ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
+
+    config_file = mount_efs.write_stunnel_config_file(
+        _get_config(mocker, stunnel_check_cert_validity_supported=stunnel_check_cert_validity_supported,
+                    stunnel_check_cert_validity=stunnel_check_cert_validity),
+        str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL)
+
+    ca_mocker.assert_called_once()
+
+    _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG,
+                     _get_expected_efs_config(check_cert_validity=expected_check_cert_validity_config_value))
+
+
+def _test_write_stunnel_config_file(mocker, tmpdir):
     ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
     state_file_dir = str(tmpdir)
 
@@ -125,18 +155,33 @@ def test_write_stunnel_config_with_debug(mocker, tmpdir):
     _validate_config(config_file, expected_global_config, _get_expected_efs_config())
 
 
-def test_write_stunnel_config_with_check_cert_hostname(mocker, tmpdir):
-    ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
-
-    config_file = mount_efs.write_stunnel_config_file(_get_config(mocker, stunnel_check_cert_hostname=True), str(tmpdir), FS_ID,
-                                                      MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL)
-    ca_mocker.assert_called_once()
-
-    _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG, _get_expected_efs_config(check_cert_hostname=True))
+def test_write_stunnel_config_check_cert_hostname_supported_flag_not_set(mocker, tmpdir):
+    _test_check_cert_hostname(mocker, tmpdir, stunnel_check_cert_hostname_supported=True, stunnel_check_cert_hostname=None,
+                              expected_check_cert_hostname_config_value=True)
 
 
-def test_write_stunnel_config_without_check_cert_hostname(mocker, capsys, tmpdir):
-    ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
+def test_write_stunnel_config_check_cert_hostname_supported_flag_set_false(mocker, capsys, tmpdir):
+    _test_check_cert_hostname(mocker, tmpdir, stunnel_check_cert_hostname_supported=True, stunnel_check_cert_hostname=False,
+                              expected_check_cert_hostname_config_value=False)
+
+
+def test_write_stunnel_config_check_cert_hostname_supported_flag_set_true(mocker, tmpdir):
+    _test_check_cert_hostname(mocker, tmpdir, stunnel_check_cert_hostname_supported=True, stunnel_check_cert_hostname=True,
+                              expected_check_cert_hostname_config_value=True)
+
+
+def test_write_stunnel_config_check_cert_hostname_not_supported_flag_not_specified(mocker, capsys, tmpdir):
+    _test_check_cert_hostname(mocker, tmpdir, stunnel_check_cert_hostname_supported=False, stunnel_check_cert_hostname=None,
+                              expected_check_cert_hostname_config_value=False)
+
+
+def test_write_stunnel_config_check_cert_hostname_not_supported_flag_set_false(mocker, capsys, tmpdir):
+    _test_check_cert_hostname(mocker, tmpdir, stunnel_check_cert_hostname_supported=False, stunnel_check_cert_hostname=False,
+                              expected_check_cert_hostname_config_value=False)
+
+
+def test_write_stunnel_config_check_cert_hostname_not_supported_flag_set_true(mocker, capsys, tmpdir):
+    mocker.patch('mount_efs.add_stunnel_ca_options')
 
     with pytest.raises(SystemExit) as ex:
         mount_efs.write_stunnel_config_file(_get_config(mocker, stunnel_check_cert_hostname_supported=False,
@@ -150,18 +195,33 @@ def test_write_stunnel_config_without_check_cert_hostname(mocker, capsys, tmpdir
     assert 'stunnel_check_cert_hostname' in err
 
 
-def test_write_stunnel_config_with_check_cert_status(mocker, tmpdir):
-    ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
-
-    config_file = mount_efs.write_stunnel_config_file(_get_config(mocker, stunnel_check_cert_validity=True), str(tmpdir), FS_ID,
-                                                      MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL)
-    ca_mocker.assert_called_once()
-
-    _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG, _get_expected_efs_config(check_cert_status=True))
+def test_write_stunnel_config_check_cert_validity_supported_flag_not_set(mocker, capsys, tmpdir):
+    _test_check_cert_validity(mocker, tmpdir, stunnel_check_cert_validity_supported=True, stunnel_check_cert_validity=None,
+                              expected_check_cert_validity_config_value=True)
 
 
-def test_write_stunnel_config_without_check_cert_status(mocker, capsys, tmpdir):
-    ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
+def test_write_stunnel_config_check_cert_validity_supported_flag_set_false(mocker, capsys, tmpdir):
+    _test_check_cert_validity(mocker, tmpdir, stunnel_check_cert_validity_supported=True, stunnel_check_cert_validity=False,
+                              expected_check_cert_validity_config_value=False)
+
+
+def test_write_stunnel_config_check_cert_validity_supported_flag_set_true(mocker, tmpdir):
+    _test_check_cert_validity(mocker, tmpdir, stunnel_check_cert_validity_supported=True, stunnel_check_cert_validity=True,
+                              expected_check_cert_validity_config_value=True)
+
+
+def test_write_stunnel_config_check_cert_validity_not_supported_flag_not_set(mocker, capsys, tmpdir):
+    _test_check_cert_validity(mocker, tmpdir, stunnel_check_cert_validity_supported=False, stunnel_check_cert_validity=None,
+                              expected_check_cert_validity_config_value=False)
+
+
+def test_write_stunnel_config_check_cert_validity_not_supported_flag_set_false(mocker, capsys, tmpdir):
+    _test_check_cert_validity(mocker, tmpdir, stunnel_check_cert_validity_supported=False, stunnel_check_cert_validity=False,
+                              expected_check_cert_validity_config_value=False)
+
+
+def test_write_stunnel_config_check_cert_validity_not_supported_flag_set_true(mocker, capsys, tmpdir):
+    mocker.patch('mount_efs.add_stunnel_ca_options')
 
     with pytest.raises(SystemExit) as ex:
         mount_efs.write_stunnel_config_file(_get_config(mocker, stunnel_check_cert_validity_supported=False,
@@ -184,4 +244,4 @@ def test_write_stunnel_config_with_verify_level(mocker, tmpdir):
     ca_mocker.assert_not_called()
 
     _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG,
-                     _get_expected_efs_config(check_cert_status=True, verify=verify))
+                     _get_expected_efs_config(check_cert_validity=True, verify=verify))
