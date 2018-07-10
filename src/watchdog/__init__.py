@@ -78,13 +78,24 @@ def bootstrap_logging(config, log_dir=LOG_DIR):
         logging.error('Malformed logging level "%s", setting logging level to %s', raw_level, level)
 
 
+def parse_options(options):
+    opts = {}
+    for o in options.split(','):
+        if '=' in o:
+            k, v = o.split('=')
+            opts[k] = v
+        else:
+            opts[o] = None
+    return opts
+
+
 def get_file_safe_mountpoint(mount):
     mountpoint = os.path.abspath(mount.mountpoint).replace(os.sep, '.')
     if mountpoint.startswith('.'):
         mountpoint = mountpoint[1:]
 
-    port = mount.options[mount.options.find('port'):].split(',')[0].split('=')[1]
-    return mountpoint + '.' + port
+    opts = parse_options(mount.options)
+    return mountpoint + '.' + opts['port']
 
 
 def get_current_local_nfs_mounts(mount_file='/proc/mounts'):

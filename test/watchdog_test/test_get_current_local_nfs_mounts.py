@@ -9,7 +9,8 @@
 import watchdog
 
 
-MOUNT_FMT_LINE = '{address}:/ {mountpoint} {fs_type} rw,port=12345 0 0'
+MOUNT_FMT_LINE = '{address}:/ {mountpoint} {fs_type} {options} 0 0'
+DEFAULT_OPTS = 'rw,port=12345'
 
 
 def _create_mount_file(tmpdir, lines):
@@ -27,7 +28,8 @@ def test_no_mounts(tmpdir):
 
 
 def test_no_local_mounts(tmpdir):
-    mount_file = _create_mount_file(tmpdir, [MOUNT_FMT_LINE.format(address='10.1.0.1', mountpoint='/mnt', fs_type='nfs4')])
+    mount_file = _create_mount_file(tmpdir, [MOUNT_FMT_LINE.format(address='10.1.0.1', mountpoint='/mnt',
+                                                                   fs_type='nfs4', options=DEFAULT_OPTS)])
 
     mounts = watchdog.get_current_local_nfs_mounts(mount_file)
 
@@ -35,7 +37,8 @@ def test_no_local_mounts(tmpdir):
 
 
 def test_no_local_nfs_mounts(tmpdir):
-    mount_file = _create_mount_file(tmpdir, [MOUNT_FMT_LINE.format(address='127.0.0.1', mountpoint='/mnt', fs_type='ext4')])
+    mount_file = _create_mount_file(tmpdir, [MOUNT_FMT_LINE.format(address='127.0.0.1', mountpoint='/mnt',
+                                                                   fs_type='ext4', options=DEFAULT_OPTS)])
 
     mounts = watchdog.get_current_local_nfs_mounts(mount_file)
 
@@ -43,7 +46,18 @@ def test_no_local_nfs_mounts(tmpdir):
 
 
 def test_local_nfs_mount(tmpdir):
-    mount_file = _create_mount_file(tmpdir, [MOUNT_FMT_LINE.format(address='127.0.0.1', mountpoint='/mnt', fs_type='nfs4')])
+    mount_file = _create_mount_file(tmpdir, [MOUNT_FMT_LINE.format(address='127.0.0.1', mountpoint='/mnt',
+                                                                   fs_type='nfs4', options=DEFAULT_OPTS)])
+
+    mounts = watchdog.get_current_local_nfs_mounts(mount_file)
+
+    assert 1 == len(mounts)
+    assert 'mnt.12345' in mounts
+
+
+def test_local_nfs_mount_noresvport(tmpdir):
+    mount_file = _create_mount_file(tmpdir, [MOUNT_FMT_LINE.format(address='127.0.0.1', mountpoint='/mnt',
+                                                                   fs_type='nfs4', options='rw,noresvport,port=12345')])
 
     mounts = watchdog.get_current_local_nfs_mounts(mount_file)
 
