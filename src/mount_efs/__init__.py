@@ -116,7 +116,7 @@ def fatal_error(user_message, log_message=None, exit_code=1):
 def get_region():
     """Return this instance's region via the instance metadata service."""
     def _fatal_error(message):
-        fatal_error('Error retrieving region', message)
+        fatal_error('Error retrieving region from metadata server. For on-premise clients, please populate with appropriate region name on dns-name-format field at /etc/amazon/efs/efs-utils.conf', message)
 
     try:
         resource = urlopen(INSTANCE_METADATA_SERVICE_URL, timeout=1)
