@@ -64,7 +64,8 @@ LOG_FILE = 'mount.log'
 
 STATE_FILE_DIR = '/var/run/efs'
 
-FS_NAME_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)(?::(?P<path>/.*))?$')
+FS_ID_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)$')
+EFS_FQDN_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)\.efs\.(?P<region>[a-z0-9-]+)\.amazonaws.com$')
 
 INSTANCE_METADATA_SERVICE_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document/'
 
@@ -465,7 +466,7 @@ def mount_nfs(dns_name, path, mountpoint, options):
         fatal_error(err.strip(), message, proc.returncode)
 
 
-def parse_arguments(args=None):
+def parse_arguments(config, args=None):
     """Parse arguments, return (fsid, path, mountpoint, options)"""
     if args is None:
         args = sys.argv
@@ -495,12 +496,7 @@ def parse_arguments(args=None):
     if not fsname or not mountpoint:
         usage()
 
-    match = FS_NAME_RE.match(fsname)
-    if not match:
-        fatal_error('Invalid file system name: %s' % fsname)
-
-    fs_id = match.group('fs_id')
-    path = match.group('path') or '/'
+    fs_id, path = match_device(config, fsname)
 
     return fs_id, path, mountpoint, options
 
@@ -578,6 +574,72 @@ def get_dns_name(config, fs_id):
     return dns_name
 
 
+def match_device(config, device):
+    """
+    Return the EFS id and the remote path to mount.
+
+    :param config: the current configuration
+    :param device: the device descriptor, separating an EFS id or a DNS name and the remote path to mount by a colon
+    :return: a two element tuple of the EFS id and the remote path to mount
+    """
+
+    # The device descriptor as specified separates the remote filesystem by the path to mount by a colon. Since colons
+    # are not allowed in either an EFS id or in a domain name, we can left-split once. (If left-splitting fails, the
+    # user didn't specify a path and we use '/' as the default.)
+    try:
+        remote, path = device.split(':', 1)
+    except ValueError:
+        remote = device
+        path = '/'
+
+    # The simplest case is that the remote is already the EFS id. If so, we return it as is.
+    if FS_ID_RE.match(remote):
+        return remote, path
+
+    # If the user did not specify an EFS id, we first check for the special case where the user supplied us with the
+    # FQDN of the EFS.
+    efs_fqdn_match = EFS_FQDN_RE.match(remote)
+    if efs_fqdn_match:
+        fs_id = efs_fqdn_match.group('fs_id')
+        expected_dns_name = get_dns_name(config, fs_id)
+        if remote == expected_dns_name:
+            return fs_id, path
+        else:
+            fatal_error(
+                'Fully qualified EFS domain name specified "%s", but it didn\'t match the expected value "%s"'
+                % (remote, expected_dns_name),
+                'EFS FQDN "%s" didn\'t match expected "%s"' % (remote, expected_dns_name)
+            )
+
+    # For the final case we now assume that the user specified a DNS resolvable name with a CNAME record that points to
+    # a valid EFS FQDN. To verify this, we'll use `socket.gethostbyname_ex()` which returns an alias-list for, among
+    # other things, a CNAME.
+    try:
+        primary, secondaries, _ = socket.gethostbyname_ex(remote)
+        hostnames = filter(lambda e: e is not None, [primary] + secondaries)
+    except socket.gaierror:
+        fatal_error(
+            'Failed to resolve "%s" - check that the specified DNS name is a CNAME record resolving to a valid EFS DNS '
+            'name' % remote,
+            'Failed to resolve "%s"' % remote
+        )
+
+    if not hostnames:
+        fatal_error(
+            'The specified domain name "%s" returned no entries, where at least one was expected' % remote
+        )
+
+    for hostname in hostnames:
+        efs_fqdn_match = EFS_FQDN_RE.match(hostname)
+        if efs_fqdn_match:
+            fs_id = efs_fqdn_match.group('fs_id')
+            expected_dns_name = get_dns_name(config, fs_id)
+            if hostname == expected_dns_name:
+                return fs_id, path
+    else:
+        fatal_error('The specified domain name "%s" resolved to no valid/expected EFS DNS name' % remote)
+
+
 def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
     with bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options) as tunnel_proc:
         mount_completed = threading.Event()
@@ -599,11 +661,12 @@ def check_unsupported_options(options):
 
 
 def main():
-    fs_id, path, mountpoint, options = parse_arguments()
     assert_root()
 
     config = read_config()
     bootstrap_logging(config)
+
+    fs_id, path, mountpoint, options = parse_arguments(config)
 
     logging.info('version=%s options=%s', VERSION, options)
     check_unsupported_options(options)

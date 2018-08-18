@@ -13,7 +13,7 @@ import pytest
 
 def _test_parse_arguments_help(capsys, help):
     with pytest.raises(SystemExit) as ex:
-        mount_efs.parse_arguments(['mount', 'foo', 'bar', help])
+        mount_efs.parse_arguments(None, ['mount', 'foo', 'bar', help])
 
     assert 0 == ex.value.code
 
@@ -31,7 +31,7 @@ def test_parse_arguments_help_short(capsys):
 
 def test_parse_arguments_version(capsys):
     with pytest.raises(SystemExit) as ex:
-        mount_efs.parse_arguments(['mount', 'foo', 'bar', '--version'])
+        mount_efs.parse_arguments(None, ['mount', 'foo', 'bar', '--version'])
 
     assert 0 == ex.value.code
 
@@ -41,7 +41,7 @@ def test_parse_arguments_version(capsys):
 
 def test_parse_arguments_no_fs_id(capsys):
     with pytest.raises(SystemExit) as ex:
-        mount_efs.parse_arguments(['mount'])
+        mount_efs.parse_arguments(None, ['mount'])
 
     assert 0 != ex.value.code
 
@@ -51,7 +51,7 @@ def test_parse_arguments_no_fs_id(capsys):
 
 def test_parse_arguments_no_mount_point(capsys):
     with pytest.raises(SystemExit) as ex:
-        mount_efs.parse_arguments(['mount', 'fs-deadbeef'])
+        mount_efs.parse_arguments(None, ['mount', 'fs-deadbeef'])
 
     assert 0 != ex.value.code
 
@@ -59,18 +59,8 @@ def test_parse_arguments_no_mount_point(capsys):
     assert 'Usage:' in err
 
 
-def test_parse_arguments_invalid_fs_id(capsys):
-    with pytest.raises(SystemExit) as ex:
-        mount_efs.parse_arguments(['mount', 'not-a-file-system-id', '/dir'])
-
-    assert 0 != ex.value.code
-
-    out, err = capsys.readouterr()
-    assert 'Invalid file system name' in err
-
-
 def test_parse_arguments_default_path():
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(['mount', 'fs-deadbeef', '/dir'])
+    fsid, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', 'fs-deadbeef', '/dir'])
 
     assert 'fs-deadbeef' == fsid
     assert '/' == path
@@ -79,7 +69,7 @@ def test_parse_arguments_default_path():
 
 
 def test_parse_arguments_custom_path():
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(['mount', 'fs-deadbeef:/home', '/dir'])
+    fsid, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', 'fs-deadbeef:/home', '/dir'])
 
     assert 'fs-deadbeef' == fsid
     assert '/home' == path
@@ -88,7 +78,7 @@ def test_parse_arguments_custom_path():
 
 
 def test_parse_arguments():
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(['mount', 'fs-deadbeef:/home', '/dir', '-o', 'foo,bar=baz,quux'])
+    fsid, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', 'fs-deadbeef:/home', '/dir', '-o', 'foo,bar=baz,quux'])
 
     assert 'fs-deadbeef' == fsid
     assert '/home' == path
