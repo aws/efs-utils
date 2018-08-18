@@ -3,7 +3,7 @@
 \fBmount\&.efs\fR \- Mount helper for using Amazon EFS file systems\&.
 .SH "SYNOPSIS"
 .sp
-\fBmount\&.efs\fR \fIfile\-system\-id\fR \fImount-point\fR [\fB\-o\fR \fIoptions\fR]
+\fBmount\&.efs\fR \fIfs-id-or-dns-name\fR \fImount-point\fR [\fB\-o\fR \fIoptions\fR]
 .SH "DESCRIPTION"
 .sp
 \fBmount\&.efs\fR is part of the \fBamazon\-efs\-utils\fR \
@@ -12,9 +12,21 @@ package, which simplifies using EFS file systems\&.
 \fBmount\&.efs\fR is meant to be used through the \
 \fBmount\fR(8) command for mounting EFS file systems\&.
 .sp
-\fIfile\-system\-id\fR is an EFS file system ID in the \
-form of "fs\-abcd1234", generated when the file system \
-is created\&. \fImount-point\fR is the local directory \
+\fIfs-id-or-dns-name\fR has to be of any of the following \
+three forms:
+.P
+.IP \(bu
+An EFS filesystem ID in the form of "fs\-abcd1234", generated \
+when the file system is created\&.
+.IP \(bu
+A fully-qualified EFS DNS name in the form of \
+"fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com"\&.
+.IP \(bu
+A domain name that has a resolvable DNS-CNAME record, \
+which in turn points to a fully-qualified EFS DNS name \
+in the form of "fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com"\&.
+.P
+\fImount-point\fR is the local directory \
 on which the file system will be mounted\&.
 .sp
 \fBmount\&.efs\fR automatically applies the following NFS options:
@@ -87,6 +99,20 @@ Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 sudo mount -t efs -o tls,verify=0 fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 "/mnt/efs" using encryption of data in transit and a verify level of 0\&.
+.TP
+sudo mount -t efs fs-abcd1234.efs.us-east-1.amazonaws.com /mnt/efs
+Mount an EFS file system with the fully-qualified EFS DNS name \
+"fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com" at mount point \
+"/mnt/efs" without encryption of data in transit\&. If the region \
+is correct, this is identical to mounting with just the file system ID\&.
+.TP
+sudo mount -t efs custom-cname.example.com /mnt/efs
+Mount an EFS file system using the custom DNS name \
+"custom-cname\&.example\&.com" \(em which has to \
+resolve to a fully-qualified EFS DNS name such as \
+"fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com" \
+\(em at mount point "/mnt/efs" without encryption \
+of data in transit\&.
 .SH "FILES"
 .TP
 \fI/sbin/mount.efs\fR
