@@ -613,8 +613,8 @@ def match_device(config, device):
                 return fs_id, path
     else:
         fatal_error('The specified CNAME "%s" did not resolve to a valid DNS name for an EFS mount target. '
-                    'Please refer to the EFS documentation for mounting with DNS names for examples: '
-                    'https://docs.aws.amazon.com/efs/latest/ug/mounting-fs-mount-cmd-dns-name.' % remote)
+                    'Please refer to the EFS documentation for mounting with DNS names for examples: %s'
+                    % (remote, 'https://docs.aws.amazon.com/efs/latest/ug/mounting-fs-mount-cmd-dns-name.html'))
 
 
 def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
