@@ -608,6 +608,7 @@ def match_device(config, device):
             fs_id = efs_fqdn_match.group('fs_id')
             expected_dns_name = get_dns_name(config, fs_id)
 
+            # check that the DNS name of the mount target matches exactly the DNS name the CNAME resolves to
             if hostname == expected_dns_name:
                 return fs_id, path
     else:
