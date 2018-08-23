@@ -575,45 +575,17 @@ def get_dns_name(config, fs_id):
 
 
 def match_device(config, device):
-    """
-    Return the EFS id and the remote path to mount.
+    """Return the EFS id and the remote path to mount"""
 
-    :param config: the current configuration
-    :param device: the device descriptor, separating an EFS id or a DNS name and the remote path to mount by a colon
-    :return: a two element tuple of the EFS id and the remote path to mount
-    """
-
-    # The device descriptor as specified separates the remote filesystem by the path to mount by a colon. Since colons
-    # are not allowed in either an EFS id or in a domain name, we can left-split once. (If left-splitting fails, the
-    # user didn't specify a path and we use '/' as the default.)
     try:
         remote, path = device.split(':', 1)
     except ValueError:
         remote = device
         path = '/'
 
-    # The simplest case is that the remote is already the EFS id. If so, we return it as is.
     if FS_ID_RE.match(remote):
         return remote, path
 
-    # If the user did not specify an EFS id, we first check for the special case where the user supplied us with the
-    # FQDN of the EFS.
-    efs_fqdn_match = EFS_FQDN_RE.match(remote)
-    if efs_fqdn_match:
-        fs_id = efs_fqdn_match.group('fs_id')
-        expected_dns_name = get_dns_name(config, fs_id)
-        if remote == expected_dns_name:
-            return fs_id, path
-        else:
-            fatal_error(
-                'Fully qualified EFS domain name specified "%s", but it didn\'t match the expected value "%s"'
-                % (remote, expected_dns_name),
-                'EFS FQDN "%s" didn\'t match expected "%s"' % (remote, expected_dns_name)
-            )
-
-    # For the final case we now assume that the user specified a DNS resolvable name with a CNAME record that points to
-    # a valid EFS FQDN. To verify this, we'll use `socket.gethostbyname_ex()` which returns an alias-list for, among
-    # other things, a CNAME.
     try:
         primary, secondaries, _ = socket.gethostbyname_ex(remote)
         hostnames = filter(lambda e: e is not None, [primary] + secondaries)
@@ -626,18 +598,22 @@ def match_device(config, device):
 
     if not hostnames:
         fatal_error(
-            'The specified domain name "%s" returned no entries, where at least one was expected' % remote
+            'The specified domain name "%s" did not resolve to an EFS mount target' % remote
         )
 
     for hostname in hostnames:
         efs_fqdn_match = EFS_FQDN_RE.match(hostname)
+
         if efs_fqdn_match:
             fs_id = efs_fqdn_match.group('fs_id')
             expected_dns_name = get_dns_name(config, fs_id)
+
             if hostname == expected_dns_name:
                 return fs_id, path
     else:
-        fatal_error('The specified domain name "%s" resolved to no valid/expected EFS DNS name' % remote)
+        fatal_error('The specified CNAME "%s" did not resolve to a valid DNS name for an EFS mount target. '
+                    'Please refer to the EFS documentation for mounting with DNS names for examples: '
+                    'https://docs.aws.amazon.com/efs/latest/ug/mounting-fs-mount-cmd-dns-name.' % remote)
 
 
 def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
