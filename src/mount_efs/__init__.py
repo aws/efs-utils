@@ -54,7 +54,7 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.3'
+VERSION = '1.4'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount'
