@@ -13,7 +13,7 @@ import pytest
 
 def _test_parse_arguments_help(capsys, help):
     with pytest.raises(SystemExit) as ex:
-        mount_efs.parse_arguments(None, ['mount', 'foo', 'bar', help])
+        mount_efs.parse_arguments_early_exit(['mount', 'foo', 'bar', help])
 
     assert 0 == ex.value.code
 
@@ -31,7 +31,7 @@ def test_parse_arguments_help_short(capsys):
 
 def test_parse_arguments_version(capsys):
     with pytest.raises(SystemExit) as ex:
-        mount_efs.parse_arguments(None, ['mount', 'foo', 'bar', '--version'])
+        mount_efs.parse_arguments_early_exit(['mount', 'foo', 'bar', '--version'])
 
     assert 0 == ex.value.code
 
@@ -78,7 +78,8 @@ def test_parse_arguments_custom_path():
 
 
 def test_parse_arguments():
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', 'fs-deadbeef:/home', '/dir', '-o', 'foo,bar=baz,quux'])
+    fsid, path, mountpoint, options = mount_efs.parse_arguments(None,
+                                                                ['mount', 'fs-deadbeef:/home', '/dir', '-o', 'foo,bar=baz,quux'])
 
     assert 'fs-deadbeef' == fsid
     assert '/home' == path

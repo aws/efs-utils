@@ -100,6 +100,7 @@ STUNNEL_EFS_CONFIG = {
     'renegotiation': 'no',
     'TIMEOUTbusy': '20',
     'libwrap': 'no',
+    'delay': 'yes',
 }
 
 WATCHDOG_SERVICE = 'amazon-efs-mount-watchdog'
@@ -188,8 +189,8 @@ def choose_tls_port(config):
             continue
 
     fatal_error('Failed to locate an available port in the range [%d, %d], '
-                'try specifying a different port range in efs-utils.conf'
-                % (lower_bound, upper_bound))
+                'try specifying a different port range in %s'
+                % (lower_bound, upper_bound, CONFIG_FILE))
 
 
 def get_mount_specific_filename(fs_id, mountpoint, tls_port):
@@ -466,14 +467,15 @@ def mount_nfs(dns_name, path, mountpoint, options):
         fatal_error(err.strip(), message, proc.returncode)
 
 
-def parse_arguments(config, args=None):
-    """Parse arguments, return (fsid, path, mountpoint, options)"""
+def usage(out, exit_code=1):
+    out.write('Usage: mount.efs [--version] [-h|--help] <fsname> <mountpoint> [-o <options>]\n')
+    sys.exit(exit_code)
+
+
+def parse_arguments_early_exit(args=None):
+    """Parse arguments, checking for early exit conditions only"""
     if args is None:
         args = sys.argv
-
-    def usage(out=sys.stderr, exit_code=1):
-        out.write('Usage: mount.efs [--version] [-h|--help] <fsname> <mountpoint> [-o <options>]\n')
-        sys.exit(exit_code)
 
     if '-h' in args[1:] or '--help' in args[1:]:
         usage(out=sys.stdout, exit_code=0)
@@ -481,6 +483,12 @@ def parse_arguments(config, args=None):
     if '--version' in args[1:]:
         sys.stdout.write('%s Version: %s\n' % (args[0], VERSION))
         sys.exit(0)
+
+
+def parse_arguments(config, args=None):
+    """Parse arguments, return (fsid, path, mountpoint, options)"""
+    if args is None:
+        args = sys.argv
 
     fsname = None
     mountpoint = None
@@ -494,7 +502,7 @@ def parse_arguments(config, args=None):
         options = parse_options(args[4])
 
     if not fsname or not mountpoint:
-        usage()
+        usage(out=sys.stderr)
 
     fs_id, path = match_device(config, fsname)
 
@@ -638,6 +646,8 @@ def check_unsupported_options(options):
 
 
 def main():
+    parse_arguments_early_exit()
+
     assert_root()
 
     config = read_config()
