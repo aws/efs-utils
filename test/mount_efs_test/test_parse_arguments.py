@@ -77,6 +77,16 @@ def test_parse_arguments_custom_path():
     assert {} == options
 
 
+def test_parse_arguments_verbose():
+    fsid, path, mountpoint, options = mount_efs.parse_arguments(None,
+                                                                ['mount', 'fs-deadbeef:/home', '/dir', '-v', '-o', 'foo,bar=baz,quux'])
+
+    assert 'fs-deadbeef' == fsid
+    assert '/home' == path
+    assert '/dir' == mountpoint
+    assert {'foo': None, 'bar': 'baz', 'quux': None} == options
+
+
 def test_parse_arguments():
     fsid, path, mountpoint, options = mount_efs.parse_arguments(None,
                                                                 ['mount', 'fs-deadbeef:/home', '/dir', '-o', 'foo,bar=baz,quux'])
