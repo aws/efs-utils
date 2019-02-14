@@ -21,9 +21,9 @@ from logging.handlers import RotatingFileHandler
 from signal import SIGTERM
 
 try:
-    import ConfigParser
+    import ConfigParser as cp
 except ImportError:
-    from configparser import ConfigParser
+    import configparser as cp
 
 VERSION = '1.5'
 
@@ -275,7 +275,7 @@ def assert_root():
 
 
 def read_config(config_file=CONFIG_FILE):
-    p = ConfigParser.SafeConfigParser()
+    p = cp.ConfigParser()
     p.read(config_file)
     return p
 

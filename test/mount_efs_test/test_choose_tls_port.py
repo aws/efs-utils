@@ -7,8 +7,12 @@
 #
 
 import mount_efs
-import ConfigParser
 import socket
+
+try:
+    import ConfigParser as cp
+except ImportError:
+    import configparser as cp
 
 import pytest
 
@@ -19,7 +23,7 @@ DEFAULT_TLS_PORT_RANGE_HIGH = 20449
 
 
 def _get_config():
-    config = ConfigParser.SafeConfigParser()
+    config = cp.ConfigParser()
     config.add_section(mount_efs.CONFIG_SECTION)
     config.set(mount_efs.CONFIG_SECTION, 'port_range_lower_bound', str(DEFAULT_TLS_PORT_RANGE_LOW))
     config.set(mount_efs.CONFIG_SECTION, 'port_range_upper_bound', str(DEFAULT_TLS_PORT_RANGE_HIGH))

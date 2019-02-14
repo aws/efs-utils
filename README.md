@@ -12,6 +12,11 @@ The `efs-utils` package has been verified against the following Linux distributi
 | RHEL 7 | `rpm`| `systemd` |
 | Debian 9 | `deb` | `systemd` |
 | Ubuntu 16.04 | `deb` | `systemd` |
+| SLES 12 | rpm | `systemd` |
+| SLES 15 | rpm | `systemd` |
+| openSUSE Leap 42.x | rpm | `systemd` |
+| openSUSE Leap 15.x | rpm | `systemd` |
+
 
 ## Prerequisites
 
@@ -30,9 +35,17 @@ For those using Amazon Linux or Amazon Linux 2, the easiest way to install `efs-
 $ sudo yum -y install amazon-efs-utils
 ```
 
+### On SUSE Linux distributions
+
+```
+$ zypper in aws-efs-utils
+```
+
+Package availability depends on the repository configuration
+
 ### On other Linux distributions
 
-Other distributions require building the package from source and installing it.
+Installing he package from source:
 
 - Clone this repository:
 

@@ -7,8 +7,12 @@
 #
 
 import mount_efs
-import ConfigParser
 import os
+
+try:
+    import ConfigParser as cp
+except ImportError:
+    import configparser as cp
 
 import pytest
 
@@ -32,7 +36,7 @@ def _get_config(mocker, stunnel_debug_enabled=False, stunnel_check_cert_hostname
     if stunnel_check_cert_validity is None:
         stunnel_check_cert_validity = stunnel_check_cert_validity_supported
 
-    config = ConfigParser.SafeConfigParser()
+    config = cp.ConfigParser()
     config.add_section(mount_efs.CONFIG_SECTION)
     config.set(mount_efs.CONFIG_SECTION, 'stunnel_debug_enabled', str(stunnel_debug_enabled))
     config.set(mount_efs.CONFIG_SECTION, 'stunnel_check_cert_hostname', str(stunnel_check_cert_hostname))
