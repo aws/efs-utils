@@ -66,6 +66,14 @@ def test_bootstrap_tls_state_file_nonexistent_dir(mocker, tmpdir):
     mocker.patch('os.kill')
     state_file_dir = str(tmpdir.join(tempfile.mktemp()))
 
+    def config_get_side_effect(section, field):
+        if section == mount_efs.CONFIG_SECTION and field == 'state_file_dir_mode':
+            return '0755'
+        else:
+            raise ValueError('Unexpected arguments')
+
+    MOCK_CONFIG.get.side_effect = config_get_side_effect
+
     assert not os.path.exists(state_file_dir)
 
     with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {}, state_file_dir):
