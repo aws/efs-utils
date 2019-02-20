@@ -180,14 +180,17 @@ def choose_tls_port(config):
     ports_to_try = tls_ports[mid:] + tls_ports[:mid]
     assert len(tls_ports) == len(ports_to_try)
 
+    sock = socket.socket()
+
     for tls_port in ports_to_try:
-        sock = socket.socket()
         try:
             sock.bind(('localhost', tls_port))
             sock.close()
             return tls_port
         except socket.error:
             continue
+
+    sock.close()
 
     fatal_error('Failed to locate an available port in the range [%d, %d], '
                 'try specifying a different port range in %s'
