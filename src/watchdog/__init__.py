@@ -95,6 +95,9 @@ def get_file_safe_mountpoint(mount):
         mountpoint = mountpoint[1:]
 
     opts = parse_options(mount.options)
+    if 'port' not in opts:
+        # some other localhost nfs mount not running over stunnel
+        return None
     return mountpoint + '.' + opts['port']
 
 
@@ -113,7 +116,9 @@ def get_current_local_nfs_mounts(mount_file='/proc/mounts'):
 
     mount_dict = {}
     for m in mounts:
-        mount_dict[get_file_safe_mountpoint(m)] = m
+        safe_mnt = get_file_safe_mountpoint(m)
+        if safe_mnt:
+            mount_dict[safe_mnt] = m
 
     return mount_dict
 
