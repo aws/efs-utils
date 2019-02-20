@@ -235,7 +235,7 @@ def is_stunnel_option_supported(stunnel_output, stunnel_option_name):
 
 
 def get_version_specific_stunnel_options(config):
-    proc = subprocess.Popen(['stunnel', '-help'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(['stunnel', '-help'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
     proc.wait()
     _, err = proc.communicate()
 
@@ -355,7 +355,7 @@ def check_network_status(fs_id, init_system):
         return
 
     with open(os.devnull, 'w') as devnull:
-        rc = subprocess.call(['systemctl', 'status', 'network.target'], stdout=devnull, stderr=devnull)
+        rc = subprocess.call(['systemctl', 'status', 'network.target'], stdout=devnull, stderr=devnull, close_fds=True)
 
     if rc != 0:
         fatal_error('Failed to mount %s because the network was not yet available, add "_netdev" to your mount options' % fs_id,
@@ -364,19 +364,20 @@ def check_network_status(fs_id, init_system):
 
 def start_watchdog(init_system):
     if init_system == 'init':
-        proc = subprocess.Popen(['/sbin/status', WATCHDOG_SERVICE], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.Popen(
+                ['/sbin/status', WATCHDOG_SERVICE], stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
         status, _ = proc.communicate()
         if 'stop' in status:
             with open(os.devnull, 'w') as devnull:
-                subprocess.Popen(['/sbin/start', WATCHDOG_SERVICE], stdout=devnull, stderr=devnull)
+                subprocess.Popen(['/sbin/start', WATCHDOG_SERVICE], stdout=devnull, stderr=devnull, close_fds=True)
         elif 'start' in status:
             logging.debug('%s is already running', WATCHDOG_SERVICE)
 
     elif init_system == 'systemd':
-        rc = subprocess.call(['systemctl', 'is-active', '--quiet', WATCHDOG_SERVICE])
+        rc = subprocess.call(['systemctl', 'is-active', '--quiet', WATCHDOG_SERVICE], close_fds=True)
         if rc != 0:
             with open(os.devnull, 'w') as devnull:
-                subprocess.Popen(['systemctl', 'start', WATCHDOG_SERVICE], stdout=devnull, stderr=devnull)
+                subprocess.Popen(['systemctl', 'start', WATCHDOG_SERVICE], stdout=devnull, stderr=devnull, close_fds=True)
         else:
             logging.debug('%s is already running', WATCHDOG_SERVICE)
 
@@ -404,7 +405,8 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
 
     # launch the tunnel in a process group so if it has any child processes, they can be killed easily by the mount watchdog
     logging.info('Starting TLS tunnel: "%s"', ' '.join(tunnel_args))
-    tunnel_proc = subprocess.Popen(tunnel_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
+    tunnel_proc = subprocess.Popen(
+            tunnel_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid, close_fds=True)
     logging.info('Started TLS tunnel, pid: %d', tunnel_proc.pid)
 
     temp_tls_state_file = write_tls_tunnel_state_file(fs_id, mountpoint, tls_port, tunnel_proc.pid, tunnel_args,
@@ -458,7 +460,7 @@ def mount_nfs(dns_name, path, mountpoint, options):
 
     logging.info('Executing: "%s"', ' '.join(command))
 
-    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
     out, err = proc.communicate()
 
     if proc.returncode == 0:

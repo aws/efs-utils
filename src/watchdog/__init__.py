@@ -150,7 +150,7 @@ def is_pid_running(pid):
 def start_tls_tunnel(child_procs, state_file, command):
     # launch the tunnel in a process group so if it has any child processes, they can be killed easily
     logging.info('Starting TLS tunnel: "%s"', ' '.join(command))
-    tunnel = subprocess.Popen(command, preexec_fn=os.setsid)
+    tunnel = subprocess.Popen(command, preexec_fn=os.setsid, close_fds=True)
 
     if not is_pid_running(tunnel.pid):
         fatal_error('Failed to initialize TLS tunnel for %s' % state_file, 'Failed to start TLS tunnel.')
