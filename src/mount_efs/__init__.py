@@ -387,12 +387,26 @@ def start_watchdog(init_system):
         logging.warning(error_message)
 
 
+def create_state_file_dir(config, state_file_dir):
+    mode = 0o750
+    try:
+        mode_str = config.get(CONFIG_SECTION, 'state_file_dir_mode')
+        try:
+            mode = int(mode_str, 8)
+        except ValueError:
+            logging.warn('Bad state_file_dir_mode "%s" in config file "%s"', mode_str, CONFIG_FILE)
+    except ConfigParser.NoOptionError:
+        pass
+
+    os.makedirs(state_file_dir, mode)
+
+
 @contextmanager
 def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, state_file_dir=STATE_FILE_DIR):
     start_watchdog(init_system)
 
     if not os.path.exists(state_file_dir):
-        os.makedirs(state_file_dir)
+        create_state_file_dir(config, state_file_dir)
 
     tls_port = choose_tls_port(config)
     options['tlsport'] = tls_port
