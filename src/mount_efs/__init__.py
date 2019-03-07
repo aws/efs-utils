@@ -54,7 +54,7 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.5'
+VERSION = '1.6'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount'
@@ -499,8 +499,9 @@ def parse_arguments(config, args=None):
         fsname = args[1]
     if len(args) > 2:
         mountpoint = args[2]
-    if len(args) > 4 and args[3] == '-o':
-        options = parse_options(args[4])
+    if len(args) > 4 and '-o' in args[:-1]:
+        options_index = args.index('-o') + 1
+        options = parse_options(args[options_index])
 
     if not fsname or not mountpoint:
         usage(out=sys.stderr)
