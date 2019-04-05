@@ -25,7 +25,7 @@ try:
 except ImportError:
     from configparser import ConfigParser
 
-VERSION = '1.6'
+VERSION = '1.7'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount-watchdog'
