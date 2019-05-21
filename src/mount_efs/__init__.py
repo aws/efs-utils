@@ -484,7 +484,7 @@ def mount_nfs(dns_name, path, mountpoint, options):
 
 
 def usage(out, exit_code=1):
-    out.write('Usage: mount.efs [--version] [-h|--help] <fsname> <mountpoint> [-o <options>]\n')
+    out.write('Usage: mount.efs [--version] [-h|--help] <fsname|mount-target IP> <mountpoint> [-o <options>]\n')
     sys.exit(exit_code)
 
 
@@ -610,8 +610,14 @@ def match_device(config, device):
     if FS_ID_RE.match(remote):
     	return remote, path
     
-    if IP_RE.match(remote):
+    ip_address = IP_RE.match(remote)
+
+    if ip_address:
 	return remote, path
+    else :
+	 fatal_error(
+            'The specified IP "%s" is invalid' % remote
+        )	
    
     try:
         primary, secondaries, _ = socket.gethostbyname_ex(remote)
