@@ -499,27 +499,6 @@ def parse_arguments_early_exit(args=None):
     if '--version' in args[1:]:
         sys.stdout.write('%s Version: %s\n' % (args[0], VERSION))
         sys.exit(0)
-def parse_arguments1(config, args=None):
-    """Parse arguments, return (fsid, path, mountpoint, options)"""
-    if args is None:
-        args = sys.argv
-
-    fsname = None
-    mountpoint = None
-    options = {}
-
-    if len(args) > 1:
-        fsname = args[1]
-    if len(args) > 2:
-        mountpoint = args[2]
-    if len(args) > 4 and '-o' in args[:-1]:
-        options_index = args.index('-o') + 1
-        options = parse_options(args[options_index])
-
-    if not fsname or not mountpoint:
-        usage(out=sys.stderr)
-
-    return mountpoint, options
 
 def parse_arguments(config, args=None):
     """Parse arguments, return (fsid, path, mountpoint, options)"""
@@ -692,30 +671,21 @@ def main():
 
     config = read_config()
     bootstrap_logging(config)
-    #device = sys.argv[3]
-    #try:
-	#remote, path = device.split(':',1)
-    #except ValueError:
-	#remote = device
-	#path = '/'
-    #print(remote) 	
-    #if socket.inet_aton(remote):
-    	 #dns_name = remote 
-    
-    	 #mountpoint, options = parse_arguments1(config)
-	 #fs_id =  dns_name
-    #else:
     fs_id, path, mountpoint, options = parse_arguments(config)
-
-
-    dns_name = fs_id
-    print(dns_name)
 
     logging.info('version=%s options=%s', VERSION, options)
     check_unsupported_options(options)
 
     init_system = get_init_system()
     check_network_status(fs_id, init_system)
+	
+    if FS_ID_RE.match(fs_id):
+	   dns_name = get_dns_name(config, fs_id)
+	
+    else:
+	   dns_name = fs_id
+    	   print(dns_name)
+	
     if 'tls' in options:
         mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options)
     else:
