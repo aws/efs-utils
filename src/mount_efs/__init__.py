@@ -282,12 +282,6 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
             efs_config['checkHost'] = dns_name
         else:
             fatal_error(tls_controls_message % 'stunnel_check_cert_hostname')
-    
-    if config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname') and IP_RE.match(fs_id):
-        if check_host_supported:
-            efs_config['checkIP'] = dns_name
-        else:
-            fatal_error(tls_controls_message % 'stunnel_check_cert_hostname')
 
     if config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_validity'):
         if ocsp_aia_supported:
