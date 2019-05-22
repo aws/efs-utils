@@ -65,7 +65,7 @@ LOG_FILE = 'mount.log'
 STATE_FILE_DIR = '/var/run/efs'
 
 FS_ID_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)$')
-IP_RE = re.compile("^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
+IP_RE = re.compile("^([01]?[0-9]{1,2}|2[0-4][0-9]|25[0-5])\.([01]?[0-9]{1,2}|2[0-4][0-9]|25[0-5])\.([01]?[0-9]{1,2}|2[0-4][0-9]|25[0-5])\.([01]?[0-9]{1,2}|2[0-4][0-9]|25[0-5])$")
 EFS_FQDN_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)\.efs\.(?P<region>[a-z0-9-]+)\.amazonaws.com$')
 
 INSTANCE_METADATA_SERVICE_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document/'
