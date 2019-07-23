@@ -10,6 +10,7 @@ The `efs-utils` package has been verified against the following Linux distributi
 | Amazon Linux 2 | `rpm` | `systemd` |
 | CentOS 7 | `rpm` | `systemd` |
 | RHEL 7 | `rpm`| `systemd` |
+| RHEL 8 | `rpm`| `systemd` |
 | Debian 9 | `deb` | `systemd` |
 | Ubuntu 16.04 | `deb` | `systemd` |
 

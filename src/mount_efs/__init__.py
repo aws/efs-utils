@@ -54,7 +54,7 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.10'
+VERSION = '1.11'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount'
@@ -102,11 +102,12 @@ STUNNEL_EFS_CONFIG = {
     'renegotiation': 'no',
     'TIMEOUTbusy': '20',
     'TIMEOUTclose': '0',
-    'libwrap': 'no',
     'delay': 'yes',
 }
 
 WATCHDOG_SERVICE = 'amazon-efs-mount-watchdog'
+SYSTEM_RELEASE_PATH = '/etc/system-release'
+RHEL8_RELEASE_NAME = 'Red Hat Enterprise Linux release 8'
 
 
 def fatal_error(user_message, log_message=None, exit_code=1):
@@ -270,6 +271,17 @@ def get_version_specific_stunnel_options(config):
     return check_host_supported, ocsp_aia_supported
 
 
+def get_system_release_version():
+    system_release_version = 'unknown'
+    try:
+        with open(SYSTEM_RELEASE_PATH) as f:
+            system_release_version = f.read().strip()
+    except IOError:
+        logging.debug('Unable to read %s', SYSTEM_RELEASE_PATH)
+
+    return system_release_version
+
+
 def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level, ocsp_enabled,
                               log_dir=LOG_DIR):
     """
@@ -309,6 +321,9 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
             efs_config['OCSPaia'] = 'yes'
         else:
             fatal_error(tls_controls_message % 'stunnel_check_cert_validity')
+
+    if RHEL8_RELEASE_NAME not in get_system_release_version():
+        efs_config['libwrap'] = 'no'
 
     stunnel_config = '\n'.join(serialize_stunnel_config(global_config) + serialize_stunnel_config(efs_config, 'efs'))
     logging.debug('Writing stunnel configuration:\n%s', stunnel_config)

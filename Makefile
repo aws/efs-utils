@@ -45,6 +45,10 @@ specfile: clean
 .PHONY: sources
 sources: tarball specfile
 
+.PHONY: rhel8-support
+rhel8-support:
+	./rhel8-support.sh
+
 .PHONY: rpm-only
 rpm-only:
 	mkdir -p $(BUILD_DIR)/{SPECS,COORD_SOURCES,DATA_SOURCES,BUILD,RPMS,SOURCES,SRPMS}
@@ -54,7 +58,7 @@ rpm-only:
 	cp $(BUILD_DIR)/RPMS/*/*rpm build
 
 .PHONY: rpm
-rpm: sources rpm-only
+rpm: rhel8-support sources rpm-only
 
 .PHONY: deb
 deb:

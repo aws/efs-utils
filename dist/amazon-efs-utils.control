@@ -1,6 +1,6 @@
 Package: amazon-efs-utils
 Architecture: all
-Version: 1.10
+Version: 1.11
 Section: utils
 Depends: python|python2, nfs-common, stunnel4 (>= 4.56)
 Priority: optional
