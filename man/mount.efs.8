@@ -76,6 +76,11 @@ Configure the TLS relay to listen on the specified port\&.
 \fBverify=\fR\fIn\fR
 Verify TLS certificates using the specified stunnel verify level\&. For \
 more information, see \fBstunnel(8)\fR\&.
+.TP
+\fBocsp / noocsp\fR
+Selects whether to perform OCSP validation on TLS certificates\&, \
+overriding /etc/amazon/efs/efs-utils.conf. \
+For more information, see \fBstunnel(8)\fR\&.
 .if n \{\
 .RE
 .\}
@@ -96,6 +101,10 @@ Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 sudo mount -t efs -o tls,verify=0 fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 "/mnt/efs" using encryption of data in transit and a verify level of 0\&.
+.TP
+sudo mount -t efs -o tls,ocsp fs-abcd1234 /mnt/efs
+Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
+"/mnt/efs" using encryption of data in transit and with OCSP validation enabled\&.
 .TP
 sudo mount -t efs custom-cname.example.com /mnt/efs
 Mount an EFS file system using the custom DNS name \

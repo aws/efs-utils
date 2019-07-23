@@ -54,7 +54,7 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.7'
+VERSION = '1.10'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount'
@@ -76,6 +76,8 @@ EFS_ONLY_OPTIONS = [
     'tls',
     'tlsport',
     'verify',
+    'ocsp',
+    'noocsp'
 ]
 
 UNSUPPORTED_OPTIONS = [
@@ -169,19 +171,24 @@ def get_tls_port_range(config):
     return lower_bound, upper_bound
 
 
-def choose_tls_port(config):
-    lower_bound, upper_bound = get_tls_port_range(config)
+def choose_tls_port(config, options):
+    if 'tlsport' in options:
+        try:
+            ports_to_try = [int(options['tlsport'])]
+        except ValueError:
+            fatal_error('tlsport option [%s] is not an integer' % options['tlsport'])
+    else:
+        lower_bound, upper_bound = get_tls_port_range(config)
 
-    tls_ports = list(range(lower_bound, upper_bound))
+        tls_ports = list(range(lower_bound, upper_bound))
 
-    # Choose a random midpoint, and then try ports in-order from there
-    mid = random.randrange(len(tls_ports))
+        # Choose a random midpoint, and then try ports in-order from there
+        mid = random.randrange(len(tls_ports))
 
-    ports_to_try = tls_ports[mid:] + tls_ports[:mid]
-    assert len(tls_ports) == len(ports_to_try)
+        ports_to_try = tls_ports[mid:] + tls_ports[:mid]
+        assert len(tls_ports) == len(ports_to_try)
 
     sock = socket.socket()
-
     for tls_port in ports_to_try:
         try:
             sock.bind(('localhost', tls_port))
@@ -192,9 +199,22 @@ def choose_tls_port(config):
 
     sock.close()
 
-    fatal_error('Failed to locate an available port in the range [%d, %d], '
-                'try specifying a different port range in %s'
-                % (lower_bound, upper_bound, CONFIG_FILE))
+    if 'tlsport' in options:
+        fatal_error('Specified port [%s] is unavailable. Try selecting a different port.' % options['tlsport'])
+    else:
+        fatal_error('Failed to locate an available port in the range [%d, %d], try specifying a different port range in %s'
+                    % (lower_bound, upper_bound, CONFIG_FILE))
+
+
+def is_ocsp_enabled(config, options):
+    if 'ocsp' in options and 'noocsp' in options:
+        fatal_error('The "ocsp" and "noocsp" options are mutually exclusive')
+    elif 'ocsp' in options:
+        return True
+    elif 'noocsp' in options:
+        return False
+    else:
+        return config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_validity')
 
 
 def get_mount_specific_filename(fs_id, mountpoint, tls_port):
@@ -250,7 +270,8 @@ def get_version_specific_stunnel_options(config):
     return check_host_supported, ocsp_aia_supported
 
 
-def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level, log_dir=LOG_DIR):
+def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level, ocsp_enabled,
+                              log_dir=LOG_DIR):
     """
     Serializes stunnel configuration to a file. Unfortunately this does not conform to Python's config file format, so we have to
     hand-serialize it.
@@ -282,7 +303,8 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
         else:
             fatal_error(tls_controls_message % 'stunnel_check_cert_hostname')
 
-    if config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_validity'):
+    # Only use the config setting if the override is not set
+    if ocsp_enabled:
         if ocsp_aia_supported:
             efs_config['OCSPaia'] = 'yes'
         else:
@@ -411,12 +433,17 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
     if not os.path.exists(state_file_dir):
         create_state_file_dir(config, state_file_dir)
 
-    tls_port = choose_tls_port(config)
-    options['tlsport'] = tls_port
-    verify_level = int(options.get('verify', DEFAULT_STUNNEL_VERIFY_LEVEL))
-    options['verify'] = verify_level
+    tls_port = choose_tls_port(config, options)
 
-    stunnel_config_file = write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level)
+    # override the tlsport option so that we can later override the port the NFS client uses to connect to stunnel.
+    # if the user has specified tlsport=X at the command line this will just re-set tlsport to X.
+    options['tlsport'] = tls_port
+
+    verify_level = int(options.get('verify', DEFAULT_STUNNEL_VERIFY_LEVEL))
+    ocsp_enabled = is_ocsp_enabled(config, options)
+
+    stunnel_config_file = write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level,
+                                                    ocsp_enabled)
 
     tunnel_args = ['stunnel', stunnel_config_file]
 

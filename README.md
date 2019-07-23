@@ -112,7 +112,7 @@ For more information on mounting with the mount helper, see the [documentation](
 
 ## Upgrading stunnel for RHEL/CentOS
 
-By default, when using the EFS mount helper with TLS, it enforces use of the Online Certificate Status Protocol (OCSP) and certificate hostname checking. The EFS mount helper uses the `stunnel` program for its TLS functionality. Please note that some versions of Linux do not include a version of `stunnel` that supports these TLS features by default. When using such a Linux version, mounting an EFS file system using TLS will fail.
+By default, when using the EFS mount helper with TLS, it enforces certificate hostname checking. The EFS mount helper uses the `stunnel` program for its TLS functionality. Please note that some versions of Linux do not include a version of `stunnel` that supports TLS features by default. When using such a Linux version, mounting an EFS file system using TLS will fail.
 
 Once you’ve installed the `amazon-efs-utils` package, to upgrade your system’s version of `stunnel`, see [Upgrading Stunnel](https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html#upgrading-stunnel).
 
