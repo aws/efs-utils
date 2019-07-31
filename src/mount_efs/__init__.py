@@ -54,7 +54,7 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.11'
+VERSION = '1.12'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount'
@@ -102,6 +102,7 @@ STUNNEL_EFS_CONFIG = {
     'renegotiation': 'no',
     'TIMEOUTbusy': '20',
     'TIMEOUTclose': '0',
+    'TIMEOUTidle': '70',
     'delay': 'yes',
 }
 
