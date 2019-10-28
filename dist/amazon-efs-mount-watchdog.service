@@ -8,6 +8,7 @@
 
 [Unit]
 Description=amazon-efs-mount-watchdog
+Before=remote-fs-pre.target
 
 [Service]
 Type=simple
