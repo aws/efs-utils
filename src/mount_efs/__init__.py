@@ -30,6 +30,7 @@
 #
 # The script will add recommended mount options, if not provided in fstab.
 
+import errno
 import json
 import logging
 import os
@@ -439,7 +440,11 @@ def create_state_file_dir(config, state_file_dir):
     except ConfigParser.NoOptionError:
         pass
 
-    os.makedirs(state_file_dir, mode)
+    try:
+        os.makedirs(state_file_dir, mode)
+    except OSError as e:
+        if errno.EEXIST != e.errno or not os.path.isdir(state_file_dir):
+            raise
 
 
 @contextmanager
