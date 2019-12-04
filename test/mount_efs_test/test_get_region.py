@@ -11,7 +11,10 @@ import json
 
 import pytest
 
-from urllib2 import URLError
+try:
+    from urllib2 import URLError
+except ImportError:
+    from urllib.error import URLError
 
 INSTANCE_DATA = {
   'devpayProductCodes': None,

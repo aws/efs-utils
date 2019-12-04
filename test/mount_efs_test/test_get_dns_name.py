@@ -63,7 +63,7 @@ def test_get_dns_name_bad_format_wrong_specifiers(mocker):
     with pytest.raises(ValueError) as ex:
         mount_efs.get_dns_name(config, FS_ID)
 
-    assert 'must include' in ex.value.message
+    assert 'must include' in str(ex)
 
 
 def test_get_dns_name_bad_format_too_many_specifiers_1(mocker):
@@ -72,7 +72,7 @@ def test_get_dns_name_bad_format_too_many_specifiers_1(mocker):
     with pytest.raises(ValueError) as ex:
         mount_efs.get_dns_name(config, FS_ID)
 
-    assert 'incorrect number' in ex.value.message
+    assert 'incorrect number' in str(ex)
 
 
 def test_get_dns_name_bad_format_too_many_specifiers_2(mocker):
@@ -81,7 +81,7 @@ def test_get_dns_name_bad_format_too_many_specifiers_2(mocker):
     with pytest.raises(ValueError) as ex:
         mount_efs.get_dns_name(config, FS_ID)
 
-    assert 'incorrect number' in ex.value.message
+    assert 'incorrect number' in str(ex)
 
 
 def test_get_dns_name_unresolvable(mocker, capsys):

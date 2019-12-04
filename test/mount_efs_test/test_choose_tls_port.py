@@ -7,19 +7,26 @@
 #
 
 import mount_efs
-import ConfigParser
 import socket
 
 import pytest
 
 from mock import MagicMock
 
+try:
+    import ConfigParser
+except ImportError:
+    from configparser import ConfigParser
+
 DEFAULT_TLS_PORT_RANGE_LOW = 20049
 DEFAULT_TLS_PORT_RANGE_HIGH = 20449
 
 
 def _get_config():
-    config = ConfigParser.SafeConfigParser()
+    try:
+        config = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        config = ConfigParser()
     config.add_section(mount_efs.CONFIG_SECTION)
     config.set(mount_efs.CONFIG_SECTION, 'port_range_lower_bound', str(DEFAULT_TLS_PORT_RANGE_LOW))
     config.set(mount_efs.CONFIG_SECTION, 'port_range_upper_bound', str(DEFAULT_TLS_PORT_RANGE_HIGH))
