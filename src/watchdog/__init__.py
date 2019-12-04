@@ -280,7 +280,10 @@ def assert_root():
 
 
 def read_config(config_file=CONFIG_FILE):
-    p = ConfigParser.SafeConfigParser()
+    try:
+        p = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        p = ConfigParser()
     p.read(config_file)
     return p
 
