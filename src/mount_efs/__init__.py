@@ -45,11 +45,6 @@ from contextlib import contextmanager
 from logging.handlers import RotatingFileHandler
 
 try:
-    from ConfigParser import NoOptionError
-except Exception:
-    from configparser import NoOptionError
-
-try:
     import ConfigParser
 except ImportError:
     from configparser import ConfigParser
@@ -79,11 +74,11 @@ DEFAULT_STUNNEL_VERIFY_LEVEL = 2
 DEFAULT_STUNNEL_CAFILE = '/etc/amazon/efs/efs-utils.crt'
 
 EFS_ONLY_OPTIONS = [
-    'noocsp',
-    'ocsp',
     'tls',
     'tlsport',
-    'verify'
+    'verify',
+    'ocsp',
+    'noocsp'
 ]
 
 UNSUPPORTED_OPTIONS = [
@@ -442,7 +437,7 @@ def create_state_file_dir(config, state_file_dir):
             mode = int(mode_str, 8)
         except ValueError:
             logging.warn('Bad state_file_dir_mode "%s" in config file "%s"', mode_str, CONFIG_FILE)
-    except NoOptionError:
+    except ConfigParser.NoOptionError:
         pass
 
     try:
@@ -590,10 +585,7 @@ def assert_root():
 
 
 def read_config(config_file=CONFIG_FILE):
-    try:
-        p = ConfigParser.SafeConfigParser()
-    except AttributeError:
-        p = ConfigParser()
+    p = ConfigParser.SafeConfigParser()
     p.read(config_file)
     return p
 
@@ -673,7 +665,7 @@ def match_device(config, device):
 
     try:
         primary, secondaries, _ = socket.gethostbyname_ex(remote)
-        hostnames = list(filter(lambda e: e is not None, [primary] + secondaries))
+        hostnames = filter(lambda e: e is not None, [primary] + secondaries)
     except socket.gaierror:
         fatal_error(
             'Failed to resolve "%s" - check that the specified DNS name is a CNAME record resolving to a valid EFS DNS '
@@ -706,7 +698,6 @@ def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
     with bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options) as tunnel_proc:
         mount_completed = threading.Event()
         t = threading.Thread(target=poll_tunnel_process, args=(tunnel_proc, fs_id, mount_completed))
-        t.daemon = True
         t.start()
         mount_nfs(dns_name, path, mountpoint, options)
         mount_completed.set()

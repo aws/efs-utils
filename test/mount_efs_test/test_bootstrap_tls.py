@@ -30,7 +30,7 @@ def setup_mocks(mocker):
     mocker.patch('mount_efs.start_watchdog')
     mocker.patch('mount_efs.get_tls_port_range', return_value=(DEFAULT_TLS_PORT, DEFAULT_TLS_PORT + 10))
     mocker.patch('socket.socket', return_value=MagicMock())
-    mocker.patch('mount_efs.write_tls_tunnel_state_file', return_value="~mocktempfile")
+    mocker.patch('mount_efs.write_tls_tunnel_state_file')
     mocker.patch('os.rename')
     mocker.patch('os.kill')
 

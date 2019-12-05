@@ -7,19 +7,13 @@
 #
 
 import mount_efs
+import ConfigParser
 
 import pytest
 
-try:
-    import ConfigParser
-except ImportError:
-    from configparser import ConfigParser
 
 def _get_config(stunnel_check_cert_validity):
-    try:
-        config = ConfigParser.SafeConfigParser()
-    except AttributeError:
-        config = ConfigParser()
+    config = ConfigParser.SafeConfigParser()
     config.add_section(mount_efs.CONFIG_SECTION)
     if stunnel_check_cert_validity is not None:
         config.set(mount_efs.CONFIG_SECTION, 'stunnel_check_cert_validity', str(stunnel_check_cert_validity))

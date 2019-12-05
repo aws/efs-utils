@@ -7,14 +7,10 @@
 #
 
 import mount_efs
+import ConfigParser
 import os
 
 import pytest
-
-try:
-    import ConfigParser
-except ImportError:
-    from configparser import ConfigParser
 
 FS_ID = 'fs-deadbeef'
 DNS_NAME = 'fs-deadbeef.com'
@@ -37,10 +33,7 @@ def _get_config(mocker, stunnel_debug_enabled=False, stunnel_check_cert_hostname
     if stunnel_check_cert_validity is None:
         stunnel_check_cert_validity = stunnel_check_cert_validity_supported
 
-    try:
-        config = ConfigParser.SafeConfigParser()
-    except AttributeError:
-        config = ConfigParser()
+    config = ConfigParser.SafeConfigParser()
     config.add_section(mount_efs.CONFIG_SECTION)
     config.set(mount_efs.CONFIG_SECTION, 'stunnel_debug_enabled', str(stunnel_debug_enabled))
     config.set(mount_efs.CONFIG_SECTION, 'stunnel_check_cert_hostname', str(stunnel_check_cert_hostname))
