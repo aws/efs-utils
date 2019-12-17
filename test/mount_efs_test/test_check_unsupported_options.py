@@ -7,14 +7,6 @@
 #
 
 import mount_efs
-import tempfile
-
-
-def create_temp_file(tmpdir, content=''):
-    temp_file = tmpdir.join(tempfile.mktemp())
-    temp_file.write(content, ensure=True)
-    return temp_file
-
 
 def test_no_unsupported_options(capsys):
     options = {}

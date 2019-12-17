@@ -25,7 +25,7 @@ try:
 except ImportError:
     from configparser import ConfigParser
 
-VERSION = '1.13'
+VERSION = '1.17'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount-watchdog'
@@ -248,7 +248,7 @@ def check_efs_mounts(child_procs, unmount_grace_period_sec, state_file_dir=STATE
             if is_running:
                 logging.debug('TLS tunnel for %s is running', state_file)
             else:
-                logging.warn('TLS tunnel for %s is not running', state_file)
+                logging.warning('TLS tunnel for %s is not running', state_file)
                 restart_tls_tunnel(child_procs, state, state_file_dir, state_file)
 
 
@@ -256,7 +256,7 @@ def check_child_procs(child_procs):
     for proc in child_procs:
         proc.poll()
         if proc.returncode is not None:
-            logging.warn('Child TLS tunnel process %d has exited, returncode=%d', proc.pid, proc.returncode)
+            logging.warning('Child TLS tunnel process %d has exited, returncode=%d', proc.pid, proc.returncode)
             child_procs.remove(proc)
 
 
@@ -280,7 +280,10 @@ def assert_root():
 
 
 def read_config(config_file=CONFIG_FILE):
-    p = ConfigParser.SafeConfigParser()
+    try:
+        p = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        p = ConfigParser()
     p.read(config_file)
     return p
 

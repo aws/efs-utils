@@ -12,6 +12,7 @@ import pytest
 
 from contextlib import contextmanager
 
+from mock import patch
 
 @contextmanager
 def dummy_contextmanager(*args, **kwargs):
@@ -48,11 +49,13 @@ def _test_main(mocker, tls=False, root=True):
         bootstrap_tls_mock.assert_not_called()
 
 
-def test_main_tls(mocker):
+@patch('mount_efs.check_network_target')
+def test_main_tls(check_network, mocker):
     _test_main(mocker, tls=True)
 
 
-def test_main_no_tls(mocker):
+@patch('mount_efs.check_network_target')
+def test_main_no_tls(check_network, mocker):
     _test_main(mocker, tls=False)
 
 

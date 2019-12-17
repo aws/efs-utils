@@ -45,6 +45,11 @@ from contextlib import contextmanager
 from logging.handlers import RotatingFileHandler
 
 try:
+    from ConfigParser import NoOptionError
+except Exception:
+    from configparser import NoOptionError
+
+try:
     import ConfigParser
 except ImportError:
     from configparser import ConfigParser
@@ -55,7 +60,7 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.13'
+VERSION = '1.17'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount'
@@ -66,7 +71,7 @@ LOG_FILE = 'mount.log'
 STATE_FILE_DIR = '/var/run/efs'
 
 FS_ID_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)$')
-EFS_FQDN_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)\.efs\.(?P<region>[a-z0-9-]+)\.amazonaws.com$')
+EFS_FQDN_RE = re.compile(r'^(?P<fs_id>fs-[0-9a-f]+)\.efs\.(?P<region>[a-z0-9-]+)\.amazonaws.com$')
 
 INSTANCE_METADATA_SERVICE_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document/'
 
@@ -255,7 +260,7 @@ def is_stunnel_option_supported(stunnel_output, stunnel_option_name):
             break
 
     if not supported:
-        logging.warn('stunnel does not support "%s"', stunnel_option_name)
+        logging.warning('stunnel does not support "%s"', stunnel_option_name)
 
     return supported
 
@@ -391,17 +396,21 @@ def get_init_system(comm_file='/proc/1/comm'):
     return init_system
 
 
-def check_network_status(fs_id, init_system):
-    if init_system != 'systemd':
-        logging.debug('Not testing network on non-systemd init systems')
-        return
-
+def check_network_target(fs_id):
     with open(os.devnull, 'w') as devnull:
         rc = subprocess.call(['systemctl', 'status', 'network.target'], stdout=devnull, stderr=devnull, close_fds=True)
 
     if rc != 0:
         fatal_error('Failed to mount %s because the network was not yet available, add "_netdev" to your mount options' % fs_id,
                     exit_code=0)
+
+
+def check_network_status(fs_id, init_system):
+    if init_system != 'systemd':
+        logging.debug('Not testing network on non-systemd init systems')
+        return
+
+    check_network_target(fs_id)
 
 
 def start_watchdog(init_system):
@@ -436,8 +445,8 @@ def create_state_file_dir(config, state_file_dir):
         try:
             mode = int(mode_str, 8)
         except ValueError:
-            logging.warn('Bad state_file_dir_mode "%s" in config file "%s"', mode_str, CONFIG_FILE)
-    except ConfigParser.NoOptionError:
+            logging.warning('Bad state_file_dir_mode "%s" in config file "%s"', mode_str, CONFIG_FILE)
+    except NoOptionError:
         pass
 
     try:
@@ -585,7 +594,10 @@ def assert_root():
 
 
 def read_config(config_file=CONFIG_FILE):
-    p = ConfigParser.SafeConfigParser()
+    try:
+        p = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        p = ConfigParser()
     p.read(config_file)
     return p
 
@@ -665,7 +677,7 @@ def match_device(config, device):
 
     try:
         primary, secondaries, _ = socket.gethostbyname_ex(remote)
-        hostnames = filter(lambda e: e is not None, [primary] + secondaries)
+        hostnames = list(filter(lambda e: e is not None, [primary] + secondaries))
     except socket.gaierror:
         fatal_error(
             'Failed to resolve "%s" - check that the specified DNS name is a CNAME record resolving to a valid EFS DNS '
@@ -710,7 +722,7 @@ def check_unsupported_options(options):
             warn_message = 'The "%s" option is not supported and has been ignored, as amazon-efs-utils relies on a built-in ' \
                            'trust store.' % unsupported_option
             sys.stderr.write('WARN: %s\n' % warn_message)
-            logging.warn(warn_message)
+            logging.warning(warn_message)
             del options[unsupported_option]
 
 
