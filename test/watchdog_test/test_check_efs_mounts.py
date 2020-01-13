@@ -6,16 +6,39 @@
 # the License.
 #
 
+import mount_efs
 import watchdog
 import json
 import tempfile
+
+from datetime import datetime
+try:
+    import ConfigParser
+except ImportError:
+    from configparser import ConfigParser
 
 TIME = 1514764800
 GRACE_PERIOD = 30
 PID = 1234
 STATE = {
     'pid': PID,
+    'commonName': 'deadbeef.com',
+    'certificate': '/tmp/foobar',
+    'certificateCreationTime': datetime.utcnow().strftime(watchdog.CERT_DATETIME_FORMAT),
+    'mountStateDir': 'fs-deadbeef.mount.dir.12345',
+    'privateKey': '/tmp/foobarbaz',
+    'accessPoint': 'fsap-fedcba9876543210'
 }
+
+
+def _get_config():
+    try:
+        config = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        config = ConfigParser()
+    config.add_section(mount_efs.CONFIG_SECTION)
+    config.set(mount_efs.CONFIG_SECTION, 'state_file_dir_mode', '750')
+    return config
 
 
 def setup_mocks(mocker, mounts, state_files, is_pid_running=True):
@@ -30,8 +53,9 @@ def setup_mocks(mocker, mounts, state_files, is_pid_running=True):
 
     clean_up_mock = mocker.patch('watchdog.clean_up_mount_state')
     restart_tls_mock = mocker.patch('watchdog.restart_tls_tunnel')
+    check_certificate_call = mocker.patch('watchdog.check_certificate')
 
-    return clean_up_mock, restart_tls_mock
+    return clean_up_mock, restart_tls_mock, check_certificate_call
 
 
 def create_state_file(tmpdir, content=json.dumps(STATE)):
@@ -42,11 +66,11 @@ def create_state_file(tmpdir, content=json.dumps(STATE)):
 
 
 def test_no_state_files(mocker):
-    clean_up_mock, restart_tls_mock = setup_mocks(mocker,
-                                                  mounts={'mnt': watchdog.Mount('127.0.0.1', '/mnt', 'nfs4', '', '0', '0')},
-                                                  state_files={})
+    clean_up_mock, restart_tls_mock, _ = setup_mocks(mocker,
+                                                     mounts={'mnt': watchdog.Mount('127.0.0.1', '/mnt', 'nfs4', '', '0', '0')},
+                                                     state_files={})
 
-    watchdog.check_efs_mounts([], GRACE_PERIOD)
+    watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD)
 
     clean_up_mock.assert_not_called()
     restart_tls_mock.assert_not_called()
@@ -55,9 +79,9 @@ def test_no_state_files(mocker):
 def test_malformed_state_file(mocker, tmpdir):
     state_file_dir, state_file = create_state_file(tmpdir, 'not-json')
 
-    clean_up_mock, restart_tls_mock = setup_mocks(mocker, mounts={}, state_files={'mnt': state_file})
+    clean_up_mock, restart_tls_mock, _ = setup_mocks(mocker, mounts={}, state_files={'mnt': state_file})
 
-    watchdog.check_efs_mounts([], GRACE_PERIOD, state_file_dir)
+    watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
 
     clean_up_mock.assert_not_called()
     restart_tls_mock.assert_not_called()
@@ -68,9 +92,9 @@ def test_no_mount_for_state_file(mocker, tmpdir):
 
     state_file_dir, state_file = create_state_file(tmpdir, content=json.dumps(state))
 
-    clean_up_mock, restart_tls_mock = setup_mocks(mocker, mounts={}, state_files={'mnt': state_file})
+    clean_up_mock, restart_tls_mock, _ = setup_mocks(mocker, mounts={}, state_files={'mnt': state_file})
 
-    watchdog.check_efs_mounts([], GRACE_PERIOD, state_file_dir)
+    watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
 
     clean_up_mock.assert_not_called()
     restart_tls_mock.assert_not_called()
@@ -82,12 +106,13 @@ def test_no_mount_for_state_file_out_of_grace_period(mocker, tmpdir):
 
     state_file_dir, state_file = create_state_file(tmpdir, content=json.dumps(state))
 
-    clean_up_mock, restart_tls_mock = setup_mocks(mocker, mounts={}, state_files={'mnt': state_file})
+    clean_up_mock, restart_tls_mock, check_certificate_call = setup_mocks(mocker, mounts={}, state_files={'mnt': state_file})
 
-    watchdog.check_efs_mounts([], GRACE_PERIOD, state_file_dir)
+    watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
 
     clean_up_mock.assert_called_once()
     restart_tls_mock.assert_not_called()
+    check_certificate_call.assert_not_called()
 
 
 def test_no_mount_for_state_file_in_grace_period(mocker, tmpdir):
@@ -96,9 +121,9 @@ def test_no_mount_for_state_file_in_grace_period(mocker, tmpdir):
 
     state_file_dir, state_file = create_state_file(tmpdir, content=json.dumps(state))
 
-    clean_up_mock, restart_tls_mock = setup_mocks(mocker, mounts={}, state_files={'mnt': state_file})
+    clean_up_mock, restart_tls_mock, _ = setup_mocks(mocker, mounts={}, state_files={'mnt': state_file})
 
-    watchdog.check_efs_mounts([], GRACE_PERIOD, state_file_dir)
+    watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
 
     clean_up_mock.assert_not_called()
     restart_tls_mock.assert_not_called()
@@ -107,27 +132,27 @@ def test_no_mount_for_state_file_in_grace_period(mocker, tmpdir):
 def test_tls_not_running(mocker, tmpdir):
     state_file_dir, state_file = create_state_file(tmpdir)
 
-    clean_up_mock, restart_tls_mock = setup_mocks(mocker,
-                                                  mounts={'mnt': watchdog.Mount('127.0.0.1', '/mnt', 'nfs4', '', '0', '0')},
-                                                  state_files={'mnt': state_file}, is_pid_running=False)
+    clean_up_mock, restart_tls_mock, _ = setup_mocks(mocker,
+                                                     mounts={'mnt': watchdog.Mount('127.0.0.1', '/mnt', 'nfs4', '', '0', '0')},
+                                                     state_files={'mnt': state_file}, is_pid_running=False)
 
-    watchdog.check_efs_mounts([], GRACE_PERIOD, state_file_dir)
+    watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
 
     clean_up_mock.assert_not_called()
     restart_tls_mock.assert_called_once()
 
 
-def test_extra_mount(mocker, tmpdir):
+def test_ap_mount_with_extra_mount(mocker, tmpdir):
     state_file_dir, state_file = create_state_file(tmpdir)
 
-    clean_up_mock, restart_tls_mock = setup_mocks(mocker,
-                                                  mounts={
-                                                      'mnt': watchdog.Mount('127.0.0.1', '/mnt', 'nfs4', '', '0', '0'),
-                                                      'mnt2': watchdog.Mount('192.168.1.1', '/mnt2', 'nfs4', '', '0', '0'),
-                                                  },
-                                                  state_files={'mnt': state_file})
+    clean_up_mock, restart_tls_mock, check_certificate_call = setup_mocks(
+        mocker, mounts={'mnt': watchdog.Mount('127.0.0.1', '/mnt', 'nfs4', '', '0', '0'),
+                        'mnt2': watchdog.Mount('192.168.1.1', '/mnt2', 'nfs4', '', '0', '0'),
+                        },
+        state_files={'mnt': state_file})
 
-    watchdog.check_efs_mounts([], GRACE_PERIOD, state_file_dir)
+    watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
 
     clean_up_mock.assert_not_called()
     restart_tls_mock.assert_not_called()
+    check_certificate_call.assert_called_once()

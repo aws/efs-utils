@@ -13,7 +13,7 @@ import tempfile
 PID = 1234
 
 
-def test_restart_tls_tunnel(mocker, tmpdir):
+def test_restart_tls_tunnel_without_certificate_path(mocker, tmpdir):
     mocker.patch('watchdog.start_tls_tunnel', return_value=PID)
 
     state = {
@@ -32,3 +32,20 @@ def test_restart_tls_tunnel(mocker, tmpdir):
         new_state = json.load(f)
 
     assert PID == new_state['pid']
+
+
+def test_restart_tls_tunnel_with_certificate_path(mocker, tmpdir):
+    start_tls_tunnel_call = mocker.patch('watchdog.start_tls_tunnel', return_value=PID)
+
+    state = {
+        'pid': 9999,
+        'cmd': '',
+        'certificate': 'foo/bar/certificate.pem'
+    }
+
+    state_file = tmpdir.join(tempfile.mktemp())
+    state_file.write(json.dumps(state), ensure=True)
+
+    watchdog.restart_tls_tunnel([], state, state_file.dirname, state_file.basename)
+
+    start_tls_tunnel_call.assert_not_called()

@@ -8,8 +8,6 @@
 
 import mount_efs
 
-import pytest
-
 try:
     import ConfigParser
 except ImportError:
@@ -73,14 +71,3 @@ def test_is_ocsp_enabled_config_true_cli_false():
     ocsp_enabled = mount_efs.is_ocsp_enabled(_get_config(True), options)
 
     assert ocsp_enabled is False
-
-
-def test_is_ocsp_enabled_cli_both_options(capsys):
-    options = {'noocsp': None, 'ocsp': None}
-
-    with pytest.raises(SystemExit) as ex:
-        mount_efs.is_ocsp_enabled(_get_config(True), options)
-
-    assert 0 != ex.value.code
-    out, err = capsys.readouterr()
-    assert 'The "ocsp" and "noocsp" options are mutually exclusive' in err

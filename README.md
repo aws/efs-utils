@@ -87,27 +87,39 @@ To mount with the recommended default options, simply run:
 $ sudo mount -t efs file-system-id efs-mount-point/
 ```
 
-To mount automatically with recommended options, add an `/etc/fstab` entry like:
-
-```
-file-system-id efs-mount-point efs _netdev 0 0
-```
-
 To mount over TLS, simply add the `tls` option:
 
 ```
 $ sudo mount -t efs -o tls file-system-id efs-mount-point/
 ```
 
-To mount over TLS automatically, add an `/etc/fstab` entry like:
+To authenticate with EFS using the system’s IAM identity, add the `iam` option. This option requires the `tls` option.
 
 ```
-file-system-id efs-mount-point efs _netdev,tls 0 0
+$ sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
 ```
 
-For more information on mounting with the mount helper, see the [documentation](https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html).
+To mount using an access point, use the `accesspoint=` option. This option requires the `tls` option.
 
-#### amazon-efs-mount-watchdog
+```
+$ sudo mount -t efs -o tls,accesspoint=access-point-id file-system-id efs-mount-point/
+```
+
+To mount your file system automatically with any of the options above, you can add entries to `/efs/fstab` like:
+
+```
+file-system-id efs-mount-point efs _netdev,tls,iam,accesspoint=access-point-id 0 0
+```
+
+For more information on mounting with the mount helper, see the manual page:
+
+```
+man mount.efs
+```
+
+or refer to the [documentation](https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html).
+
+### amazon-efs-mount-watchdog
 
 `efs-utils` contains a watchdog process to monitor the health of TLS mounts. This process is managed by either `upstart` or `systemd` depending on your Linux distribution, and is started automatically the first time an EFS file system is mounted over TLS.
 

@@ -9,7 +9,6 @@
 import errno
 import mount_efs
 import os
-import tempfile
 
 import pytest
 
@@ -35,7 +34,7 @@ def _get_config(mode=None):
 def test_create_state_file_dir(tmpdir):
     state_file_dir = str(tmpdir.join('efs'))
 
-    mount_efs.create_state_file_dir(_get_config(), state_file_dir)
+    mount_efs.create_required_directory(_get_config(), state_file_dir)
 
     assert os.path.isdir(state_file_dir)
     assert '0750' == oct(os.stat(state_file_dir).st_mode)[-4:]
@@ -45,7 +44,7 @@ def test_create_state_file_dir_exists(tmpdir):
     state_file_dir = str(tmpdir.join('efs'))
     os.makedirs(state_file_dir)
 
-    mount_efs.create_state_file_dir(_get_config(), state_file_dir)
+    mount_efs.create_required_directory(_get_config(), state_file_dir)
 
     assert os.path.isdir(state_file_dir)
 
@@ -55,7 +54,7 @@ def test_create_state_file_dir_exists_as_file(tmpdir):
     state_file.write('', ensure=True)
 
     with pytest.raises(OSError) as ex:
-        mount_efs.create_state_file_dir(_get_config(), str(state_file))
+        mount_efs.create_required_directory(_get_config(), str(state_file))
 
     assert errno.EEXIST == ex.value.errno
 
@@ -63,7 +62,7 @@ def test_create_state_file_dir_exists_as_file(tmpdir):
 def test_create_state_file_dir_overridden_mode(tmpdir):
     state_file_dir = str(tmpdir.join('efs'))
 
-    mount_efs.create_state_file_dir(_get_config(mode=str(755)), state_file_dir)
+    mount_efs.create_required_directory(_get_config(mode=str(755)), state_file_dir)
 
     assert os.path.isdir(state_file_dir)
     assert '0755' == oct(os.stat(state_file_dir).st_mode)[-4:]
@@ -72,7 +71,7 @@ def test_create_state_file_dir_overridden_mode(tmpdir):
 def test_create_state_file_dir_overridden_bad_mode(tmpdir):
     state_file_dir = str(tmpdir.join('efs'))
 
-    mount_efs.create_state_file_dir(_get_config(mode='invalid-mode'), state_file_dir)
+    mount_efs.create_required_directory(_get_config(mode='invalid-mode'), state_file_dir)
 
     assert os.path.isdir(state_file_dir)
     assert '0750' == oct(os.stat(state_file_dir).st_mode)[-4:]

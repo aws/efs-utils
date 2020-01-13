@@ -30,29 +30,37 @@
 #
 # The script will add recommended mount options, if not provided in fstab.
 
+import base64
 import errno
+import hashlib
+import hmac
+import itertools
 import json
 import logging
 import os
+import pwd
 import random
 import re
 import socket
 import subprocess
 import sys
 import threading
+import time
 
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
 try:
-    from ConfigParser import NoOptionError
-except Exception:
-    from configparser import NoOptionError
+    import ConfigParser
+    from ConfigParser import NoOptionError, NoSectionError
+except ImportError:
+    from configparser import ConfigParser, NoOptionError, NoSectionError
 
 try:
-    import ConfigParser
+    from urllib.parse import quote_plus
 except ImportError:
-    from configparser import ConfigParser
+    from urllib import quote_plus
 
 try:
     from urllib2 import urlopen, URLError
@@ -60,7 +68,8 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.17'
+VERSION = '1.18'
+SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount'
@@ -70,25 +79,85 @@ LOG_FILE = 'mount.log'
 
 STATE_FILE_DIR = '/var/run/efs'
 
+PRIVATE_KEY_FILE = '/etc/amazon/efs/privateKey.pem'
+DATE_ONLY_FORMAT = '%Y%m%d'
+SIGV4_DATETIME_FORMAT = '%Y%m%dT%H%M%SZ'
+CERT_DATETIME_FORMAT = '%y%m%d%H%M%SZ'
+
+CA_CONFIG_BODY = """dir = %s
+RANDFILE = $dir/database/.rand
+
+[ ca ]
+default_ca = local_ca
+
+[ local_ca ]
+database = $dir/database/index.txt
+serial = $dir/database/serial
+private_key = %s
+cert = $dir/certificate.pem
+new_certs_dir = $dir/certs
+default_md = sha256
+preserve = no
+policy = efsPolicy
+x509_extensions = v3_ca
+
+[ efsPolicy ]
+CN = supplied
+
+[ req ]
+prompt = no
+distinguished_name = req_distinguished_name
+
+[ req_distinguished_name ]
+CN = %s
+
+%s
+
+%s
+"""
+
+# SigV4 Auth
+ALGORITHM = 'AWS4-HMAC-SHA256'
+AWS4_REQUEST = 'aws4_request'
+
+HTTP_REQUEST_METHOD = 'GET'
+CANONICAL_URI = '/'
+CANONICAL_HEADERS_DICT = {
+    'host': '%s'
+}
+CANONICAL_HEADERS = '\n'.join(['%s:%s' % (k, v) for k, v in sorted(CANONICAL_HEADERS_DICT.items())])
+SIGNED_HEADERS = ';'.join(CANONICAL_HEADERS_DICT.keys())
+REQUEST_PAYLOAD = ''
+
 FS_ID_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)$')
 EFS_FQDN_RE = re.compile(r'^(?P<fs_id>fs-[0-9a-f]+)\.efs\.(?P<region>[a-z0-9-]+)\.amazonaws.com$')
+AP_ID_RE = re.compile('^fsap-[0-9a-f]{17}$')
 
 INSTANCE_METADATA_SERVICE_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document/'
+INSTANCE_IAM_URL = 'http://169.254.169.254/latest/meta-data/iam/security-credentials/'
+SECURITY_CREDS_ECS_URI_HELP_URL = 'https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html'
+SECURITY_CREDS_IAM_ROLE_HELP_URL = 'https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html'
 
 DEFAULT_STUNNEL_VERIFY_LEVEL = 2
 DEFAULT_STUNNEL_CAFILE = '/etc/amazon/efs/efs-utils.crt'
 
+NOT_BEFORE_MINS = 15
+NOT_AFTER_HOURS = 3
+
 EFS_ONLY_OPTIONS = [
+    'iam',
+    'noocsp',
+    'ocsp',
+    'accesspoint',
+    'awsprofile',
+    'cafile',
     'tls',
     'tlsport',
-    'verify',
-    'ocsp',
-    'noocsp'
+    'verify'
 ]
 
 UNSUPPORTED_OPTIONS = [
-    'cafile',
-    'capath',
+    'capath'
 ]
 
 STUNNEL_GLOBAL_CONFIG = {
@@ -156,6 +225,143 @@ def get_region():
         _fatal_error('Region not present in %s: %s' % (instance_identity, e))
 
 
+def get_region_helper(config):
+    dns_name_format = config.get(CONFIG_SECTION, 'dns_name_format')
+    if '{region}' in dns_name_format:
+        return get_region()
+    else:
+        return dns_name_format.split('.')[-3]
+
+
+def get_aws_security_credentials(awsprofile=None):
+    """
+    Lookup AWS security credentials (access key ID and secret access key). Adapted credentials provider chain from:
+    https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html and
+    https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/credentials.html
+    """
+    aws_credentials_file = os.path.expanduser(os.path.join('~' + pwd.getpwuid(os.getuid()).pw_name, '.aws', 'credentials'))
+    aws_config_file = os.path.expanduser(os.path.join('~' + pwd.getpwuid(os.getuid()).pw_name, '.aws', 'config'))
+    # attempt to lookup AWS access key ID and secret access key in AWS credentials file (~/.aws/credentials)
+    if os.path.exists(aws_credentials_file):
+        credentials = credentials_file_helper(aws_credentials_file, awsprofile=awsprofile)
+        if credentials['AccessKeyId']:
+            return credentials
+
+    # in AWS configs file (~/.aws/config)
+    if os.path.exists(aws_config_file):
+        credentials = credentials_file_helper(aws_config_file, awsprofile=awsprofile)
+        if credentials['AccessKeyId']:
+            return credentials
+
+    keys = ['AccessKeyId', 'SecretAccessKey', 'Token']
+
+    # through ECS security credentials uri found in AWS_CONTAINER_CREDENTIALS_RELATIVE_URI environment variable
+    ecs_uri_env = 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'
+    if ecs_uri_env in os.environ:
+        ecs_uri = '169.254.170.2' + os.environ[ecs_uri_env]
+        ecs_unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % ecs_uri
+        ecs_url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.', ecs_uri, \
+                            SECURITY_CREDS_ECS_URI_HELP_URL
+        ecs_security_dict = url_request_helper(ecs_uri, ecs_unsuccessful_resp, ecs_url_error_msg)
+
+        if ecs_security_dict and all(k in ecs_security_dict for k in keys):
+            return ecs_security_dict
+
+    # through IAM role name security credentials lookup uri (after lookup for IAM role name attached to instance)
+    iam_role_unsuccessful_resp = 'Unsuccessful retrieval of IAM role name at %s.' % INSTANCE_IAM_URL
+    iam_role_url_error_msg = 'Unable to reach %s to retrieve IAM role name. See %s for more info.', INSTANCE_IAM_URL, \
+                             SECURITY_CREDS_IAM_ROLE_HELP_URL
+    iam_role_name = url_request_helper(INSTANCE_IAM_URL, iam_role_unsuccessful_resp, iam_role_url_error_msg)
+    if iam_role_name:
+        security_creds_lookup_url = INSTANCE_IAM_URL + str(iam_role_name)
+        unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % security_creds_lookup_url
+        url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.',\
+                        security_creds_lookup_url, SECURITY_CREDS_IAM_ROLE_HELP_URL
+        iam_security_dict = url_request_helper(security_creds_lookup_url, unsuccessful_resp, url_error_msg)
+
+        if iam_security_dict and all(k in iam_security_dict for k in keys):
+            return iam_security_dict
+
+    error_msg = 'AWS Access Key ID and Secret Access Key are not found in AWS credentials file (%s), config file (%s), ' \
+                'from ECS credentials relative uri, or from the instance security credentials service' % \
+                (aws_credentials_file, aws_config_file)
+    fatal_error(error_msg, error_msg)
+
+
+def credentials_file_helper(file_path, awsprofile=None):
+    aws_credentials_configs = read_config(file_path)
+    credentials = {'AccessKeyId': None, 'SecretAccessKey': None, 'Token': None}
+    profile = awsprofile or get_correct_default_case_combination(aws_credentials_configs)
+
+    try:
+        access_key = aws_credentials_configs.get(profile, 'aws_access_key_id')
+        secret_key = aws_credentials_configs.get(profile, 'aws_secret_access_key')
+        session_token = aws_credentials_configs.get(profile, 'aws_session_token')
+
+        credentials['AccessKeyId'] = access_key
+        credentials['SecretAccessKey'] = secret_key
+        credentials['Token'] = session_token
+    except NoOptionError as e:
+        if 'aws_access_key_id' in str(e) or 'aws_secret_access_key' in str(e):
+            log_message = 'aws_access_key_id or aws_secret_access_key not found in %s under named profile [%s]' % \
+                          (file_path, profile)
+            if awsprofile:
+                fatal_error(log_message)
+            else:
+                logging.debug(log_message)
+
+            return credentials
+        if 'aws_session_token' in str(e):
+            logging.debug('aws_session_token not found in %s', file_path)
+            credentials['AccessKeyId'] = aws_credentials_configs.get(profile, 'aws_access_key_id')
+            credentials['SecretAccessKey'] = aws_credentials_configs.get(profile, 'aws_secret_access_key')
+    except NoSectionError:
+        log_message = 'No [%s] section found in config file %s' % (profile, file_path)
+        if awsprofile:
+            fatal_error(log_message)
+        else:
+            logging.debug(log_message)
+
+    return credentials
+
+
+def get_correct_default_case_combination(aws_credentials_configs):
+    default_str = 'default'
+    for perm in map(''.join, itertools.product(*zip(default_str.upper(), default_str.lower()))):
+        try:
+            access_key = aws_credentials_configs.get(perm, 'aws_access_key_id')
+            if access_key is not None:
+                return perm
+        except (NoSectionError, NoOptionError):
+            continue
+
+    return default_str
+
+
+def url_request_helper(url, unsuccessful_resp, url_error_msg):
+    try:
+        request_resp = urlopen(url, timeout=1)
+
+        if request_resp.getcode() != 200:
+            logging.debug(unsuccessful_resp + ' %s: ResponseCode=%d', url, request_resp.getcode())
+            return None
+
+        resp_body = request_resp.read()
+        try:
+            if type(resp_body) is str:
+                resp_dict = json.loads(resp_body)
+            else:
+                resp_dict = json.loads(resp_body.decode(request_resp.headers.get_content_charset() or 'us-ascii'))
+
+            return resp_dict
+        except ValueError as e:
+            logging.debug('Error parsing json: %s, returning raw response body: %s' % (e, str(resp_body)))
+            return resp_body
+    except URLError as e:
+        logging.debug('%s %s', url_error_msg, e)
+        return None
+
+
 def parse_options(options):
     opts = {}
     for o in options.split(','):
@@ -181,10 +387,7 @@ def get_tls_port_range(config):
 
 def choose_tls_port(config, options):
     if 'tlsport' in options:
-        try:
-            ports_to_try = [int(options['tlsport'])]
-        except ValueError:
-            fatal_error('tlsport option [%s] is not an integer' % options['tlsport'])
+        ports_to_try = [int(options['tlsport'])]
     else:
         lower_bound, upper_bound = get_tls_port_range(config)
 
@@ -215,9 +418,7 @@ def choose_tls_port(config, options):
 
 
 def is_ocsp_enabled(config, options):
-    if 'ocsp' in options and 'noocsp' in options:
-        fatal_error('The "ocsp" and "noocsp" options are mutually exclusive')
-    elif 'ocsp' in options:
+    if 'ocsp' in options:
         return True
     elif 'noocsp' in options:
         return False
@@ -245,10 +446,20 @@ def serialize_stunnel_config(config, header=None):
     return lines
 
 
-def add_stunnel_ca_options(efs_config, stunnel_cafile=DEFAULT_STUNNEL_CAFILE):
+def add_stunnel_ca_options(efs_config, config, options):
+    if 'cafile' in options:
+        stunnel_cafile = options['cafile']
+    else:
+        try:
+            stunnel_cafile = config.get(CONFIG_SECTION, 'stunnel_cafile')
+        except NoOptionError:
+            logging.debug('No CA file configured, using default CA file %s', DEFAULT_STUNNEL_CAFILE)
+            stunnel_cafile = DEFAULT_STUNNEL_CAFILE
+
     if not os.path.exists(stunnel_cafile):
-        fatal_error('Failed to find the EFS certificate authority file for verification',
-                    'Failed to find the EFS CAfile "%s"' % stunnel_cafile)
+        fatal_error('Failed to find certificate authority file for verification',
+                    'Failed to find CAfile "%s"' % stunnel_cafile)
+
     efs_config['CAfile'] = stunnel_cafile
 
 
@@ -290,7 +501,7 @@ def get_system_release_version():
 
 
 def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level, ocsp_enabled,
-                              log_dir=LOG_DIR):
+                              options, log_dir=LOG_DIR, cert_details=None):
     """
     Serializes stunnel configuration to a file. Unfortunately this does not conform to Python's config file format, so we have to
     hand-serialize it.
@@ -308,7 +519,11 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
     efs_config['connect'] = efs_config['connect'] % dns_name
     efs_config['verify'] = verify_level
     if verify_level > 0:
-        add_stunnel_ca_options(efs_config)
+        add_stunnel_ca_options(efs_config, config, options)
+
+    if cert_details:
+        efs_config['cert'] = cert_details['certificate']
+        efs_config['key'] = cert_details['privateKey']
 
     check_host_supported, ocsp_aia_supported = get_version_specific_stunnel_options(config)
 
@@ -343,7 +558,7 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
     return stunnel_config_file
 
 
-def write_tls_tunnel_state_file(fs_id, mountpoint, tls_port, tunnel_pid, command, files, state_file_dir):
+def write_tls_tunnel_state_file(fs_id, mountpoint, tls_port, tunnel_pid, command, files, state_file_dir, cert_details=None):
     """
     Return the name of the temporary file containing TLS tunnel state, prefixed with a '~'. This file needs to be renamed to a
     non-temporary version following a successful mount.
@@ -355,6 +570,9 @@ def write_tls_tunnel_state_file(fs_id, mountpoint, tls_port, tunnel_pid, command
         'cmd': command,
         'files': files,
     }
+
+    if cert_details:
+        state.update(cert_details)
 
     with open(os.path.join(state_file_dir, state_file), 'w') as f:
         json.dump(state, f)
@@ -438,7 +656,7 @@ def start_watchdog(init_system):
         logging.warning(error_message)
 
 
-def create_state_file_dir(config, state_file_dir):
+def create_required_directory(config, directory):
     mode = 0o750
     try:
         mode_str = config.get(CONFIG_SECTION, 'state_file_dir_mode')
@@ -450,31 +668,54 @@ def create_state_file_dir(config, state_file_dir):
         pass
 
     try:
-        os.makedirs(state_file_dir, mode)
+        os.makedirs(directory, mode)
     except OSError as e:
-        if errno.EEXIST != e.errno or not os.path.isdir(state_file_dir):
+        if errno.EEXIST != e.errno or not os.path.isdir(directory):
             raise
 
 
 @contextmanager
-def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, state_file_dir=STATE_FILE_DIR):
-    start_watchdog(init_system)
-
-    if not os.path.exists(state_file_dir):
-        create_state_file_dir(config, state_file_dir)
-
+def bootstrap_tls(config, init_system, dns_name, fs_id, ap_id, mountpoint, options, state_file_dir=STATE_FILE_DIR):
     tls_port = choose_tls_port(config, options)
-
     # override the tlsport option so that we can later override the port the NFS client uses to connect to stunnel.
     # if the user has specified tlsport=X at the command line this will just re-set tlsport to X.
     options['tlsport'] = tls_port
+
+    use_iam = 'iam' in options
+    awsprofile = options.get('awsprofile')
+    cert_details = {}
+
+    if use_iam or ap_id:
+        # additional symbol appended to avoid naming collisions
+        cert_details['mountStateDir'] = get_mount_specific_filename(fs_id, mountpoint, tls_port) + '+'
+        # common name for certificate signing request is max 64 characters
+        cert_details['commonName'] = socket.gethostname()[0:64]
+        cert_details['region'] = get_region_helper(config)
+        cert_details['certificateCreationTime'] = create_certificate(config, cert_details['mountStateDir'],
+                                                                     cert_details['commonName'], cert_details['region'], fs_id,
+                                                                     use_iam, ap_id=ap_id, awsprofile=awsprofile,
+                                                                     base_path=state_file_dir)
+        cert_details['certificate'] = os.path.join(state_file_dir, cert_details['mountStateDir'], 'certificate.pem')
+        cert_details['privateKey'] = get_private_key_path()
+        cert_details['fsId'] = fs_id
+        cert_details['useIam'] = use_iam
+
+    if awsprofile:
+        cert_details['awsprofile'] = awsprofile
+
+    if ap_id:
+        cert_details['accessPoint'] = ap_id
+
+    start_watchdog(init_system)
+
+    if not os.path.exists(state_file_dir):
+        create_required_directory(config, state_file_dir)
 
     verify_level = int(options.get('verify', DEFAULT_STUNNEL_VERIFY_LEVEL))
     ocsp_enabled = is_ocsp_enabled(config, options)
 
     stunnel_config_file = write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level,
-                                                    ocsp_enabled)
-
+                                                    ocsp_enabled, options, cert_details=cert_details)
     tunnel_args = ['stunnel', stunnel_config_file]
 
     # launch the tunnel in a process group so if it has any child processes, they can be killed easily by the mount watchdog
@@ -484,7 +725,7 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
     logging.info('Started TLS tunnel, pid: %d', tunnel_proc.pid)
 
     temp_tls_state_file = write_tls_tunnel_state_file(fs_id, mountpoint, tls_port, tunnel_proc.pid, tunnel_args,
-                                                      [stunnel_config_file], state_file_dir)
+                                                      [stunnel_config_file], state_file_dir, cert_details=cert_details)
 
     try:
         yield tunnel_proc
@@ -510,8 +751,6 @@ def get_nfs_mount_options(options):
         options['noresvport'] = None
 
     if 'tls' in options:
-        if 'port' in options:
-            fatal_error('The "port" and "tls" options are mutually exclusive')
         options['port'] = options['tlsport']
 
     def to_nfs_option(k, v):
@@ -525,6 +764,7 @@ def get_nfs_mount_options(options):
 
 
 def mount_nfs(dns_name, path, mountpoint, options):
+
     if 'tls' in options:
         mount_path = '127.0.0.1:%s' % path
     else:
@@ -587,6 +827,184 @@ def parse_arguments(config, args=None):
     return fs_id, path, mountpoint, options
 
 
+def create_certificate(config, mount_name, common_name, region, fs_id, use_iam, ap_id=None, awsprofile=None,
+                       base_path=STATE_FILE_DIR):
+    current_time = get_utc_now()
+    tls_paths = tls_paths_dictionary(mount_name, base_path)
+
+    certificate_config = os.path.join(tls_paths['mount_dir'], 'config.conf')
+    certificate_signing_request = os.path.join(tls_paths['mount_dir'], 'request.csr')
+    certificate = os.path.join(tls_paths['mount_dir'], 'certificate.pem')
+
+    ca_dirs_check(config, tls_paths['database_dir'], tls_paths['certs_dir'])
+    ca_supporting_files_check(tls_paths['index'], tls_paths['index_attr'], tls_paths['serial'], tls_paths['rand'])
+
+    private_key = check_and_create_private_key(base_path)
+
+    if use_iam:
+        public_key = os.path.join(tls_paths['mount_dir'], 'publicKey.pem')
+        create_public_key(private_key, public_key)
+
+    create_ca_conf(certificate_config, common_name, tls_paths['mount_dir'], private_key, current_time, region, fs_id, use_iam,
+                   ap_id=ap_id, awsprofile=awsprofile)
+    create_certificate_signing_request(certificate_config, private_key, certificate_signing_request)
+
+    not_before = get_certificate_timestamp(current_time, minutes=-NOT_BEFORE_MINS)
+    not_after = get_certificate_timestamp(current_time, hours=NOT_AFTER_HOURS)
+
+    cmd = 'openssl ca -startdate %s -enddate %s -selfsign -batch -notext -config %s -in %s -out %s' % \
+          (not_before, not_after, certificate_config, certificate_signing_request, certificate)
+    subprocess_call(cmd, 'Failed to create self-signed client-side certificate')
+    return current_time.strftime(CERT_DATETIME_FORMAT)
+
+
+def get_private_key_path():
+    """Wrapped for mocking purposes in unit tests"""
+    return PRIVATE_KEY_FILE
+
+
+def check_and_create_private_key(base_path=STATE_FILE_DIR):
+    # Creating RSA private keys is slow, so we will create one private key and allow mounts to share it.
+    # This means, however, that we have to include a locking mechanism to ensure that the private key is
+    # atomically created, as mounts occurring in parallel may try to create the key simultaneously.
+    key = get_private_key_path()
+
+    @contextmanager
+    def open_lock_file():
+        lock_file = os.path.join(base_path, 'efs-utils-lock')
+        f = os.open(lock_file, os.O_CREAT | os.O_DSYNC | os.O_EXCL | os.O_RDWR)
+        try:
+            lock_file_contents = 'PID: %s' % os.getpid()
+            os.write(f, lock_file_contents.encode('utf-8'))
+            yield f
+        finally:
+            os.close(f)
+            os.remove(lock_file)
+
+    def do_with_lock(function):
+        while True:
+            try:
+                with open_lock_file():
+                    return function()
+            except OSError as e:
+                if e.errno == errno.EEXIST:
+                    logging.info('Failed to take out private key creation lock, sleeping 50 ms')
+                    time.sleep(0.05)
+                else:
+                    raise
+
+    def generate_key():
+        if os.path.isfile(key):
+            return
+
+        cmd = 'openssl genpkey -algorithm RSA -out %s -pkeyopt rsa_keygen_bits:3072' % key
+        subprocess_call(cmd, 'Failed to create private key')
+        read_only_mode = 0o400
+        os.chmod(key, read_only_mode)
+
+    do_with_lock(generate_key)
+    return key
+
+
+def create_certificate_signing_request(config_path, private_key, csr_path):
+    cmd = 'openssl req -new -config %s -key %s -out %s' % (config_path, private_key, csr_path)
+    subprocess_call(cmd, 'Failed to create certificate signing request (csr)')
+
+
+def create_ca_conf(config_path, common_name, directory, private_key, date, region, fs_id, use_iam, ap_id=None, awsprofile=None):
+    """Populate ca/req configuration file with fresh configurations at every mount since SigV4 signature can change"""
+    public_key_path = os.path.join(directory, 'publicKey.pem')
+    credentials = get_aws_security_credentials(awsprofile=awsprofile) if use_iam else ''
+    ca_extension_body = ca_extension_builder(ap_id, use_iam, fs_id) if use_iam or ap_id else ''
+    efs_client_auth_body = efs_client_auth_builder(public_key_path, credentials['AccessKeyId'], credentials['SecretAccessKey'],
+                                                   date, region, fs_id, credentials['Token']) if use_iam else ''
+    full_config_body = CA_CONFIG_BODY % (directory, private_key, common_name, ca_extension_body, efs_client_auth_body)
+
+    with open(config_path, 'w') as f:
+        f.write(full_config_body)
+
+    return full_config_body
+
+
+def ca_extension_builder(ap_id, use_iam, fs_id):
+    ca_extension_str = '[ v3_ca ]\nsubjectKeyIdentifier = hash'
+    if ap_id:
+        ca_extension_str += '\n1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:' + ap_id
+    if use_iam:
+        ca_extension_str += '\n1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth'
+        ca_extension_str += '\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:' + fs_id
+
+    return ca_extension_str
+
+
+def efs_client_auth_builder(public_key_path, access_key_id, secret_access_key, date, region, fs_id, session_token=None):
+    public_key_hash = get_public_key_sha1(public_key_path)
+    canonical_request = create_canonical_request(public_key_hash, date, access_key_id, region, fs_id, session_token)
+    string_to_sign = create_string_to_sign(canonical_request, date, region)
+    signature = calculate_signature(string_to_sign, date, secret_access_key, region)
+    efs_client_auth_str = '[ efs_client_auth ]'
+    efs_client_auth_str += '\naccessKeyId = UTF8String:' + access_key_id
+    efs_client_auth_str += '\nsignature = OCTETSTRING:' + signature
+    efs_client_auth_str += '\nsigv4DateTime = UTCTIME:' + date.strftime(CERT_DATETIME_FORMAT)
+
+    if session_token:
+        efs_client_auth_str += '\nsessionToken = EXPLICIT:0,UTF8String:' + session_token
+
+    return efs_client_auth_str
+
+
+def create_public_key(private_key, public_key):
+    cmd = 'openssl rsa -in %s -outform PEM -pubout -out %s' % (private_key, public_key)
+    subprocess_call(cmd, 'Failed to create public key')
+
+
+def subprocess_call(cmd, error_message):
+    """Helper method to run shell openssl command and to handle response error messages"""
+    process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
+    (output, err) = process.communicate()
+    rc = process.poll()
+    if rc != 0:
+        logging.error('Command %s failed, rc=%s, stdout="%s", stderr="%s"' % (cmd, rc, output, err))
+        fatal_error(error_message, error_message)
+    else:
+        return output, err
+
+
+def ca_dirs_check(config, database_dir, certs_dir):
+    """Check if mount's database and certs directories exist and if not, create directories (also create all intermediate
+    directories if they don't exist)."""
+    if not os.path.exists(database_dir):
+        create_required_directory(config, database_dir)
+    if not os.path.exists(certs_dir):
+        create_required_directory(config, certs_dir)
+
+
+def ca_supporting_files_check(index_path, index_attr_path, serial_path, rand_path):
+    """Recreate all supporting openssl ca and req files if they're not present in their respective directories"""
+    if not os.path.isfile(index_path):
+        open(index_path, 'w').close()
+    if not os.path.isfile(index_attr_path):
+        with open(index_attr_path, 'w+') as f:
+            f.write('unique_subject = no')
+    if not os.path.isfile(serial_path):
+        with open(serial_path, 'w+') as f:
+            f.write('00')
+    if not os.path.isfile(rand_path):
+        open(rand_path, 'w').close()
+
+
+def get_certificate_timestamp(current_time, **kwargs):
+    updated_time = current_time + timedelta(**kwargs)
+    return updated_time.strftime(CERT_DATETIME_FORMAT)
+
+
+def get_utc_now():
+    """
+    Wrapped for patching purposes in unit tests
+    """
+    return datetime.utcnow()
+
+
 def assert_root():
     if os.geteuid() != 0:
         sys.stderr.write('only root can run mount.efs\n')
@@ -645,11 +1063,27 @@ def get_dns_name(config, fs_id):
 
     format_args = {'fs_id': fs_id}
 
+    expected_replacement_field_ct = 1
+
     if '{region}' in dns_name_format:
-        _validate_replacement_field_count(dns_name_format, 2)
+        expected_replacement_field_ct += 1
         format_args['region'] = get_region()
-    else:
-        _validate_replacement_field_count(dns_name_format, 1)
+
+    if '{dns_name_suffix}' in dns_name_format:
+        expected_replacement_field_ct += 1
+        config_section = CONFIG_SECTION
+        region = format_args.get('region')
+
+        if region:
+            region_specific_config_section = '%s.%s' % (CONFIG_SECTION, region)
+            if config.has_section(region_specific_config_section):
+                config_section = region_specific_config_section
+
+        format_args['dns_name_suffix'] = config.get(config_section, 'dns_name_suffix')
+
+        logging.debug("Using dns_name_suffix %s in config section [%s]", format_args.get('dns_name_suffix'), config_section)
+
+    _validate_replacement_field_count(dns_name_format, expected_replacement_field_ct)
 
     dns_name = dns_name_format.format(**format_args)
 
@@ -661,6 +1095,157 @@ def get_dns_name(config, fs_id):
                     'Failed to resolve "%s"' % dns_name)
 
     return dns_name
+
+
+def tls_paths_dictionary(mount_name, base_path=STATE_FILE_DIR):
+    tls_dict = {
+        'mount_dir': os.path.join(base_path, mount_name),
+        # every mount will have its own ca mode assets due to lack of multi-threading support in openssl
+        'database_dir': os.path.join(base_path, mount_name, 'database'),
+        'certs_dir': os.path.join(base_path, mount_name, 'certs'),
+        'index': os.path.join(base_path, mount_name, 'database/index.txt'),
+        'index_attr': os.path.join(base_path, mount_name, 'database/index.txt.attr'),
+        'serial': os.path.join(base_path, mount_name, 'database/serial'),
+        'rand': os.path.join(base_path, mount_name, 'database/.rand')
+    }
+
+    return tls_dict
+
+
+def get_public_key_sha1(public_key):
+    # truncating public key to remove the header and footer '-----(BEGIN|END) PUBLIC KEY-----'
+    with open(public_key, 'r') as f:
+        lines = f.readlines()
+        lines = lines[1:-1]
+
+    key = ''.join(lines)
+    key = bytearray(base64.b64decode(key))
+
+    # Parse the public key to pull out the actual key material by looking for the key BIT STRING
+    # Example:
+    #     0:d=0  hl=4 l= 418 cons: SEQUENCE
+    #     4:d=1  hl=2 l=  13 cons: SEQUENCE
+    #     6:d=2  hl=2 l=   9 prim: OBJECT            :rsaEncryption
+    #    17:d=2  hl=2 l=   0 prim: NULL
+    #    19:d=1  hl=4 l= 399 prim: BIT STRING
+    cmd = 'openssl asn1parse -inform PEM -in %s' % public_key
+    output, err = subprocess_call(cmd, 'Unable to ASN1 parse public key file, %s, correctly' % public_key)
+
+    key_line = ''
+    for line in output.splitlines():
+        if 'BIT STRING' in line.decode('utf-8'):
+            key_line = line.decode('utf-8')
+
+    if not key_line:
+        err_msg = 'Public key file, %s, is incorrectly formatted' % public_key
+        fatal_error(err_msg, err_msg)
+
+    key_line = key_line.replace(' ', '')
+
+    # DER encoding TLV (Tag, Length, Value)
+    # - the first octet (byte) is the tag (type)
+    # - the next octets are the length - "definite form"
+    #   - the first octet always has the high order bit (8) set to 1
+    #   - the remaining 127 bits are used to encode the number of octets that follow
+    #   - the following octets encode, as big-endian, the length (which may be 0) as a number of octets
+    # - the remaining octets are the "value" aka content
+    #
+    # For a BIT STRING, the first octet of the value is used to signify the number of unused bits that exist in the last
+    # content byte. Note that this is explicitly excluded from the SubjectKeyIdentifier hash, per
+    # https://tools.ietf.org/html/rfc5280#section-4.2.1.2
+    #
+    # Example:
+    #   0382018f00...<subjectPublicKey>
+    #   - 03 - BIT STRING tag
+    #   - 82 - 2 length octets to follow (ignore high order bit)
+    #   - 018f - length of 399
+    #   - 00 - no unused bits in the last content byte
+    offset = int(key_line.split(':')[0])
+    key = key[offset:]
+
+    num_length_octets = key[1] & 0b01111111
+
+    # Exclude the tag (1), length (1 + num_length_octets), and number of unused bits (1)
+    offset = 1 + 1 + num_length_octets + 1
+    key = key[offset:]
+
+    sha1 = hashlib.sha1()
+    sha1.update(key)
+
+    return sha1.hexdigest()
+
+
+def create_canonical_request(public_key_hash, date, access_key, region, fs_id, session_token=None):
+    """
+    Create a Canonical Request - https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html
+    """
+    formatted_datetime = date.strftime(SIGV4_DATETIME_FORMAT)
+    credential = quote_plus(access_key + '/' + get_credential_scope(date, region))
+
+    request = HTTP_REQUEST_METHOD + '\n'
+    request += CANONICAL_URI + '\n'
+    request += create_canonical_query_string(public_key_hash, credential, formatted_datetime, session_token) + '\n'
+    request += CANONICAL_HEADERS % fs_id + '\n'
+    request += SIGNED_HEADERS + '\n'
+
+    sha256 = hashlib.sha256()
+    sha256.update(REQUEST_PAYLOAD.encode())
+    request += sha256.hexdigest()
+
+    return request
+
+
+def create_canonical_query_string(public_key_hash, credential, formatted_datetime, session_token=None):
+    canonical_query_params = {
+        'Action': 'Connect',
+        # Public key hash is included in canonical request to tie the signature to a specific key pair to avoid replay attacks
+        'PublicKeyHash': quote_plus(public_key_hash),
+        'X-Amz-Algorithm': ALGORITHM,
+        'X-Amz-Credential': credential,
+        'X-Amz-Date': quote_plus(formatted_datetime),
+        'X-Amz-Expires': 86400,
+        'X-Amz-SignedHeaders': SIGNED_HEADERS,
+    }
+
+    if session_token:
+        canonical_query_params['X-Amz-Security-Token'] = quote_plus(session_token)
+
+    # Cannot use urllib.urlencode because it replaces the %s's
+    return '&'.join(['%s=%s' % (k, v) for k, v in sorted(canonical_query_params.items())])
+
+
+def create_string_to_sign(canonical_request, date, region):
+    """
+    Create a String to Sign - https://docs.aws.amazon.com/general/latest/gr/sigv4-create-string-to-sign.html
+    """
+    string_to_sign = ALGORITHM + '\n'
+    string_to_sign += date.strftime(SIGV4_DATETIME_FORMAT) + '\n'
+    string_to_sign += get_credential_scope(date, region) + '\n'
+
+    sha256 = hashlib.sha256()
+    sha256.update(canonical_request.encode())
+    string_to_sign += sha256.hexdigest()
+
+    return string_to_sign
+
+
+def calculate_signature(string_to_sign, date, secret_access_key, region):
+    """
+    Calculate the Signature - https://docs.aws.amazon.com/general/latest/gr/sigv4-calculate-signature.html
+    """
+    def _sign(key, msg):
+        return hmac.new(key, msg.encode('utf-8'), hashlib.sha256)
+
+    key_date = _sign(('AWS4' + secret_access_key).encode('utf-8'), date.strftime(DATE_ONLY_FORMAT)).digest()
+    add_region = _sign(key_date, region).digest()
+    add_service = _sign(add_region, SERVICE).digest()
+    signing_key = _sign(add_service, 'aws4_request').digest()
+
+    return _sign(signing_key, string_to_sign).hexdigest()
+
+
+def get_credential_scope(date, region):
+    return '/'.join([date.strftime(DATE_ONLY_FORMAT), region, SERVICE, AWS4_REQUEST])
 
 
 def match_device(config, device):
@@ -706,10 +1291,11 @@ def match_device(config, device):
                     % (remote, 'https://docs.aws.amazon.com/efs/latest/ug/mounting-fs-mount-cmd-dns-name.html'))
 
 
-def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
-    with bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options) as tunnel_proc:
+def mount_tls(config, init_system, dns_name, path, fs_id, ap_id, mountpoint, options):
+    with bootstrap_tls(config, init_system, dns_name, fs_id, ap_id, mountpoint, options) as tunnel_proc:
         mount_completed = threading.Event()
         t = threading.Thread(target=poll_tunnel_process, args=(tunnel_proc, fs_id, mount_completed))
+        t.daemon = True
         t.start()
         mount_nfs(dns_name, path, mountpoint, options)
         mount_completed.set()
@@ -726,6 +1312,33 @@ def check_unsupported_options(options):
             del options[unsupported_option]
 
 
+def check_options_validity(options):
+    if 'tls' in options:
+        if 'port' in options:
+            fatal_error('The "port" and "tls" options are mutually exclusive')
+
+        if 'tlsport' in options:
+            try:
+                int(options['tlsport'])
+            except ValueError:
+                fatal_error('tlsport option [%s] is not an integer' % options['tlsport'])
+
+        if 'ocsp' in options and 'noocsp' in options:
+            fatal_error('The "ocsp" and "noocsp" options are mutually exclusive')
+
+    if 'accesspoint' in options:
+        if 'tls' not in options:
+            fatal_error('The "tls" option is required when mounting via "accesspoint"')
+        if not AP_ID_RE.match(options['accesspoint']):
+            fatal_error('Access Point ID %s is malformed' % options['accesspoint'])
+
+    if 'iam' in options and 'tls' not in options:
+        fatal_error('The "tls" option is required when mounting via "iam"')
+
+    if 'awsprofile' in options and 'iam' not in options:
+        fatal_error('The "iam" option is required when mounting with named profile option, "awsprofile"')
+
+
 def main():
     parse_arguments_early_exit()
 
@@ -738,14 +1351,16 @@ def main():
 
     logging.info('version=%s options=%s', VERSION, options)
     check_unsupported_options(options)
+    check_options_validity(options)
 
     init_system = get_init_system()
     check_network_status(fs_id, init_system)
 
     dns_name = get_dns_name(config, fs_id)
+    ap_id = options.get('accesspoint')
 
     if 'tls' in options:
-        mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options)
+        mount_tls(config, init_system, dns_name, path, fs_id, ap_id, mountpoint, options)
     else:
         mount_nfs(dns_name, path, mountpoint, options)
 

@@ -12,9 +12,11 @@ import tempfile
 
 from mock import MagicMock
 
+AP_ID = 'fsap-beefdead'
 FS_ID = 'fs-deadbeef'
 DNS_NAME = '%s.efs.us-east-1.amazonaws.com' % FS_ID
 MOUNT_POINT = '/mnt'
+REGION = 'us-east-1'
 
 DEFAULT_TLS_PORT = 20049
 
@@ -30,7 +32,10 @@ def setup_mocks(mocker):
     mocker.patch('mount_efs.start_watchdog')
     mocker.patch('mount_efs.get_tls_port_range', return_value=(DEFAULT_TLS_PORT, DEFAULT_TLS_PORT + 10))
     mocker.patch('socket.socket', return_value=MagicMock())
-    mocker.patch('mount_efs.write_tls_tunnel_state_file', return_value="~mocktempfile")
+    mocker.patch('mount_efs.get_dns_name', return_value=DNS_NAME)
+    mocker.patch('mount_efs.get_region_helper', return_value=REGION)
+    mocker.patch('mount_efs.write_tls_tunnel_state_file', return_value='~mocktempfile')
+    mocker.patch('mount_efs.create_certificate')
     mocker.patch('os.rename')
     mocker.patch('os.kill')
 
@@ -43,11 +48,23 @@ def setup_mocks(mocker):
     return popen_mock, write_config_mock
 
 
+def setup_mocks_without_popen(mocker):
+    mocker.patch('mount_efs.start_watchdog')
+    mocker.patch('mount_efs.get_tls_port_range', return_value=(DEFAULT_TLS_PORT, DEFAULT_TLS_PORT + 10))
+    mocker.patch('socket.gethostname', return_value=DNS_NAME)
+    mocker.patch('mount_efs.get_dns_name', return_value=DNS_NAME)
+    mocker.patch('mount_efs.write_tls_tunnel_state_file', return_value='~mocktempfile')
+    mocker.patch('os.kill')
+
+    write_config_mock = mocker.patch('mount_efs.write_stunnel_config_file', return_value=EXPECTED_STUNNEL_CONFIG_FILE)
+    return write_config_mock
+
+
 def test_bootstrap_tls_state_file_dir_exists(mocker, tmpdir):
     popen_mock, _ = setup_mocks(mocker)
     state_file_dir = str(tmpdir)
 
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {}, state_file_dir):
         pass
 
     args, _ = popen_mock.call_args
@@ -64,6 +81,8 @@ def test_bootstrap_tls_state_file_nonexistent_dir(mocker, tmpdir):
     def config_get_side_effect(section, field):
         if section == mount_efs.CONFIG_SECTION and field == 'state_file_dir_mode':
             return '0755'
+        elif section == mount_efs.CONFIG_SECTION and field == 'dns_name_format':
+            return '{fs_id}.efs.{region}.amazonaws.com'
         else:
             raise ValueError('Unexpected arguments')
 
@@ -71,18 +90,84 @@ def test_bootstrap_tls_state_file_nonexistent_dir(mocker, tmpdir):
 
     assert not os.path.exists(state_file_dir)
 
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {}, state_file_dir):
         pass
 
     assert os.path.exists(state_file_dir)
 
 
+def test_bootstrap_tls_no_cert_creation(mocker, tmpdir):
+    setup_mocks_without_popen(mocker)
+    mocker.patch('mount_efs.get_mount_specific_filename', return_value=DNS_NAME)
+    state_file_dir = str(tmpdir)
+    tls_dict = mount_efs.tls_paths_dictionary(DNS_NAME, state_file_dir)
+
+    pk_path = os.path.join(str(tmpdir), 'privateKey.pem')
+    mocker.patch('mount_efs.get_private_key_path', return_value=pk_path)
+
+    def config_get_side_effect(section, field):
+        if section == mount_efs.CONFIG_SECTION and field == 'state_file_dir_mode':
+            return '0755'
+        elif section == mount_efs.CONFIG_SECTION and field == 'dns_name_format':
+            return '{fs_id}.efs.{region}.amazonaws.com'
+        else:
+            raise ValueError('Unexpected arguments')
+
+    MOCK_CONFIG.get.side_effect = config_get_side_effect
+
+    try:
+        with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, None, MOUNT_POINT, {}, state_file_dir):
+            pass
+    except OSError as e:
+        assert '[Errno 2] No such file or directory' in str(e)
+
+    assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
+    assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
+    assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'config.conf'))
+    assert not os.path.exists(pk_path)
+
+
+def test_bootstrap_tls_cert_created(mocker, tmpdir):
+    setup_mocks_without_popen(mocker)
+    mocker.patch('mount_efs.get_mount_specific_filename', return_value=DNS_NAME)
+    mocker.patch('mount_efs.get_region_helper', return_value=REGION)
+    state_file_dir = str(tmpdir)
+    tls_dict = mount_efs.tls_paths_dictionary(DNS_NAME + '+', state_file_dir)
+
+    pk_path = os.path.join(str(tmpdir), 'privateKey.pem')
+    mocker.patch('mount_efs.get_private_key_path', return_value=pk_path)
+
+    def config_get_side_effect(section, field):
+        if section == mount_efs.CONFIG_SECTION and field == 'state_file_dir_mode':
+            return '0755'
+        elif section == mount_efs.CONFIG_SECTION and field == 'dns_name_format':
+            return '{fs_id}.efs.{region}.amazonaws.com'
+        else:
+            raise ValueError('Unexpected arguments')
+
+    MOCK_CONFIG.get.side_effect = config_get_side_effect
+
+    try:
+        with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {},
+                                     state_file_dir=state_file_dir):
+            pass
+    except OSError as e:
+        assert '[Errno 2] No such file or directory' in str(e)
+
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'config.conf'))
+    assert os.path.exists(pk_path)
+
+
 def test_bootstrap_tls_non_default_port(mocker, tmpdir):
     popen_mock, write_config_mock = setup_mocks(mocker)
+    mocker.patch('os.rename')
     state_file_dir = str(tmpdir)
 
     tls_port = 1000
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'tlsport': tls_port}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {'tlsport': tls_port},
+                                 state_file_dir):
         pass
 
     popen_args, _ = popen_mock.call_args
@@ -99,7 +184,8 @@ def test_bootstrap_tls_non_default_verify_level(mocker, tmpdir):
     state_file_dir = str(tmpdir)
 
     verify = 0
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'verify': verify}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {'verify': verify},
+                                 state_file_dir):
         pass
 
     popen_args, _ = popen_mock.call_args
@@ -115,7 +201,7 @@ def test_bootstrap_tls_ocsp_option(mocker, tmpdir):
     popen_mock, write_config_mock = setup_mocks(mocker)
     state_file_dir = str(tmpdir)
 
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'ocsp': None}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {'ocsp': None}, state_file_dir):
         pass
 
     popen_args, _ = popen_mock.call_args
@@ -132,7 +218,7 @@ def test_bootstrap_tls_noocsp_option(mocker, tmpdir):
     popen_mock, write_config_mock = setup_mocks(mocker)
     state_file_dir = str(tmpdir)
 
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'noocsp': None}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {'noocsp': None}, state_file_dir):
         pass
 
     popen_args, _ = popen_mock.call_args
@@ -143,18 +229,3 @@ def test_bootstrap_tls_noocsp_option(mocker, tmpdir):
     assert EXPECTED_STUNNEL_CONFIG_FILE in popen_args
     # positional argument for ocsp_override
     assert write_config_args[7] is False
-
-
-def test_bootstrap_tls_ocsp_and_noocsp_option(mocker, tmpdir):
-    setup_mocks(mocker)
-    state_file_dir = str(tmpdir)
-
-    exception_thrown = False
-    try:
-        with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'ocsp': None, 'noocsp': None},
-                                     state_file_dir):
-            pass
-    except SystemExit:
-        exception_thrown = True
-
-    assert exception_thrown

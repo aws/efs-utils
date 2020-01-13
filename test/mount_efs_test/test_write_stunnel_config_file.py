@@ -116,7 +116,7 @@ def _test_check_cert_hostname(mocker, tmpdir, stunnel_check_cert_hostname_suppor
     config_file = mount_efs.write_stunnel_config_file(
         _get_config(mocker, stunnel_check_cert_hostname_supported=stunnel_check_cert_hostname_supported,
                     stunnel_check_cert_hostname=stunnel_check_cert_hostname),
-        str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL, OCSP_ENABLED)
+        str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL, OCSP_ENABLED, _get_mount_options())
 
     ca_mocker.assert_called_once()
 
@@ -130,7 +130,7 @@ def _test_check_cert_validity(mocker, tmpdir, stunnel_check_cert_validity_suppor
 
     config_file = mount_efs.write_stunnel_config_file(
         _get_config(mocker, stunnel_check_cert_validity_supported=stunnel_check_cert_validity_supported),
-        str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL, stunnel_check_cert_validity)
+        str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL, stunnel_check_cert_validity, _get_mount_options())
 
     ca_mocker.assert_called_once()
 
@@ -143,7 +143,7 @@ def _test_write_stunnel_config_file(mocker, tmpdir):
     state_file_dir = str(tmpdir)
 
     config_file = mount_efs.write_stunnel_config_file(_get_config(mocker), state_file_dir, FS_ID, MOUNT_POINT, PORT, DNS_NAME,
-                                                      VERIFY_LEVEL, OCSP_ENABLED)
+                                                      VERIFY_LEVEL, OCSP_ENABLED, _get_mount_options())
     ca_mocker.assert_called_once()
 
     _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG, _get_expected_efs_config())
@@ -154,7 +154,7 @@ def _test_disable_libwrap(mocker, tmpdir, system_release='unknown', disable_libw
     ver_mocker = mocker.patch('mount_efs.get_system_release_version', return_value=system_release)
 
     config_file = mount_efs.write_stunnel_config_file(_get_config(mocker), str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME,
-                                                      VERIFY_LEVEL, OCSP_ENABLED)
+                                                      VERIFY_LEVEL, OCSP_ENABLED, _get_mount_options())
 
     ver_mocker.assert_called_once()
     _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG, _get_expected_efs_config(disable_libwrap=disable_libwrap))
@@ -165,7 +165,8 @@ def test_write_stunnel_config_with_debug(mocker, tmpdir):
     state_file_dir = str(tmpdir)
 
     config_file = mount_efs.write_stunnel_config_file(_get_config(mocker, stunnel_debug_enabled=True), state_file_dir, FS_ID,
-                                                      MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL, OCSP_ENABLED)
+                                                      MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL, OCSP_ENABLED,
+                                                      _get_mount_options())
     ca_mocker.assert_called_once()
 
     expected_global_config = dict(mount_efs.STUNNEL_GLOBAL_CONFIG)
@@ -208,7 +209,7 @@ def test_write_stunnel_config_check_cert_hostname_not_supported_flag_set_true(mo
     with pytest.raises(SystemExit) as ex:
         mount_efs.write_stunnel_config_file(_get_config(mocker, stunnel_check_cert_hostname_supported=False,
                                             stunnel_check_cert_hostname=True), str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME,
-                                            VERIFY_LEVEL, OCSP_ENABLED)
+                                            VERIFY_LEVEL, OCSP_ENABLED, _get_mount_options())
 
     assert 0 != ex.value.code
 
@@ -238,7 +239,7 @@ def test_write_stunnel_config_check_cert_validity_not_supported_ocsp_enabled(moc
     with pytest.raises(SystemExit) as ex:
         mount_efs.write_stunnel_config_file(_get_config(mocker, stunnel_check_cert_validity_supported=False,
                                             stunnel_check_cert_validity=True), str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME,
-                                            VERIFY_LEVEL, ocsp_enabled=True)
+                                            VERIFY_LEVEL, True, _get_mount_options())
 
     assert 0 != ex.value.code
 
@@ -252,7 +253,7 @@ def test_write_stunnel_config_with_verify_level(mocker, tmpdir):
 
     verify = 0
     config_file = mount_efs.write_stunnel_config_file(_get_config(mocker, stunnel_check_cert_validity=True), str(tmpdir), FS_ID,
-                                                      MOUNT_POINT, PORT, DNS_NAME, verify, OCSP_ENABLED)
+                                                      MOUNT_POINT, PORT, DNS_NAME, verify, OCSP_ENABLED, _get_mount_options())
     ca_mocker.assert_not_called()
 
     _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG,

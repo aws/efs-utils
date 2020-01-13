@@ -8,8 +8,6 @@
 
 import mount_efs
 
-import pytest
-
 
 def test_get_default_nfs_mount_options():
     nfs_opts = mount_efs.get_nfs_mount_options({})
@@ -78,13 +76,3 @@ def test_tlsport():
 
     assert 'port=3030' in nfs_opts
     assert 'tls' not in nfs_opts
-
-
-def test_tls_with_port(capsys):
-    with pytest.raises(SystemExit) as ex:
-        mount_efs.get_nfs_mount_options({'tls': None, 'port': 3030})
-
-    assert 0 != ex.value.code
-
-    out, err = capsys.readouterr()
-    assert 'mutually exclusive' in err

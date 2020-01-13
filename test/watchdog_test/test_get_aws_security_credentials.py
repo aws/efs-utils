@@ -1,0 +1,322 @@
+#
+# Copyright 2017-2018 Amazon.com, Inc. and its affiliates. All Rights Reserved.
+#
+# Licensed under the MIT License. See the LICENSE accompanying this file
+# for the specific language governing permissions and limitations under
+# the License.
+#
+
+import watchdog
+
+import json
+import os
+import logging
+import pytest
+
+try:
+    import ConfigParser
+except ImportError:
+    from configparser import ConfigParser
+
+ACCESS_KEY_ID_KEY = 'aws_access_key_id'
+SECRET_ACCESS_KEY_KEY = 'aws_secret_access_key'
+SESSION_TOKEN_KEY = 'aws_session_token'
+ACCESS_KEY_ID_VAL = 'FAKE_AWS_ACCESS_KEY_ID'
+SECRET_ACCESS_KEY_VAL = 'FAKE_AWS_SECRET_ACCESS_KEY'
+SESSION_TOKEN_VAL = 'FAKE_SESSION_TOKEN'
+WRONG_ACCESS_KEY_ID_VAL = 'WRONG_AWS_ACCESS_KEY_ID'
+WRONG_SECRET_ACCESS_KEY_VAL = 'WRONG_AWS_SECRET_ACCESS_KEY'
+WRONG_SESSION_TOKEN_VAL = 'WRONG_SESSION_TOKEN'
+
+AWS_CONFIG_FILE = 'fake_aws_config'
+DEFAULT_PROFILE = 'DEFAULT'
+AWSPROFILE = 'test_profile'
+
+
+class MockHeaders(object):
+    def __init__(self, content_charset=None):
+        self.content_charset = content_charset
+
+    def get_content_charset(self):
+        return self.content_charset
+
+
+class MockUrlLibResponse(object):
+    def __init__(self, code=200, data={}, headers=MockHeaders()):
+        self.code = code
+        self.data = data
+        self.headers = headers
+
+    def getcode(self):
+        return self.code
+
+    def read(self):
+        return self.data
+
+
+@pytest.fixture(autouse=True)
+def setup(mocker):
+    mocker.patch('os.path.expanduser')
+
+
+def _config_helper(tmpdir, add_test_profile=False):
+    fake_file = os.path.join(str(tmpdir), AWS_CONFIG_FILE)
+
+    try:
+        config = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        config = ConfigParser()
+
+    if add_test_profile:
+        config.add_section(AWSPROFILE)
+
+    return fake_file, config
+
+
+def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_without_token_no_awsprofile(mocker):
+    file_helper_resp = {
+        'AccessKeyId': ACCESS_KEY_ID_VAL,
+        'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
+        'Token': None
+    }
+
+    mocker.patch.dict(os.environ, {})
+    mocker.patch('os.path.exists', return_value=True)
+    mocker.patch('watchdog.credentials_file_helper', return_value=file_helper_resp)
+
+    credentials = watchdog.get_aws_security_credentials()
+
+    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
+    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
+    assert credentials['Token'] is None
+
+
+def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_without_token_with_awsprofile(mocker):
+    file_helper_resp = {
+        'AccessKeyId': ACCESS_KEY_ID_VAL,
+        'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
+        'Token': None
+    }
+
+    mocker.patch.dict(os.environ, {})
+    mocker.patch('os.path.exists', return_value=True)
+    mocker.patch('watchdog.credentials_file_helper', return_value=file_helper_resp)
+
+    credentials = watchdog.get_aws_security_credentials(awsprofile='test_profile')
+
+    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
+    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
+    assert credentials['Token'] is None
+
+
+def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_with_token_no_awsprofile(mocker):
+    file_helper_resp = {
+        'AccessKeyId': ACCESS_KEY_ID_VAL,
+        'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
+        'Token': SESSION_TOKEN_VAL
+    }
+
+    mocker.patch.dict(os.environ, {})
+    mocker.patch('os.path.exists', return_value=True)
+    mocker.patch('watchdog.credentials_file_helper', return_value=file_helper_resp)
+
+    credentials = watchdog.get_aws_security_credentials()
+
+    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
+    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
+    assert credentials['Token'] is SESSION_TOKEN_VAL
+
+
+def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_with_token_with_awsprofile(mocker):
+    file_helper_resp = {
+        'AccessKeyId': ACCESS_KEY_ID_VAL,
+        'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
+        'Token': SESSION_TOKEN_VAL
+    }
+
+    mocker.patch.dict(os.environ, {})
+    mocker.patch('os.path.exists', return_value=True)
+    mocker.patch('watchdog.credentials_file_helper', return_value=file_helper_resp)
+
+    credentials = watchdog.get_aws_security_credentials(awsprofile='test_profile')
+
+    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
+    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
+    assert credentials['Token'] is SESSION_TOKEN_VAL
+
+
+def test_get_aws_security_credentials_ecs(mocker):
+    mocker.patch.dict(os.environ, {})
+    mocker.patch('os.path.exists', return_value=False)
+    response = json.dumps({
+        'AccessKeyId': ACCESS_KEY_ID_VAL,
+        'Expiration': 'EXPIRATION_DATE',
+        'RoleArn': 'TASK_ROLE_ARN',
+        'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
+        'Token': SESSION_TOKEN_VAL
+    })
+    mocker.patch.dict(os.environ, {'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI': 'fake_uri'})
+    mocker.patch('watchdog.urlopen', return_value=MockUrlLibResponse(data=response))
+
+    credentials = watchdog.get_aws_security_credentials()
+
+    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
+    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
+    assert credentials['Token'] == SESSION_TOKEN_VAL
+
+
+def test_get_aws_security_credentials_iam(mocker):
+    mocker.patch.dict(os.environ, {})
+    mocker.patch('os.path.exists', return_value=False)
+    response = json.dumps({
+        'Code': 'Success',
+        'LastUpdated': '2019-10-25T14:41:42Z',
+        'Type': 'AWS-HMAC',
+        'AccessKeyId': ACCESS_KEY_ID_VAL,
+        'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
+        'Token': SESSION_TOKEN_VAL,
+        'Expiration': '2019-10-25T21:17:24Z'
+    })
+    mocker.patch.dict(os.environ, {})
+    mocker.patch('watchdog.urlopen', return_value=MockUrlLibResponse(data=response))
+
+    credentials = watchdog.get_aws_security_credentials()
+
+    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
+    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
+    assert credentials['Token'] == SESSION_TOKEN_VAL
+
+
+def test_get_aws_security_credentials_not_found(mocker):
+    mocker.patch.dict(os.environ, {})
+    mocker.patch('os.path.exists', return_value=False)
+    mocker.patch('watchdog.urlopen')
+    credentials = watchdog.get_aws_security_credentials()
+
+    assert credentials['AccessKeyId'] is None
+    assert credentials['SecretAccessKey'] is None
+    assert credentials['Token'] is None
+
+
+def test_credentials_file_helper_found_with_token_default(tmpdir):
+    fake_file, config = _config_helper(tmpdir)
+
+    config.set(DEFAULT_PROFILE, ACCESS_KEY_ID_KEY, ACCESS_KEY_ID_VAL)
+    config.set(DEFAULT_PROFILE, SECRET_ACCESS_KEY_KEY, SECRET_ACCESS_KEY_VAL)
+    config.set(DEFAULT_PROFILE, SESSION_TOKEN_KEY, SESSION_TOKEN_VAL)
+    with open(fake_file, 'w') as f:
+        config.write(f)
+
+    credentials = watchdog.credentials_file_helper(fake_file)
+
+    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
+    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
+    assert credentials['Token'] == SESSION_TOKEN_VAL
+
+
+def test_credentials_file_helper_found_with_token_awsprofile(tmpdir):
+    fake_file, config = _config_helper(tmpdir, add_test_profile=True)
+
+    config.set(DEFAULT_PROFILE, ACCESS_KEY_ID_KEY, WRONG_ACCESS_KEY_ID_VAL)
+    config.set(DEFAULT_PROFILE, SECRET_ACCESS_KEY_KEY, WRONG_SECRET_ACCESS_KEY_VAL)
+    config.set(DEFAULT_PROFILE, SESSION_TOKEN_KEY, WRONG_SESSION_TOKEN_VAL)
+    config.set(AWSPROFILE, ACCESS_KEY_ID_KEY, ACCESS_KEY_ID_VAL)
+    config.set(AWSPROFILE, SECRET_ACCESS_KEY_KEY, SECRET_ACCESS_KEY_VAL)
+    config.set(AWSPROFILE, SESSION_TOKEN_KEY, SESSION_TOKEN_VAL)
+    with open(fake_file, 'w') as f:
+        config.write(f)
+
+    credentials = watchdog.credentials_file_helper(fake_file, awsprofile=AWSPROFILE)
+
+    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
+    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
+    assert credentials['Token'] == SESSION_TOKEN_VAL
+
+
+def test_credentials_file_helper_found_without_token_default(caplog, tmpdir):
+    caplog.set_level(logging.DEBUG)
+    fake_file, config = _config_helper(tmpdir)
+
+    config.set(DEFAULT_PROFILE, ACCESS_KEY_ID_KEY, ACCESS_KEY_ID_VAL)
+    config.set(DEFAULT_PROFILE, SECRET_ACCESS_KEY_KEY, SECRET_ACCESS_KEY_VAL)
+    with open(fake_file, 'w') as f:
+        config.write(f)
+
+    credentials = watchdog.credentials_file_helper(fake_file)
+
+    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
+    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
+    assert credentials['Token'] is None
+    assert 'aws_session_token' in [rec.message for rec in caplog.records][0]
+
+
+def test_credentials_file_helper_found_without_token_awsprofile(caplog, tmpdir):
+    caplog.set_level(logging.DEBUG)
+    fake_file, config = _config_helper(tmpdir, add_test_profile=True)
+
+    config.set(DEFAULT_PROFILE, ACCESS_KEY_ID_KEY, WRONG_ACCESS_KEY_ID_VAL)
+    config.set(DEFAULT_PROFILE, SECRET_ACCESS_KEY_KEY, WRONG_SECRET_ACCESS_KEY_VAL)
+    config.set(AWSPROFILE, ACCESS_KEY_ID_KEY, ACCESS_KEY_ID_VAL)
+    config.set(AWSPROFILE, SECRET_ACCESS_KEY_KEY, SECRET_ACCESS_KEY_VAL)
+    with open(fake_file, 'w') as f:
+        config.write(f)
+
+    credentials = watchdog.credentials_file_helper(fake_file, awsprofile=AWSPROFILE)
+
+    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
+    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
+    assert credentials['Token'] is None
+    assert 'aws_session_token' in [rec.message for rec in caplog.records][0]
+
+
+def test_credentials_file_helper_not_found_no_default(caplog, tmpdir):
+    caplog.set_level(logging.DEBUG)
+    fake_file = os.path.join(str(tmpdir), 'fake_aws_config')
+    tmpdir.join('fake_aws_config').write('')
+
+    credentials = watchdog.credentials_file_helper(fake_file)
+
+    assert credentials is None
+    assert 'No [default] section found in config file' in [rec.message for rec in caplog.records][0]
+
+
+def test_credentials_file_helper_not_found_no_awsprofile(caplog, tmpdir):
+    caplog.set_level(logging.DEBUG)
+    fake_file = os.path.join(str(tmpdir), 'fake_aws_config')
+    tmpdir.join('fake_aws_config').write('')
+
+    credentials = watchdog.credentials_file_helper(fake_file, awsprofile='test_profile')
+
+    assert credentials is None
+    assert 'No [test_profile] section found in config file' in [rec.message for rec in caplog.records][0]
+
+
+def test_credentials_file_helper_not_found_with_default(caplog, tmpdir):
+    caplog.set_level(logging.DEBUG)
+    fake_file, config = _config_helper(tmpdir)
+
+    config.set(DEFAULT_PROFILE, SECRET_ACCESS_KEY_KEY, WRONG_SECRET_ACCESS_KEY_VAL)
+    with open(fake_file, 'w') as f:
+        config.write(f)
+
+    credentials = watchdog.credentials_file_helper(fake_file)
+
+    assert credentials is None
+    assert 'No [default] section found in config file' in [rec.message for rec in caplog.records][0]
+
+
+def test_credentials_file_helper_not_found_with_awsprofile(caplog, tmpdir):
+    caplog.set_level(logging.DEBUG)
+    fake_file, config = _config_helper(tmpdir, add_test_profile=True)
+
+    config.set(DEFAULT_PROFILE, SECRET_ACCESS_KEY_KEY, WRONG_SECRET_ACCESS_KEY_VAL)
+    config.set(AWSPROFILE, SECRET_ACCESS_KEY_KEY, SECRET_ACCESS_KEY_VAL)
+    with open(fake_file, 'w') as f:
+        config.write(f)
+
+    credentials = watchdog.credentials_file_helper(fake_file, awsprofile=AWSPROFILE)
+
+    assert credentials['AccessKeyId'] is None
+    assert credentials['SecretAccessKey'] is None
+    assert credentials['Token'] is None
+    assert 'aws_access_key_id or aws_secret_access_key not found' in [rec.message for rec in caplog.records][0]

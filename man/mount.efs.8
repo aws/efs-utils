@@ -81,6 +81,22 @@ more information, see \fBstunnel(8)\fR\&.
 Selects whether to perform OCSP validation on TLS certificates\&, \
 overriding /etc/amazon/efs/efs-utils.conf. \
 For more information, see \fBstunnel(8)\fR\&.
+.TP
+\fBiam\fR
+Use the system's IAM identity to authenticate with EFS. The mount helper will try \
+to retrieve the required IAM credentials from the following locations: the EC2 instance \
+profile, the AWS CLI credentials file (~/.aws/credentials), and the AWS CLI config \
+file (~/.aws/config). The first location that has credentials will be used. \
+This option requires the \fBtls\fR option\&.
+.TP
+\fBaccesspoint\fR
+Mount the EFS file system using the specified access point. This option requires the \
+\fBtls\fR option\&.
+.TP
+\fBawsprofile\fR
+Use the named profile used to lookup IAM credentials in the AWS CLI credentials file \
+(~/.aws/credentials) or AWS CLI config file (~/.aws/config). If "awsprofile" is not \
+specified, the "default" profile is used\&.
 .if n \{\
 .RE
 .\}
@@ -121,6 +137,16 @@ resolve to a fully-qualified EFS DNS name such as \
 "fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com" \
 \(em at mount point "/mnt/efs" using encryption \
 of data in transit\&.
+.TP
+sudo mount -t efs -o tls,iam fs-abcd1234 /mnt/efs
+Mount an EFS file system with file system ID "fs-abcd1234" at mount point "/mnt/efs" \
+with encryption of data in transit. The mount helper will authenticate with EFS using \
+the system's IAM identity\&.
+.TP
+sudo mount -t efs -o tls,accesspoint=fsap-12345678 fs-abcd1234 /mnt/efs
+Mount an EFS file system with file system ID "fs-abcd1234" at mount point "/mnt/efs" \
+with encryption of data in transit. The file system is mounted using the access point \
+"fsap-12345678"\&.
 .SH "FILES"
 .TP
 \fI/sbin/mount.efs\fR
