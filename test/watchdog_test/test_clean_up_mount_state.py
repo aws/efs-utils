@@ -11,6 +11,8 @@ import json
 import os
 import tempfile
 
+from .. import utils
+
 PID = 99999999999999999
 
 
@@ -48,7 +50,7 @@ def test_clean_up_on_first_try(mocker, tmpdir):
 
     watchdog.clean_up_mount_state(state_dir, state_file, PID, is_running=True)
 
-    killpg_mock.assert_called_once()
+    utils.assert_called_once(killpg_mock)
     assert not os.path.exists(abs_state_file)
 
 
@@ -70,7 +72,7 @@ def _test_clean_up_files(mocker, tmpdir, files_should_exist):
 
     watchdog.clean_up_mount_state(state_dir, state_file, PID, is_running=True)
 
-    killpg_mock.assert_called_once()
+    utils.assert_called_once(killpg_mock)
     assert not os.path.exists(abs_state_file)
     for f in extra_files:
         assert not os.path.exists(f)
@@ -93,7 +95,7 @@ def test_clean_up_pid_still_lives(mocker, tmpdir):
 
     watchdog.clean_up_mount_state(state_dir, state_file, PID, is_running=True)
 
-    killpg_mock.assert_called_once()
+    utils.assert_called_once(killpg_mock)
     assert os.path.exists(abs_state_file)
 
 
@@ -106,7 +108,7 @@ def test_pid_not_running(mocker, tmpdir):
 
     watchdog.clean_up_mount_state(state_dir, state_file, PID, is_running=False)
 
-    killpg_mock.assert_not_called()
+    utils.assert_not_called(killpg_mock)
     assert not os.path.exists(abs_state_file)
 
 
@@ -121,7 +123,7 @@ def test_clean_up_mount_state_dir_success(mocker, tmpdir):
 
     watchdog.clean_up_mount_state(state_dir, state_file, PID, is_running=False, mount_state_dir='/fake/path')
 
-    rm_tree.assert_called_once()
+    utils.assert_called_once(rm_tree)
 
 
 def test_clean_up_mount_state_dir_fail(mocker, tmpdir):
@@ -135,4 +137,4 @@ def test_clean_up_mount_state_dir_fail(mocker, tmpdir):
 
     watchdog.clean_up_mount_state(state_dir, state_file, PID, is_running=False, mount_state_dir='/fake/path')
 
-    rm_tree.assert_not_called()
+    utils.assert_not_called(rm_tree)

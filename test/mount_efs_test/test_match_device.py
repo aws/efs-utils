@@ -11,6 +11,9 @@ import pytest
 
 import mount_efs
 
+from .. import utils
+
+
 CORRECT_DEVICE_DESCRIPTORS_FS_ID = [
     ('fs-deadbeef', ('fs-deadbeef', '/')),
     ('fs-deadbeef:/', ('fs-deadbeef', '/')),
@@ -36,8 +39,8 @@ def test_match_device_correct_descriptors_cname_dns_primary(mocker):
                                          return_value=('fs-deadbeef.efs.us-east-1.amazonaws.com', [], None))
     for device, (fs_id, path) in CORRECT_DEVICE_DESCRIPTORS_CNAME_DNS:
         assert (fs_id, path) == mount_efs.match_device(None, device)
-    get_dns_name_mock.assert_called()
-    gethostbyname_ex_mock.assert_called()
+    utils.assert_called(get_dns_name_mock)
+    utils.assert_called(gethostbyname_ex_mock)
 
 
 def test_match_device_correct_descriptors_cname_dns_secondary(mocker):
@@ -46,8 +49,8 @@ def test_match_device_correct_descriptors_cname_dns_secondary(mocker):
                                          return_value=(None, ['fs-deadbeef.efs.us-east-1.amazonaws.com'], None))
     for device, (fs_id, path) in CORRECT_DEVICE_DESCRIPTORS_CNAME_DNS:
         assert (fs_id, path) == mount_efs.match_device(None, device)
-    get_dns_name_mock.assert_called()
-    gethostbyname_ex_mock.assert_called()
+    utils.assert_called(get_dns_name_mock)
+    utils.assert_called(gethostbyname_ex_mock)
 
 
 def test_match_device_correct_descriptors_cname_dns_tertiary(mocker):
@@ -56,8 +59,8 @@ def test_match_device_correct_descriptors_cname_dns_tertiary(mocker):
                                          return_value=(None, [None, 'fs-deadbeef.efs.us-east-1.amazonaws.com'], None))
     for device, (fs_id, path) in CORRECT_DEVICE_DESCRIPTORS_CNAME_DNS:
         assert (fs_id, path) == mount_efs.match_device(None, device)
-    get_dns_name_mock.assert_called()
-    gethostbyname_ex_mock.assert_called()
+    utils.assert_called(get_dns_name_mock)
+    utils.assert_called(gethostbyname_ex_mock)
 
 
 def test_match_device_correct_descriptors_cname_dns_amongst_invalid(mocker):
@@ -70,8 +73,8 @@ def test_match_device_correct_descriptors_cname_dns_amongst_invalid(mocker):
     )
     for device, (fs_id, path) in CORRECT_DEVICE_DESCRIPTORS_CNAME_DNS:
         assert (fs_id, path) == mount_efs.match_device(None, device)
-    get_dns_name_mock.assert_called()
-    gethostbyname_ex_mock.assert_called()
+    utils.assert_called(get_dns_name_mock)
+    utils.assert_called(gethostbyname_ex_mock)
 
 
 def test_match_device_unresolvable_domain(mocker, capsys):
@@ -93,7 +96,7 @@ def test_match_device_no_hostnames(mocker, capsys):
     assert 0 != ex.value.code
     out, err = capsys.readouterr()
     assert 'did not resolve to an EFS mount target' in err
-    gethostbyname_ex_mock.assert_called()
+    utils.assert_called(gethostbyname_ex_mock)
 
 
 def test_match_device_no_hostnames2(mocker, capsys):
@@ -105,7 +108,7 @@ def test_match_device_no_hostnames2(mocker, capsys):
     assert 0 != ex.value.code
     out, err = capsys.readouterr()
     assert 'did not resolve to an EFS mount target' in err
-    gethostbyname_ex_mock.assert_called()
+    utils.assert_called(gethostbyname_ex_mock)
 
 
 def test_match_device_resolve_to_invalid_efs_dns_name(mocker, capsys):
@@ -117,7 +120,7 @@ def test_match_device_resolve_to_invalid_efs_dns_name(mocker, capsys):
     assert 0 != ex.value.code
     out, err = capsys.readouterr()
     assert 'did not resolve to a valid DNS name' in err
-    gethostbyname_ex_mock.assert_called()
+    utils.assert_called(gethostbyname_ex_mock)
 
 
 def test_match_device_resolve_to_unexpected_efs_dns_name(mocker, capsys):
@@ -130,5 +133,5 @@ def test_match_device_resolve_to_unexpected_efs_dns_name(mocker, capsys):
     assert 0 != ex.value.code
     out, err = capsys.readouterr()
     assert 'did not resolve to a valid DNS name' in err
-    get_dns_name_mock.assert_called()
-    gethostbyname_ex_mock.assert_called()
+    utils.assert_called(get_dns_name_mock)
+    utils.assert_called(gethostbyname_ex_mock)

@@ -11,6 +11,8 @@ import watchdog
 import json
 import tempfile
 
+from .. import utils
+
 from datetime import datetime
 try:
     import ConfigParser
@@ -72,8 +74,8 @@ def test_no_state_files(mocker):
 
     watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD)
 
-    clean_up_mock.assert_not_called()
-    restart_tls_mock.assert_not_called()
+    utils.assert_not_called(clean_up_mock)
+    utils.assert_not_called(restart_tls_mock)
 
 
 def test_malformed_state_file(mocker, tmpdir):
@@ -83,8 +85,8 @@ def test_malformed_state_file(mocker, tmpdir):
 
     watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
 
-    clean_up_mock.assert_not_called()
-    restart_tls_mock.assert_not_called()
+    utils.assert_not_called(clean_up_mock)
+    utils.assert_not_called(restart_tls_mock)
 
 
 def test_no_mount_for_state_file(mocker, tmpdir):
@@ -96,8 +98,8 @@ def test_no_mount_for_state_file(mocker, tmpdir):
 
     watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
 
-    clean_up_mock.assert_not_called()
-    restart_tls_mock.assert_not_called()
+    utils.assert_not_called(clean_up_mock)
+    utils.assert_not_called(restart_tls_mock)
 
 
 def test_no_mount_for_state_file_out_of_grace_period(mocker, tmpdir):
@@ -110,9 +112,9 @@ def test_no_mount_for_state_file_out_of_grace_period(mocker, tmpdir):
 
     watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
 
-    clean_up_mock.assert_called_once()
-    restart_tls_mock.assert_not_called()
-    check_certificate_call.assert_not_called()
+    utils.assert_called_once(clean_up_mock)
+    utils.assert_not_called(restart_tls_mock)
+    utils.assert_not_called(check_certificate_call)
 
 
 def test_no_mount_for_state_file_in_grace_period(mocker, tmpdir):
@@ -125,8 +127,8 @@ def test_no_mount_for_state_file_in_grace_period(mocker, tmpdir):
 
     watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
 
-    clean_up_mock.assert_not_called()
-    restart_tls_mock.assert_not_called()
+    utils.assert_not_called(clean_up_mock)
+    utils.assert_not_called(restart_tls_mock)
 
 
 def test_tls_not_running(mocker, tmpdir):
@@ -138,8 +140,8 @@ def test_tls_not_running(mocker, tmpdir):
 
     watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
 
-    clean_up_mock.assert_not_called()
-    restart_tls_mock.assert_called_once()
+    utils.assert_not_called(clean_up_mock)
+    utils.assert_called_once(restart_tls_mock)
 
 
 def test_ap_mount_with_extra_mount(mocker, tmpdir):
@@ -153,6 +155,6 @@ def test_ap_mount_with_extra_mount(mocker, tmpdir):
 
     watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
 
-    clean_up_mock.assert_not_called()
-    restart_tls_mock.assert_not_called()
-    check_certificate_call.assert_called_once()
+    utils.assert_not_called(clean_up_mock)
+    utils.assert_not_called(restart_tls_mock)
+    utils.assert_called_once(check_certificate_call)

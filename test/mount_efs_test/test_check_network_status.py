@@ -12,6 +12,8 @@ import pytest
 
 from mock import MagicMock
 
+from .. import utils
+
 FS_ID = 'fs-deadbeef'
 
 
@@ -25,7 +27,7 @@ def test_non_systemd(mocker):
 
     mount_efs.check_network_status(FS_ID, 'init')
 
-    call_mock.assert_not_called()
+    utils.assert_not_called(call_mock)
 
 
 def test_systemd_network_up(mocker):
@@ -33,7 +35,7 @@ def test_systemd_network_up(mocker):
 
     mount_efs.check_network_status(FS_ID, 'systemd')
 
-    call_mock.assert_called_once()
+    utils.assert_called_once(call_mock)
 
 
 def test_systemd_network_down(mocker):
@@ -42,5 +44,5 @@ def test_systemd_network_down(mocker):
     with pytest.raises(SystemExit) as ex:
         mount_efs.check_network_status(FS_ID, 'systemd')
 
-    call_mock.assert_called_once()
+    utils.assert_called_once(call_mock)
     assert 0 == ex.value.code

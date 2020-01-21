@@ -13,10 +13,17 @@ import pytest
 
 from mock import MagicMock
 
+from .. import utils
+
 FS_ID = 'fs-deadbeef'
 DEFAULT_REGION = 'us-east-1'
-SPECIAL_DNS_NAME_SUFFIX = 'amazonaws.com.cn'
-SPECIAL_REGION = 'cn-north-1'
+SPECIAL_REGION_DNS_DICT = {
+    "cn-north-1": "amazonaws.com.cn",
+    "cn-northwest-1": "amazonaws.com.cn",
+    "us-iso-east-1": "c2s.ic.gov",
+    "us-isob-east-1": "sc2s.sgov.gov"
+}
+SPECIAL_REGIONS = ["cn-north-1", "cn-northwest-1", "us-iso-east-1", "us-isob-east-1"]
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +71,7 @@ def test_get_dns_name_region_hardcoded(mocker):
 
     dns_name = mount_efs.get_dns_name(config, FS_ID)
 
-    get_region_mock.assert_not_called()
+    utils.assert_not_called(get_region_mock)
 
     assert '%s.efs.%s.amazonaws.com' % (FS_ID, DEFAULT_REGION) == dns_name
 
@@ -76,7 +83,7 @@ def test_get_dns_name_region_and_suffix_hardcoded(mocker):
 
     dns_name = mount_efs.get_dns_name(config, FS_ID)
 
-    get_region_mock.assert_not_called()
+    utils.assert_not_called(get_region_mock)
 
     assert '%s.elastic-file-system.us-west-2.amazonaws.com' % FS_ID == dns_name
 
@@ -123,25 +130,32 @@ def test_get_dns_name_unresolvable(mocker, capsys):
 
 
 def test_get_dns_name_special_region(mocker):
-    mocker.patch('mount_efs.get_region', return_value=SPECIAL_REGION)
+    for special_region in SPECIAL_REGIONS:
+        mocker.patch('mount_efs.get_region', return_value=special_region)
 
-    config_section = 'mount.%s' % SPECIAL_REGION
-    config = _get_mock_config(dns_name_suffix=SPECIAL_DNS_NAME_SUFFIX, config_section=config_section)
-    config.has_section.return_value = True
+        config_section = 'mount.%s' % special_region
+        special_dns_name_suffix = SPECIAL_REGION_DNS_DICT[special_region]
 
-    dns_name = mount_efs.get_dns_name(config, FS_ID)
+        config = _get_mock_config(dns_name_suffix=special_dns_name_suffix, config_section=config_section)
+        config.has_section.return_value = True
 
-    assert '%s.efs.%s.%s' % (FS_ID, SPECIAL_REGION, SPECIAL_DNS_NAME_SUFFIX) == dns_name
+        dns_name = mount_efs.get_dns_name(config, FS_ID)
+
+        assert '%s.efs.%s.%s' % (FS_ID, special_region, special_dns_name_suffix) == dns_name
 
 
 def test_get_dns_name_region_in_suffix(mocker):
     get_region_mock = mocker.patch('mount_efs.get_region')
 
-    dns_name_suffix = '%s.%s' % (SPECIAL_REGION, SPECIAL_DNS_NAME_SUFFIX)
-    config = _get_mock_config('{fs_id}.efs.{dns_name_suffix}', dns_name_suffix=dns_name_suffix)
+    for special_region in SPECIAL_REGIONS:
+        special_dns_name_suffix = SPECIAL_REGION_DNS_DICT[special_region]
+        dns_name_suffix = '%s.%s' % (special_region, special_dns_name_suffix)
 
-    dns_name = mount_efs.get_dns_name(config, FS_ID)
+        config = _get_mock_config('{fs_id}.efs.{dns_name_suffix}', dns_name_suffix=dns_name_suffix)
 
-    get_region_mock.assert_not_called()
+        dns_name = mount_efs.get_dns_name(config, FS_ID)
 
-    assert '%s.efs.%s.%s' % (FS_ID, SPECIAL_REGION, SPECIAL_DNS_NAME_SUFFIX) == dns_name
+        utils.assert_not_called(get_region_mock)
+
+        assert '%s.efs.%s.%s' % (FS_ID, special_region, special_dns_name_suffix) == dns_name
+

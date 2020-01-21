@@ -10,6 +10,8 @@ import watchdog
 import json
 import tempfile
 
+from .. import utils
+
 PID = 1234
 
 
@@ -48,4 +50,4 @@ def test_restart_tls_tunnel_with_certificate_path(mocker, tmpdir):
 
     watchdog.restart_tls_tunnel([], state, state_file.dirname, state_file.basename)
 
-    start_tls_tunnel_call.assert_not_called()
+    utils.assert_not_called(start_tls_tunnel_call)

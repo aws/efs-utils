@@ -1,0 +1,61 @@
+version: 2.1
+executors:
+  python:
+    parameters:
+      image:
+        type: string
+    docker:
+      - image: << parameters.image >>
+commands:
+  runtest:
+    steps:
+      - checkout
+      - restore_cache:
+          key: efs-utils-{{ .Branch }}-{{ checksum "requirements.txt" }}
+      - run:
+          name: Install Python dependencies in a virtual env
+          command: |
+            python -m pip install --user virtualenv
+            python -m virtualenv ~/.env/efs-utils
+            source ~/.env/efs-utils/bin/activate
+            pip install -r requirements.txt
+      - save_cache:
+          key: efs-utils-{{ .Branch }}-{{ checksum "requirements.txt" }}
+          paths:
+            - ~/.env/efs-utils
+      - run:
+          name: Run all tests
+          command: |
+            source ~/.env/efs-utils/bin/activate
+            make test
+jobs:
+  test:
+    parameters:
+      image:
+        type: string
+    executor:
+      name: python
+      image: << parameters.image >>
+    steps:
+      - runtest
+workflows:
+  workflow:
+    jobs:
+      - test:
+          name: python38
+          image: circleci/python:3.8.1
+      - test:
+          name: python37
+          image: circleci/python:3.7.3
+      - test:
+          name: python36
+          image: circleci/python:3.6.9
+      - test:
+          name: python35
+          image: circleci/python:3.5.9
+      - test:
+          name: python34
+          image: circleci/python:3.4.9
+      - test:
+          name: python27
+          image: circleci/python:2.7.13

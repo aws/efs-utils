@@ -10,6 +10,8 @@ import watchdog
 
 from mock import MagicMock
 
+from .. import utils
+
 
 def test_child_procs_empty():
     watchdog.check_child_procs([])
@@ -27,6 +29,6 @@ def test_child_procs():
 
     assert 1 == len(children)
     assert dead_proc not in children
-    dead_proc.poll.assert_called_once()
+    utils.assert_called_once(dead_proc.poll)
     assert live_proc in children
-    live_proc.poll.assert_called_once()
+    utils.assert_called_once(live_proc.poll)

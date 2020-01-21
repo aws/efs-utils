@@ -10,6 +10,8 @@ import mount_efs
 
 from mock import MagicMock
 
+from .. import utils
+
 FS_ID = 'fs-deadbeef'
 
 
@@ -31,10 +33,10 @@ def test_systemd_system(mocker):
 
     mount_efs.start_watchdog('systemd')
 
-    call_mock.assert_called_once()
+    utils.assert_called_once(call_mock)
     assert 'systemctl' in call_mock.call_args[0][0]
     assert 'is-active' in call_mock.call_args[0][0]
-    popen_mock.assert_called_once()
+    utils.assert_called_once(popen_mock)
     assert 'systemctl' in popen_mock.call_args[0][0]
     assert 'start' in popen_mock.call_args[0][0]
 
@@ -44,4 +46,4 @@ def test_unknown_system(mocker):
 
     mount_efs.start_watchdog('unknown')
 
-    popen_mock.assert_not_called()
+    utils.assert_not_called(popen_mock)

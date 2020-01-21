@@ -14,6 +14,9 @@ from contextlib import contextmanager
 
 from mock import patch
 
+from .. import utils
+
+
 AP_ID = 'fsap-0123456789abcdef0'
 BAD_AP_ID_INCORRECT_START = 'bad-fsap-0123456789abc'
 BAD_AP_ID_TOO_SHORT = 'fsap-0123456789abcdef'
@@ -61,15 +64,15 @@ def _test_main(mocker, tls=False, root=True, ap_id=None, iam=False, awsprofile=N
 
     mount_efs.main()
 
-    bootstrap_logging_mock.assert_called_once()
-    get_dns_mock.assert_called_once()
-    parse_arguments_mock.assert_called_once()
-    mount_mock.assert_called_once()
+    utils.assert_called_once(bootstrap_logging_mock)
+    utils.assert_called_once(get_dns_mock)
+    utils.assert_called_once(parse_arguments_mock)
+    utils.assert_called_once(mount_mock)
 
     if tls:
-        bootstrap_tls_mock.assert_called_once()
+        utils.assert_called_once(bootstrap_tls_mock)
     else:
-        bootstrap_tls_mock.assert_not_called()
+        utils.assert_not_called(bootstrap_tls_mock)
 
 
 def _test_main_assert_error(mocker, capsys, expected_err, **kwargs):
