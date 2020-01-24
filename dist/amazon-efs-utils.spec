@@ -20,7 +20,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.19
+Version   : 1.20
 Release   : 1%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 

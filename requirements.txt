@@ -1,6 +1,6 @@
 attrs==17.4.0
 configparser==3.5.0
-coverage==4.5
+coverage==4.5.4
 enum34==1.1.6
 flake8==3.7.9
 funcsigs==1.0.2

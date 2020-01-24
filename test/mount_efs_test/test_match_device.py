@@ -33,6 +33,16 @@ def test_match_device_correct_descriptors_fs_id(mocker):
         assert (fs_id, path) == mount_efs.match_device(None, device)
 
 
+def test_match_device_correct_descriptors_cname_dns_suffix_override_region(mocker):
+    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value='fs-deadbeef.efs.cn-north-1.amazonaws.com.cn')
+    gethostbyname_ex_mock = mocker.patch('socket.gethostbyname_ex',
+                                         return_value=('fs-deadbeef.efs.cn-north-1.amazonaws.com.cn', [], None))
+    for device, (fs_id, path) in CORRECT_DEVICE_DESCRIPTORS_CNAME_DNS:
+        assert (fs_id, path) == mount_efs.match_device(None, device)
+    utils.assert_called(get_dns_name_mock)
+    utils.assert_called(gethostbyname_ex_mock)
+
+
 def test_match_device_correct_descriptors_cname_dns_primary(mocker):
     get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value='fs-deadbeef.efs.us-east-1.amazonaws.com')
     gethostbyname_ex_mock = mocker.patch('socket.gethostbyname_ex',

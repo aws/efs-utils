@@ -1,3 +1,5 @@
+[![CircleCI](https://circleci.com/gh/aws/efs-utils.svg?style=svg)](https://circleci.com/gh/aws/efs-utils)
+
 # efs-utils
 
 Utilities for Amazon Elastic File System (EFS)
