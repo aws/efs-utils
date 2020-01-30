@@ -11,7 +11,6 @@ import base64
 import errno
 import hashlib
 import hmac
-import itertools
 import json
 import logging
 import logging.handlers
@@ -46,7 +45,7 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.20'
+VERSION = '1.21'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -64,6 +63,11 @@ NOT_AFTER_HOURS = 3
 DATE_ONLY_FORMAT = '%Y%m%d'
 SIGV4_DATETIME_FORMAT = '%Y%m%dT%H%M%SZ'
 CERT_DATETIME_FORMAT = '%y%m%d%H%M%SZ'
+
+AWS_CREDENTIALS_FILES = {
+    'credentials': os.path.expanduser(os.path.join('~' + pwd.getpwuid(os.getuid()).pw_name, '.aws', 'credentials')),
+    'config': os.path.expanduser(os.path.join('~' + pwd.getpwuid(os.getuid()).pw_name, '.aws', 'config')),
+}
 
 CA_CONFIG_BODY = """dir = %s
 RANDFILE = $dir/database/.rand
@@ -112,6 +116,7 @@ REQUEST_PAYLOAD = ''
 
 AP_ID_RE = re.compile('^fsap-[0-9a-f]{17}$')
 
+ECS_TASK_METADATA_API = '169.254.170.2'
 INSTANCE_IAM_URL = 'http://169.254.169.254/latest/meta-data/iam/security-credentials/'
 SECURITY_CREDS_ECS_URI_HELP_URL = 'https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html'
 SECURITY_CREDS_IAM_ROLE_HELP_URL = 'https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html'
@@ -128,45 +133,57 @@ def fatal_error(user_message, log_message=None):
     sys.exit(1)
 
 
-def get_aws_security_credentials(awsprofile=None):
+def get_aws_security_credentials(credentials_source):
     """
     Lookup AWS security credentials (access key ID and secret access key). Adapted credentials provider chain from:
     https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html and
     https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/credentials.html
     """
-    aws_credentials_file = os.path.expanduser(os.path.join('~' + pwd.getpwuid(os.getuid()).pw_name, '.aws', 'credentials'))
-    aws_config_file = os.path.expanduser(os.path.join('~' + pwd.getpwuid(os.getuid()).pw_name, '.aws', 'config'))
-    # attempt to lookup AWS access key ID and secret access key in AWS credentials file (~/.aws/credentials)
-    if os.path.exists(aws_credentials_file):
-        credentials = credentials_file_helper(aws_credentials_file, awsprofile=awsprofile)
-        if credentials['AccessKeyId']:
-            return credentials
+    method, value = credentials_source.split(':', 1)
 
-    # in AWS configs file (~/.aws/config)
-    if os.path.exists(aws_config_file):
-        credentials = credentials_file_helper(aws_config_file, awsprofile=awsprofile)
-        if credentials['AccessKeyId']:
-            return credentials
-
-    # return None if option 'awsprofile' is present - this indicates no credentials were found in the config files
-    if awsprofile:
+    if method == 'credentials':
+        return get_aws_security_credentials_from_file('credentials', value)
+    elif method == 'config':
+        return get_aws_security_credentials_from_file('config', value)
+    elif method == 'ecs':
+        return get_aws_security_credentials_from_ecs(value)
+    elif method == 'metadata':
+        return get_aws_security_credentials_from_instance_metadata()
+    else:
+        logging.error('Improper credentials source string "%s" found from mount state file', credentials_source)
         return None
 
-    keys = ['AccessKeyId', 'SecretAccessKey', 'Token']
 
+def get_aws_security_credentials_from_file(file_name, awsprofile):
+    # attempt to lookup AWS security credentials in AWS credentials file (~/.aws/credentials) and configs file (~/.aws/config)
+    file_path = AWS_CREDENTIALS_FILES.get(file_name)
+    if file_path and os.path.exists(file_path):
+        credentials = credentials_file_helper(file_path, awsprofile)
+        if credentials['AccessKeyId']:
+            return credentials
+
+    logging.error('AWS security credentials not found in %s under named profile [%s]', file_path, awsprofile)
+    return None
+
+
+def get_aws_security_credentials_from_ecs(uri):
     # through ECS security credentials uri found in AWS_CONTAINER_CREDENTIALS_RELATIVE_URI environment variable
-    ecs_uri_env = 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'
-    if ecs_uri_env in os.environ:
-        ecs_uri = '169.254.170.2' + os.environ[ecs_uri_env]
-        ecs_unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % ecs_uri
-        ecs_url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.', ecs_uri, \
-                            SECURITY_CREDS_ECS_URI_HELP_URL
-        ecs_security_dict = url_request_helper(ecs_uri, ecs_unsuccessful_resp, ecs_url_error_msg)
+    dict_keys = ['AccessKeyId', 'SecretAccessKey', 'Token']
+    ecs_uri = ECS_TASK_METADATA_API + uri
+    ecs_unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % ecs_uri
+    ecs_url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.', ecs_uri, \
+                        SECURITY_CREDS_ECS_URI_HELP_URL
+    ecs_security_dict = url_request_helper(ecs_uri, ecs_unsuccessful_resp, ecs_url_error_msg)
 
-        if ecs_security_dict and all(k in ecs_security_dict for k in keys):
-            return ecs_security_dict
+    if ecs_security_dict and all(k in ecs_security_dict for k in dict_keys):
+        return ecs_security_dict
 
+    return None
+
+
+def get_aws_security_credentials_from_instance_metadata():
     # through IAM role name security credentials lookup uri (after lookup for IAM role name attached to instance)
+    dict_keys = ['AccessKeyId', 'SecretAccessKey', 'Token']
     iam_role_unsuccessful_resp = 'Unsuccessful retrieval of IAM role name at %s.' % INSTANCE_IAM_URL
     iam_role_url_error_msg = 'Unable to reach %s to retrieve IAM role name. See %s for more info.', INSTANCE_IAM_URL, \
                              SECURITY_CREDS_IAM_ROLE_HELP_URL
@@ -178,62 +195,36 @@ def get_aws_security_credentials(awsprofile=None):
                         security_creds_lookup_url, SECURITY_CREDS_IAM_ROLE_HELP_URL
         iam_security_dict = url_request_helper(security_creds_lookup_url, unsuccessful_resp, url_error_msg)
 
-        if iam_security_dict and all(k in iam_security_dict for k in keys):
+        if iam_security_dict and all(k in iam_security_dict for k in dict_keys):
             return iam_security_dict
 
-    error_msg = 'AWS Access Key ID and Secret Access Key are not found in AWS credentials file (%s), config file (%s), ' \
-                'from ECS credentials relative uri, or from the instance security credentials service' % \
-                (aws_credentials_file, aws_config_file)
-    logging.debug(error_msg)
-
-    return {'AccessKeyId': None, 'SecretAccessKey': None, 'Token': None}
+    return None
 
 
-def credentials_file_helper(file_path, awsprofile=None):
+def credentials_file_helper(file_path, awsprofile):
     aws_credentials_configs = read_config(file_path)
     credentials = {'AccessKeyId': None, 'SecretAccessKey': None, 'Token': None}
-    profile = awsprofile or get_correct_default_case_combination(aws_credentials_configs)
 
     try:
-        access_key = aws_credentials_configs.get(profile, 'aws_access_key_id')
-        secret_key = aws_credentials_configs.get(profile, 'aws_secret_access_key')
-        session_token = aws_credentials_configs.get(profile, 'aws_session_token')
+        aws_access_key_id = aws_credentials_configs.get(awsprofile, 'aws_access_key_id')
+        secret_access_key = aws_credentials_configs.get(awsprofile, 'aws_secret_access_key')
+        session_token = aws_credentials_configs.get(awsprofile, 'aws_session_token')
 
-        credentials['AccessKeyId'] = access_key
-        credentials['SecretAccessKey'] = secret_key
+        credentials['AccessKeyId'] = aws_access_key_id
+        credentials['SecretAccessKey'] = secret_access_key
         credentials['Token'] = session_token
     except NoOptionError as e:
         if 'aws_access_key_id' in str(e) or 'aws_secret_access_key' in str(e):
-            log_message = 'aws_access_key_id or aws_secret_access_key not found in %s under named profile [%s]' % \
-                          (file_path, profile)
-            if awsprofile:
-                logging.warning(log_message)
-            else:
-                logging.debug(log_message)
-
-            return credentials
+            logging.debug('aws_access_key_id or aws_secret_access_key not found in %s under named profile [%s]', file_path,
+                          awsprofile)
         if 'aws_session_token' in str(e):
             logging.debug('aws_session_token not found in %s', file_path)
-            credentials['AccessKeyId'] = aws_credentials_configs.get(profile, 'aws_access_key_id')
-            credentials['SecretAccessKey'] = aws_credentials_configs.get(profile, 'aws_secret_access_key')
+            credentials['AccessKeyId'] = aws_credentials_configs.get(awsprofile, 'aws_access_key_id')
+            credentials['SecretAccessKey'] = aws_credentials_configs.get(awsprofile, 'aws_secret_access_key')
     except NoSectionError:
-        logging.debug('No [%s] section found in config file %s', profile, file_path)
-        return None
+        logging.debug('No [%s] section found in config file %s', awsprofile, file_path)
 
     return credentials
-
-
-def get_correct_default_case_combination(aws_credentials_configs):
-    default_str = 'default'
-    for perm in map(''.join, itertools.product(*zip(default_str.upper(), default_str.lower()))):
-        try:
-            access_key = aws_credentials_configs.get(perm, 'aws_access_key_id')
-            if access_key is not None:
-                return perm
-        except (NoSectionError, NoOptionError):
-            continue
-
-    return default_str
 
 
 def url_request_helper(url, unsuccessful_resp, url_error_msg):
@@ -537,10 +528,9 @@ def check_certificate(config, state, state_file_dir, state_file, base_path=STATE
     else:
         logging.debug('Refreshing self-signed certificate (at %s)' % state['certificate'])
 
-    awsprofile = state.get('awsprofile')
+    credentials_source = state.get('awsCredentialsMethod')
     updated_certificate_creation_time = recreate_certificate(config, state['mountStateDir'], state['commonName'], state['fsId'],
-                                                             state['useIam'], ap_state, awsprofile, state['region'],
-                                                             base_path=base_path)
+                                                             credentials_source, ap_state, state['region'], base_path=base_path)
     if updated_certificate_creation_time:
         state['certificateCreationTime'] = updated_certificate_creation_time
         rewrite_state_file(state, state_file_dir, state_file)
@@ -574,7 +564,8 @@ def create_required_directory(config, directory):
             raise
 
 
-def recreate_certificate(config, mount_name, common_name, fs_id, use_iam, ap_id, awsprofile, region, base_path=STATE_FILE_DIR):
+def recreate_certificate(config, mount_name, common_name, fs_id, credentials_source, ap_id, region,
+                         base_path=STATE_FILE_DIR):
     current_time = get_utc_now()
     tls_paths = tls_paths_dictionary(mount_name, base_path)
 
@@ -587,12 +578,12 @@ def recreate_certificate(config, mount_name, common_name, fs_id, use_iam, ap_id,
 
     private_key = check_and_create_private_key(base_path)
 
-    if use_iam:
+    if credentials_source:
         public_key = os.path.join(tls_paths['mount_dir'], 'publicKey.pem')
         create_public_key(private_key, public_key)
 
     config_body = create_ca_conf(certificate_config, common_name, tls_paths['mount_dir'], private_key, current_time, region,
-                                 fs_id, use_iam, ap_id=ap_id, awsprofile=awsprofile)
+                                 fs_id, credentials_source, ap_id=ap_id)
 
     if not config_body:
         logging.error('Cannot recreate self-signed certificate')
@@ -664,21 +655,23 @@ def create_certificate_signing_request(config_path, key_path, csr_path):
     subprocess_call(cmd, 'Failed to create certificate signing request (csr)')
 
 
-def create_ca_conf(config_path, common_name, directory, private_key, date, region, fs_id, use_iam, ap_id=None, awsprofile=None):
+def create_ca_conf(config_path, common_name, directory, private_key, date, region, fs_id, credentials_source,
+                   ap_id=None):
     """Populate ca/req configuration file with fresh configurations at every mount since SigV4 signature can change"""
     public_key_path = os.path.join(directory, 'publicKey.pem')
-    credentials = get_aws_security_credentials(awsprofile=awsprofile) if use_iam else ''
+    security_credentials = get_aws_security_credentials(credentials_source) if credentials_source else ''
 
-    if awsprofile and credentials is None:
-        logging.error('Failed to retrieve AWS security credentials from named profile "%s" in ~/.aws/credentials or '
-                      '~/.aws/config', awsprofile)
+    if credentials_source and security_credentials is None:
+        logging.error('Failed to retrieve AWS security credentials using lookup method: %s', credentials_source)
         return None
 
-    ca_extension_body = ca_extension_builder(ap_id, use_iam, fs_id)
-    efs_client_auth_body = efs_client_auth_builder(public_key_path, credentials['AccessKeyId'], credentials['SecretAccessKey'],
-                                                   date, region, fs_id, credentials['Token']) if use_iam else ''
+    ca_extension_body = ca_extension_builder(ap_id, security_credentials, fs_id)
+    efs_client_auth_body = efs_client_auth_builder(public_key_path, security_credentials['AccessKeyId'],
+                                                   security_credentials['SecretAccessKey'], date, region, fs_id,
+                                                   security_credentials['Token']) if credentials_source else ''
 
-    if use_iam and not efs_client_auth_body:
+    if credentials_source and not efs_client_auth_body:
+        logging.error('Failed to create AWS SigV4 signature section for OpenSSL config. Public Key path: %s', public_key_path)
         return None
 
     full_config_body = CA_CONFIG_BODY % (directory, private_key, common_name, ca_extension_body, efs_client_auth_body)
@@ -689,13 +682,14 @@ def create_ca_conf(config_path, common_name, directory, private_key, date, regio
     return full_config_body
 
 
-def ca_extension_builder(ap_id, use_iam, fs_id):
+def ca_extension_builder(ap_id, security_credentials, fs_id):
     ca_extension_str = '[ v3_ca ]\nsubjectKeyIdentifier = hash'
     if ap_id:
         ca_extension_str += '\n1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:' + ap_id
-    if use_iam:
+    if security_credentials:
         ca_extension_str += '\n1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth'
-        ca_extension_str += '\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:' + fs_id
+
+    ca_extension_str += '\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:' + fs_id
 
     return ca_extension_str
 

@@ -102,6 +102,7 @@ $ sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
 ```
 
 To mount using an access point, use the `accesspoint=` option. This option requires the `tls` option.
+The access point must be in the "available" state before it can be used to mount EFS.
 
 ```
 $ sudo mount -t efs -o tls,accesspoint=access-point-id file-system-id efs-mount-point/

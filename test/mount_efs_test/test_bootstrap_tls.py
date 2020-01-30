@@ -64,7 +64,7 @@ def test_bootstrap_tls_state_file_dir_exists(mocker, tmpdir):
     popen_mock, _ = setup_mocks(mocker)
     state_file_dir = str(tmpdir)
 
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {}, state_file_dir):
         pass
 
     args, _ = popen_mock.call_args
@@ -90,7 +90,7 @@ def test_bootstrap_tls_state_file_nonexistent_dir(mocker, tmpdir):
 
     assert not os.path.exists(state_file_dir)
 
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {}, state_file_dir):
         pass
 
     assert os.path.exists(state_file_dir)
@@ -116,7 +116,7 @@ def test_bootstrap_tls_no_cert_creation(mocker, tmpdir):
     MOCK_CONFIG.get.side_effect = config_get_side_effect
 
     try:
-        with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, None, MOUNT_POINT, {}, state_file_dir):
+        with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {}, state_file_dir):
             pass
     except OSError as e:
         assert '[Errno 2] No such file or directory' in str(e)
@@ -148,8 +148,8 @@ def test_bootstrap_tls_cert_created(mocker, tmpdir):
     MOCK_CONFIG.get.side_effect = config_get_side_effect
 
     try:
-        with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {},
-                                     state_file_dir=state_file_dir):
+        with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'accesspoint': AP_ID},
+                                     state_file_dir):
             pass
     except OSError as e:
         assert '[Errno 2] No such file or directory' in str(e)
@@ -166,7 +166,7 @@ def test_bootstrap_tls_non_default_port(mocker, tmpdir):
     state_file_dir = str(tmpdir)
 
     tls_port = 1000
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {'tlsport': tls_port},
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'tlsport': tls_port},
                                  state_file_dir):
         pass
 
@@ -184,7 +184,7 @@ def test_bootstrap_tls_non_default_verify_level(mocker, tmpdir):
     state_file_dir = str(tmpdir)
 
     verify = 0
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {'verify': verify},
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'verify': verify},
                                  state_file_dir):
         pass
 
@@ -201,7 +201,7 @@ def test_bootstrap_tls_ocsp_option(mocker, tmpdir):
     popen_mock, write_config_mock = setup_mocks(mocker)
     state_file_dir = str(tmpdir)
 
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {'ocsp': None}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'ocsp': None}, state_file_dir):
         pass
 
     popen_args, _ = popen_mock.call_args
@@ -218,7 +218,7 @@ def test_bootstrap_tls_noocsp_option(mocker, tmpdir):
     popen_mock, write_config_mock = setup_mocks(mocker)
     state_file_dir = str(tmpdir)
 
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, AP_ID, MOUNT_POINT, {'noocsp': None}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'noocsp': None}, state_file_dir):
         pass
 
     popen_args, _ = popen_mock.call_args

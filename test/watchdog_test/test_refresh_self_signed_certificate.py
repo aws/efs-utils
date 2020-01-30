@@ -30,6 +30,7 @@ AP_ID = 'fsap-0123456789abcdef0'
 BAD_AP_ID_INCORRECT_START = 'bad-fsap-0123456789abc'
 BAD_AP_ID_TOO_SHORT = 'fsap-0123456789abcdef'
 BAD_AP_ID_BAD_CHAR = 'fsap-0123456789abcdefg'
+CREDENTIALS_SOURCE = 'credentials:default'
 ACCESS_KEY_ID_VAL = 'FAKE_AWS_ACCESS_KEY_ID'
 SECRET_ACCESS_KEY_VAL = 'FAKE_AWS_SECRET_ACCESS_KEY'
 SESSION_TOKEN_VAL = 'FAKE_SESSION_TOKEN'
@@ -39,6 +40,13 @@ CREDENTIALS = {
     'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
     'Token': SESSION_TOKEN_VAL
 }
+PUBLIC_KEY_BODY = '-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEArGJgJTTwefL+jHV8A9EM\npX56n3Z' \
+                  'JczM+4iPPSnledJzBcUO1VF+j6TOzy39BWBtvRjSs0nqd5wqw+1xHawhh\ndJF5KsqMNGcP/y9fLi9Bm1vInHfQVan4NhXWh8S' \
+                  'NbRZM1tNZV5/k+VnFur6ACHwq\neWppGXkGBASL0zG0MiCbOVMkwfv/E69APVC6ljnPXBWaDuggAClYheTv5RIU4wD1\nc1nohR' \
+                  'b0ZHyfZjELjnqLfY0eOqY+msQXzP0eUmZXCMvUkGxi5DJnNVKhw5y96QbB\nRFO5ImQXpNsQmp8F9Ih1RIxNsl4csaEuK+/Zo' \
+                  'J68vR47oQNtPp1PjdIwcnQ3cOvO\nHMxulMX21Fd/e9TsnqISOTOyebmYFgaHczg4JVu5lV699+7QWJm1a7M4ab0WgVVR\nz27J0' \
+                  'Lx/691MZB4TbGoEIFza30/sk6uTPxAzebzCaroXzT7uA6TIRtRpxt4X9a+4\n6GhfgR5RJfFMb8rPGmaKWqA2YkTsZzRGHhbAzs' \
+                  'J/nEstAgMBAAE=\n-----END PUBLIC KEY-----'
 
 
 @pytest.fixture(autouse=True)
@@ -71,16 +79,18 @@ def _get_mock_private_key_path(mocker, tmpdir):
     return pk_path
 
 
-def _create_certificate_and_state(tls_dict, temp_dir, pk_path, timestamp, iam, ap_id=None, remove_cert=False):
+def _create_certificate_and_state(tls_dict, temp_dir, pk_path, timestamp, security_credentials=None,
+                                  credentials_source=None, ap_id=None, remove_cert=False):
     config = _get_config()
     good_ap_id = AP_ID if ap_id else None
-    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, iam, good_ap_id, base_path=str(temp_dir))
+    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, security_credentials, good_ap_id,
+                                 base_path=str(temp_dir))
 
     assert os.path.exists(pk_path)
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
 
-    public_key_present = os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem')) if iam \
+    public_key_present = os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem')) if security_credentials \
         else not os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
     assert public_key_present
 
@@ -92,9 +102,11 @@ def _create_certificate_and_state(tls_dict, temp_dir, pk_path, timestamp, iam, a
         'mountStateDir': MOUNT_NAME,
         'region': REGION,
         'fsId': FS_ID,
-        'useIam': iam,
         'privateKey': pk_path,
     }
+
+    if credentials_source:
+        state['awsCredentialsMethod'] = credentials_source
 
     if ap_id:
         state['accessPoint'] = ap_id
@@ -109,13 +121,34 @@ def _create_certificate_and_state(tls_dict, temp_dir, pk_path, timestamp, iam, a
     return state
 
 
+def _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True):
+    tls_dict = mount_efs.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
+    mount_efs.create_required_directory({}, tls_dict['mount_dir'])
+    tls_dict['certificate_path'] = os.path.join(tls_dict['mount_dir'], 'config.conf')
+    tls_dict['private_key'] = os.path.join(tls_dict['mount_dir'], 'privateKey.pem')
+    tls_dict['public_key'] = os.path.join(tls_dict['mount_dir'], 'publicKey.pem')
+
+    if iam:
+        with open(tls_dict['public_key'], 'w') as f:
+            f.write(PUBLIC_KEY_BODY)
+
+    mocker.patch('watchdog.get_aws_security_credentials', return_value=CREDENTIALS)
+    credentials = 'dummy:lookup' if iam else None
+    ap_id = AP_ID if ap else None
+    full_config_body = watchdog.create_ca_conf(tls_dict['certificate_path'], COMMON_NAME, tls_dict['mount_dir'],
+                                               tls_dict['private_key'], current_time, REGION, FS_ID, credentials, ap_id)
+    assert os.path.exists(tls_dict['certificate_path'])
+
+    return tls_dict, full_config_body
+
+
 def test_do_not_refresh_self_signed_certificate(mocker, tmpdir):
     mocker.patch('watchdog.get_utc_now', return_value=FIXED_DT)
     config = _get_config()
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     current_time_formatted = FIXED_DT.strftime(DT_PATTERN)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, current_time_formatted, False, ap_id=AP_ID)
+    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, current_time_formatted, ap_id=AP_ID)
 
     watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
 
@@ -125,7 +158,7 @@ def test_do_not_refresh_self_signed_certificate(mocker, tmpdir):
     assert datetime.strptime(state['certificateCreationTime'], DT_PATTERN) == datetime.strptime(current_time_formatted,
                                                                                                 DT_PATTERN)
     assert state['accessPoint'] == AP_ID
-    assert state['useIam'] is False
+    assert not state.get('awsCredentialsMethod')
     assert os.path.exists(pk_path)
     assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
@@ -139,7 +172,7 @@ def test_do_not_refresh_self_signed_certificate_bad_ap_id_incorrect_start(mocker
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     four_hours_back = (FIXED_DT - timedelta(hours=4)).strftime(DT_PATTERN)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, False, ap_id=BAD_AP_ID_INCORRECT_START,
+    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, ap_id=BAD_AP_ID_INCORRECT_START,
                                           remove_cert=True)
 
     watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
@@ -157,7 +190,7 @@ def test_do_not_refresh_self_signed_certificate_bad_ap_id_too_short(mocker, tmpd
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     four_hours_back = (FIXED_DT - timedelta(hours=4)).strftime(DT_PATTERN)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, False, ap_id=BAD_AP_ID_TOO_SHORT,
+    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, ap_id=BAD_AP_ID_TOO_SHORT,
                                           remove_cert=True)
 
     watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
@@ -174,7 +207,7 @@ def test_do_not_refresh_self_signed_certificate_bad_ap_id_bad_char(mocker, tmpdi
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     four_hours_back = (FIXED_DT - timedelta(hours=4)).strftime(DT_PATTERN)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, False, ap_id=BAD_AP_ID_BAD_CHAR,
+    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, ap_id=BAD_AP_ID_BAD_CHAR,
                                           remove_cert=True)
 
     watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
@@ -190,14 +223,14 @@ def test_recreate_missing_self_signed_certificate(mocker, tmpdir):
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     four_hours_back = (FIXED_DT - timedelta(hours=4)).strftime(DT_PATTERN)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, False, ap_id=AP_ID, remove_cert=True)
+    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, ap_id=AP_ID, remove_cert=True)
 
     watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
 
     assert datetime.strptime(state['certificateCreationTime'], DT_PATTERN) > datetime.strptime(four_hours_back, DT_PATTERN)
 
     assert state['accessPoint'] == AP_ID
-    assert state['useIam'] is False
+    assert not state.get('awsCredentialsMethod')
     assert os.path.exists(pk_path)
     assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
@@ -210,7 +243,7 @@ def test_refresh_self_signed_certificate_without_iam_with_ap_id(mocker, tmpdir):
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     four_hours_back = (FIXED_DT - timedelta(hours=4)).strftime(DT_PATTERN)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, False, ap_id=AP_ID)
+    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, ap_id=AP_ID)
 
     watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
 
@@ -219,7 +252,7 @@ def test_refresh_self_signed_certificate_without_iam_with_ap_id(mocker, tmpdir):
 
     assert datetime.strptime(state['certificateCreationTime'], DT_PATTERN) > datetime.strptime(four_hours_back, DT_PATTERN)
     assert state['accessPoint'] == AP_ID
-    assert state['useIam'] is False
+    assert not state.get('awsCredentialsMethod')
     assert os.path.exists(pk_path)
     assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
@@ -232,7 +265,8 @@ def test_refresh_self_signed_certificate_with_iam_without_ap_id(mocker, tmpdir):
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     four_hours_back = (FIXED_DT - timedelta(hours=4)).strftime(DT_PATTERN)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, True)
+    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, security_credentials=CREDENTIALS,
+                                          credentials_source=CREDENTIALS_SOURCE)
 
     watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
 
@@ -241,7 +275,7 @@ def test_refresh_self_signed_certificate_with_iam_without_ap_id(mocker, tmpdir):
 
     assert datetime.strptime(state['certificateCreationTime'], DT_PATTERN) > datetime.strptime(four_hours_back, DT_PATTERN)
     assert 'accessPoint' not in state
-    assert state['useIam'] is True
+    assert state['awsCredentialsMethod'] == CREDENTIALS_SOURCE
     assert os.path.exists(pk_path)
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
@@ -254,7 +288,8 @@ def test_refresh_self_signed_certificate_with_iam_with_ap_id(mocker, tmpdir):
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     four_hours_back = (FIXED_DT - timedelta(hours=4)).strftime(DT_PATTERN)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, True, ap_id=AP_ID)
+    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, security_credentials=CREDENTIALS,
+                                          credentials_source=CREDENTIALS_SOURCE, ap_id=AP_ID)
 
     watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
 
@@ -263,7 +298,7 @@ def test_refresh_self_signed_certificate_with_iam_with_ap_id(mocker, tmpdir):
 
     assert datetime.strptime(state['certificateCreationTime'], DT_PATTERN) > datetime.strptime(four_hours_back, DT_PATTERN)
     assert state['accessPoint'] == AP_ID
-    assert state['useIam'] is True
+    assert state['awsCredentialsMethod'] == CREDENTIALS_SOURCE
     assert os.path.exists(pk_path)
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
@@ -282,7 +317,7 @@ def test_refresh_self_signed_certificate_send_sighup(mocker, tmpdir, caplog):
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     four_hours_back = (datetime.utcnow() - timedelta(hours=4)).strftime(DT_PATTERN)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, False, ap_id=AP_ID)
+    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, ap_id=AP_ID)
 
     watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
 
@@ -331,14 +366,7 @@ def test_create_canonical_request_with_token(mocker):
 def test_get_public_key_sha1(tmpdir):
     fake_public_key_filename = 'fake_public_key.pem'
     fake_public_key_path = os.path.join(str(tmpdir), fake_public_key_filename)
-    public_key_body = '-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEArGJgJTTwefL+jHV8A9EM\npX56n3Z' \
-                      'JczM+4iPPSnledJzBcUO1VF+j6TOzy39BWBtvRjSs0nqd5wqw+1xHawhh\ndJF5KsqMNGcP/y9fLi9Bm1vInHfQVan4NhXWh8S' \
-                      'NbRZM1tNZV5/k+VnFur6ACHwq\neWppGXkGBASL0zG0MiCbOVMkwfv/E69APVC6ljnPXBWaDuggAClYheTv5RIU4wD1\nc1nohR' \
-                      'b0ZHyfZjELjnqLfY0eOqY+msQXzP0eUmZXCMvUkGxi5DJnNVKhw5y96QbB\nRFO5ImQXpNsQmp8F9Ih1RIxNsl4csaEuK+/Zo' \
-                      'J68vR47oQNtPp1PjdIwcnQ3cOvO\nHMxulMX21Fd/e9TsnqISOTOyebmYFgaHczg4JVu5lV699+7QWJm1a7M4ab0WgVVR\nz27J0' \
-                      'Lx/691MZB4TbGoEIFza30/sk6uTPxAzebzCaroXzT7uA6TIRtRpxt4X9a+4\n6GhfgR5RJfFMb8rPGmaKWqA2YkTsZzRGHhbAzs' \
-                      'J/nEstAgMBAAE=\n-----END PUBLIC KEY-----'
-    tmpdir.join(fake_public_key_filename).write(public_key_body)
+    tmpdir.join(fake_public_key_filename).write(PUBLIC_KEY_BODY)
 
     sha1_result = watchdog.get_public_key_sha1(fake_public_key_path)
 
@@ -368,7 +396,7 @@ def test_recreate_certificate_primary_assets_created(mocker, tmpdir):
     config = _get_config()
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    watchdog.recreate_certificate(config, MOUNT_NAME, COMMON_NAME, FS_ID, False, AP_ID, None, REGION, base_path=str(tmpdir))
+    watchdog.recreate_certificate(config, MOUNT_NAME, COMMON_NAME, FS_ID, None, AP_ID, REGION, base_path=str(tmpdir))
     assert os.path.exists(pk_path)
     assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
@@ -409,6 +437,49 @@ def test_create_ca_supporting_files(tmpdir):
 
 def test_create_ca_conf_with_awsprofile_no_credentials_found(mocker, caplog, tmpdir):
     mocker.patch('watchdog.get_aws_security_credentials', return_value=None)
-    watchdog.create_ca_conf(None, None, str(tmpdir), None, None, None, None, True, awsprofile='test_profile')
-    assert 'Failed to retrieve AWS security credentials from named profile "%s"' % 'test_profile' in \
+    watchdog.create_ca_conf(None, None, str(tmpdir), None, None, None, None, CREDENTIALS_SOURCE)
+    assert 'Failed to retrieve AWS security credentials using lookup method: %s' % CREDENTIALS_SOURCE in \
            [rec.message for rec in caplog.records][0]
+
+
+def test_create_ca_conf_with_iam_and_accesspoint(mocker, tmpdir):
+    current_time = mount_efs.get_utc_now()
+    tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True)
+
+    ca_extension_body = '[ v3_ca ]\nsubjectKeyIdentifier = hash\n1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n1.3.6.1.4.1.4843.' \
+                        '7.2 = ASN1:SEQUENCE:efs_client_auth\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s' % (AP_ID, FS_ID)
+    efs_client_auth_body = watchdog.efs_client_auth_builder(tls_dict['public_key'], CREDENTIALS['AccessKeyId'],
+                                                            CREDENTIALS['SecretAccessKey'], current_time, REGION, FS_ID,
+                                                            CREDENTIALS['Token'])
+    matching_config_body = watchdog.CA_CONFIG_BODY % (tls_dict['mount_dir'], tls_dict['private_key'], COMMON_NAME,
+                                                      ca_extension_body, efs_client_auth_body)
+
+    assert full_config_body == matching_config_body
+
+
+def test_create_ca_conf_with_iam_no_accesspoint(mocker, tmpdir):
+    current_time = mount_efs.get_utc_now()
+    tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=False)
+
+    ca_extension_body = '[ v3_ca ]\nsubjectKeyIdentifier = hash\n1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth' \
+                        '\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s' % FS_ID
+    efs_client_auth_body = watchdog.efs_client_auth_builder(tls_dict['public_key'], CREDENTIALS['AccessKeyId'],
+                                                            CREDENTIALS['SecretAccessKey'], current_time, REGION, FS_ID,
+                                                            CREDENTIALS['Token'])
+    matching_config_body = watchdog.CA_CONFIG_BODY % (tls_dict['mount_dir'], tls_dict['private_key'], COMMON_NAME,
+                                                      ca_extension_body, efs_client_auth_body)
+
+    assert full_config_body == matching_config_body
+
+
+def test_create_ca_conf_with_accesspoint_no_iam(mocker, tmpdir):
+    current_time = mount_efs.get_utc_now()
+    tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=False, ap=True)
+
+    ca_extension_body = '[ v3_ca ]\nsubjectKeyIdentifier = hash\n1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n1.3.6.1.4.1.4843' \
+                        '.7.3 = ASN1:UTF8String:%s' % (AP_ID, FS_ID)
+    efs_client_auth_body = ''
+    matching_config_body = watchdog.CA_CONFIG_BODY % (tls_dict['mount_dir'], tls_dict['private_key'], COMMON_NAME,
+                                                      ca_extension_body, efs_client_auth_body)
+
+    assert full_config_body == matching_config_body

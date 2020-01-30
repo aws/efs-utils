@@ -73,24 +73,6 @@ def _config_helper(tmpdir, add_test_profile=False):
     return fake_file, config
 
 
-def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_without_token_no_awsprofile(mocker):
-    file_helper_resp = {
-        'AccessKeyId': ACCESS_KEY_ID_VAL,
-        'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
-        'Token': None
-    }
-
-    mocker.patch.dict(os.environ, {})
-    mocker.patch('os.path.exists', return_value=True)
-    mocker.patch('mount_efs.credentials_file_helper', return_value=file_helper_resp)
-
-    credentials = mount_efs.get_aws_security_credentials()
-
-    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
-    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
-    assert credentials['Token'] is None
-
-
 def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_without_token_with_awsprofile(mocker):
     file_helper_resp = {
         'AccessKeyId': ACCESS_KEY_ID_VAL,
@@ -102,29 +84,12 @@ def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_wit
     mocker.patch('os.path.exists', return_value=True)
     mocker.patch('mount_efs.credentials_file_helper', return_value=file_helper_resp)
 
-    credentials = mount_efs.get_aws_security_credentials(awsprofile='test_profile')
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, 'test_profile')
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
     assert credentials['Token'] is None
-
-
-def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_with_token_no_awsprofile(mocker):
-    file_helper_resp = {
-        'AccessKeyId': ACCESS_KEY_ID_VAL,
-        'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
-        'Token': SESSION_TOKEN_VAL
-    }
-
-    mocker.patch.dict(os.environ, {})
-    mocker.patch('os.path.exists', return_value=True)
-    mocker.patch('mount_efs.credentials_file_helper', return_value=file_helper_resp)
-
-    credentials = mount_efs.get_aws_security_credentials()
-
-    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
-    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
-    assert credentials['Token'] is SESSION_TOKEN_VAL
+    assert credentials_source == 'credentials:test_profile'
 
 
 def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_with_token_with_awsprofile(mocker):
@@ -138,14 +103,22 @@ def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_wit
     mocker.patch('os.path.exists', return_value=True)
     mocker.patch('mount_efs.credentials_file_helper', return_value=file_helper_resp)
 
-    credentials = mount_efs.get_aws_security_credentials(awsprofile='test_profile')
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, 'test_profile')
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
     assert credentials['Token'] is SESSION_TOKEN_VAL
+    assert credentials_source == 'credentials:test_profile'
 
 
-def test_get_aws_security_credentials_ecs(mocker):
+def test_get_aws_security_credentials_do_not_use_iam():
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(False, 'test_profile')
+
+    assert not credentials
+    assert not credentials_source
+
+
+def test_get_aws_security_credentials_get_ecs(mocker):
     mocker.patch.dict(os.environ, {})
     mocker.patch('os.path.exists', return_value=False)
     response = json.dumps({
@@ -158,14 +131,15 @@ def test_get_aws_security_credentials_ecs(mocker):
     mocker.patch.dict(os.environ, {'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI': 'fake_uri'})
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse(data=response))
 
-    credentials = mount_efs.get_aws_security_credentials()
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, None)
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
     assert credentials['Token'] == SESSION_TOKEN_VAL
+    assert credentials_source == 'ecs:fake_uri'
 
 
-def test_get_aws_security_credentials_iam(mocker):
+def test_get_aws_security_credentials_get_instance_metadata(mocker):
     mocker.patch.dict(os.environ, {})
     mocker.patch('os.path.exists', return_value=False)
     response = json.dumps({
@@ -180,44 +154,45 @@ def test_get_aws_security_credentials_iam(mocker):
     mocker.patch.dict(os.environ, {})
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse(data=response))
 
-    credentials = mount_efs.get_aws_security_credentials()
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, None)
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
     assert credentials['Token'] == SESSION_TOKEN_VAL
+    assert credentials_source == 'metadata:'
 
 
-def test_get_aws_security_credentials_not_found(mocker, capsys):
+def test_get_aws_security_credentials_no_credentials_found(mocker, capsys):
     mocker.patch.dict(os.environ, {})
     mocker.patch('os.path.exists', return_value=False)
     mocker.patch('mount_efs.urlopen')
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.get_aws_security_credentials()
+        mount_efs.get_aws_security_credentials(True, None)
 
     assert 0 != ex.value.code
 
     out, err = capsys.readouterr()
     assert 'AWS Access Key ID and Secret Access Key are not found in AWS credentials file' in err
+    assert 'from ECS credentials relative uri, or from the instance security credentials service' in err
 
 
-def test_credentials_file_helper_found_with_token_default(tmpdir):
-    fake_file, config = _config_helper(tmpdir)
+def test_get_aws_security_credentials_credentials_not_found_in_files(mocker, capsys):
+    mocker.patch.dict(os.environ, {})
+    mocker.patch('os.path.exists', return_value=False)
+    mocker.patch('mount_efs.urlopen')
 
-    config.set(DEFAULT_PROFILE, ACCESS_KEY_ID_KEY, ACCESS_KEY_ID_VAL)
-    config.set(DEFAULT_PROFILE, SECRET_ACCESS_KEY_KEY, SECRET_ACCESS_KEY_VAL)
-    config.set(DEFAULT_PROFILE, SESSION_TOKEN_KEY, SESSION_TOKEN_VAL)
-    with open(fake_file, 'w') as f:
-        config.write(f)
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.get_aws_security_credentials(True, 'default')
 
-    credentials = mount_efs.credentials_file_helper(fake_file)
+    assert 0 != ex.value.code
 
-    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
-    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
-    assert credentials['Token'] == SESSION_TOKEN_VAL
+    out, err = capsys.readouterr()
+    assert 'AWS security credentials not found in' in err
+    assert 'under named profile [default]' in err
 
 
-def test_credentials_file_helper_found_with_token_awsprofile(tmpdir):
+def test_credentials_file_helper_awsprofile_found_with_token(tmpdir):
     fake_file, config = _config_helper(tmpdir, add_test_profile=True)
 
     config.set(DEFAULT_PROFILE, ACCESS_KEY_ID_KEY, WRONG_ACCESS_KEY_ID_VAL)
@@ -229,31 +204,14 @@ def test_credentials_file_helper_found_with_token_awsprofile(tmpdir):
     with open(fake_file, 'w') as f:
         config.write(f)
 
-    credentials = mount_efs.credentials_file_helper(fake_file, awsprofile=AWSPROFILE)
+    credentials = mount_efs.credentials_file_helper(fake_file, AWSPROFILE)
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
     assert credentials['Token'] == SESSION_TOKEN_VAL
 
 
-def test_credentials_file_helper_found_without_token_default(caplog, tmpdir):
-    caplog.set_level(logging.DEBUG)
-    fake_file, config = _config_helper(tmpdir)
-
-    config.set(DEFAULT_PROFILE, ACCESS_KEY_ID_KEY, ACCESS_KEY_ID_VAL)
-    config.set(DEFAULT_PROFILE, SECRET_ACCESS_KEY_KEY, SECRET_ACCESS_KEY_VAL)
-    with open(fake_file, 'w') as f:
-        config.write(f)
-
-    credentials = mount_efs.credentials_file_helper(fake_file)
-
-    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
-    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
-    assert credentials['Token'] is None
-    assert 'aws_session_token' in [rec.message for rec in caplog.records][0]
-
-
-def test_credentials_file_helper_found_without_token_awsprofile(caplog, tmpdir):
+def test_credentials_file_helper_awsprofile_found_without_token(caplog, tmpdir):
     caplog.set_level(logging.DEBUG)
     fake_file, config = _config_helper(tmpdir, add_test_profile=True)
 
@@ -272,59 +230,32 @@ def test_credentials_file_helper_found_without_token_awsprofile(caplog, tmpdir):
     assert 'aws_session_token' in [rec.message for rec in caplog.records][0]
 
 
-def test_credentials_file_helper_not_found_no_default(caplog, tmpdir):
+def test_credentials_file_helper_awsprofile_not_found(caplog, tmpdir):
     caplog.set_level(logging.DEBUG)
     fake_file = os.path.join(str(tmpdir), 'fake_aws_config')
     tmpdir.join('fake_aws_config').write('')
 
-    credentials = mount_efs.credentials_file_helper(fake_file)
+    credentials = mount_efs.credentials_file_helper(fake_file, 'default')
 
     assert credentials['AccessKeyId'] is None
     assert credentials['SecretAccessKey'] is None
     assert credentials['Token'] is None
-    assert 'No [default] section found in config file' in [rec.message for rec in caplog.records][0]
+
+    assert 'No [default] section found in config file %s' % fake_file in [rec.message for rec in caplog.records][0]
 
 
-def test_credentials_file_helper_not_found_no_awsprofile(capsys, tmpdir):
-    fake_file = os.path.join(str(tmpdir), 'fake_aws_config')
-    tmpdir.join('fake_aws_config').write('')
-
-    with pytest.raises(SystemExit) as ex:
-        mount_efs.credentials_file_helper(fake_file, awsprofile='test_profile')
-
-    assert 0 != ex.value.code
-
-    out, err = capsys.readouterr()
-    assert 'No [test_profile] section found in config file' in err
-
-
-def test_credentials_file_helper_not_found_with_default(caplog, tmpdir):
+def test_credentials_file_helper_awsprofile_found_missing_key(caplog, tmpdir):
     caplog.set_level(logging.DEBUG)
-    fake_file, config = _config_helper(tmpdir)
-
-    config.set(DEFAULT_PROFILE, SECRET_ACCESS_KEY_KEY, WRONG_SECRET_ACCESS_KEY_VAL)
-    with open(fake_file, 'w') as f:
-        config.write(f)
-
-    credentials = mount_efs.credentials_file_helper(fake_file)
-
-    assert credentials['AccessKeyId'] is None
-    assert credentials['SecretAccessKey'] is None
-    assert credentials['Token'] is None
-    assert 'No [default] section found in config file' in [rec.message for rec in caplog.records][0]
-
-
-def test_credentials_file_helper_not_found_with_awsprofile(capsys, tmpdir):
     fake_file = os.path.join(str(tmpdir), 'fake_aws_config')
     tmpdir.join('fake_aws_config').write('[default]\naws_access_key_id = WRONG_AWS_ACCESS_KEY_ID\n'
                                          'aws_secret_access_key = WRONG_AWS_SECRET_ACCESS_KEY\n\n'
                                          '[test_profile]\naws_secret_access_key = FAKE_AWS_SECRET_ACCESS_KEY')
 
-    with pytest.raises(SystemExit) as ex:
-        mount_efs.credentials_file_helper(fake_file, awsprofile='test_profile')
+    credentials = mount_efs.credentials_file_helper(fake_file, 'test_profile')
 
-    assert 0 != ex.value.code
+    assert credentials['AccessKeyId'] is None
+    assert credentials['SecretAccessKey'] is None
+    assert credentials['Token'] is None
 
-    out, err = capsys.readouterr()
-    assert 'aws_access_key_id or aws_secret_access_key not found' in err
-    assert 'under named profile [test_profile]' in err
+    assert 'aws_access_key_id or aws_secret_access_key not found in %s under named profile [test_profile]' % fake_file \
+           in [rec.message for rec in caplog.records][0]

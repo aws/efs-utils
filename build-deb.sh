@@ -11,7 +11,7 @@ set -ex
 
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
-VERSION=1.20
+VERSION=1.21
 
 echo 'Cleaning deb build workspace'
 rm -rf ${BUILD_ROOT}
