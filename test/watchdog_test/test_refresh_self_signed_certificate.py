@@ -58,12 +58,14 @@ def setup(mocker):
     mocker.patch('watchdog.get_aws_security_credentials', return_value=CREDENTIALS)
 
 
-def _get_config(dns_name_format='{fs_id}.efs.{region}.amazonaws.com'):
+def _get_config(dns_name_format='{fs_id}.efs.{region}.amazonaws.com', certificate_renewal_interval=60):
     def config_get_side_effect(section, field):
         if field == 'state_file_dir_mode':
             return '0755'
         elif field == 'dns_name_format':
             return dns_name_format
+        elif field == 'tls_cert_renewal_interval_min':
+            return certificate_renewal_interval
         else:
             raise ValueError('Unexpected arguments')
 
@@ -140,6 +142,48 @@ def _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True):
     assert os.path.exists(tls_dict['certificate_path'])
 
     return tls_dict, full_config_body
+
+
+def _test_refresh_certificate_helper(mocker, tmpdir, caplog, minutes_back, renewal_interval=60, with_iam=True, with_ap=True):
+    mocker.patch('watchdog.get_utc_now', return_value=FIXED_DT)
+    config = _get_config(certificate_renewal_interval=renewal_interval)
+    pk_path = _get_mock_private_key_path(mocker, tmpdir)
+    minutes_back = (FIXED_DT - timedelta(minutes=minutes_back)).strftime(DT_PATTERN)
+    tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
+
+    if not with_iam and with_ap:
+        state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, minutes_back, ap_id=AP_ID)
+    elif with_iam and not with_ap:
+        state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, minutes_back, security_credentials=CREDENTIALS,
+                                              credentials_source=CREDENTIALS_SOURCE)
+    else:
+        state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, minutes_back, security_credentials=CREDENTIALS,
+                                              credentials_source=CREDENTIALS_SOURCE, ap_id=AP_ID)
+
+    watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
+
+    with open(os.path.join(str(tmpdir), STATE_FILE), 'r') as state_json:
+        state = json.load(state_json)
+
+    if not with_iam and with_ap:
+        assert state['accessPoint'] == AP_ID
+        assert not state.get('awsCredentialsMethod')
+        assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
+    elif with_iam and not with_ap:
+        assert 'accessPoint' not in state
+        assert state['awsCredentialsMethod'] == CREDENTIALS_SOURCE
+        assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
+    else:
+        assert state['accessPoint'] == AP_ID
+        assert state['awsCredentialsMethod'] == CREDENTIALS_SOURCE
+        assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
+
+    assert datetime.strptime(state['certificateCreationTime'], DT_PATTERN) > datetime.strptime(minutes_back, DT_PATTERN)
+    assert os.path.exists(pk_path)
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
+
+    return caplog
 
 
 def test_do_not_refresh_self_signed_certificate(mocker, tmpdir):
@@ -237,72 +281,36 @@ def test_recreate_missing_self_signed_certificate(mocker, tmpdir):
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
 
 
-def test_refresh_self_signed_certificate_without_iam_with_ap_id(mocker, tmpdir):
-    mocker.patch('watchdog.get_utc_now', return_value=FIXED_DT)
-    config = _get_config()
-    pk_path = _get_mock_private_key_path(mocker, tmpdir)
-    four_hours_back = (FIXED_DT - timedelta(hours=4)).strftime(DT_PATTERN)
-    tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, ap_id=AP_ID)
-
-    watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
-
-    with open(os.path.join(str(tmpdir), STATE_FILE), 'r') as state_json:
-        state = json.load(state_json)
-
-    assert datetime.strptime(state['certificateCreationTime'], DT_PATTERN) > datetime.strptime(four_hours_back, DT_PATTERN)
-    assert state['accessPoint'] == AP_ID
-    assert not state.get('awsCredentialsMethod')
-    assert os.path.exists(pk_path)
-    assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
-    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
-    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
+def test_refresh_self_signed_certificate_without_iam_with_ap_id(mocker, caplog, tmpdir):
+    _test_refresh_certificate_helper(mocker, tmpdir, caplog, 240, with_iam=False)
 
 
-def test_refresh_self_signed_certificate_with_iam_without_ap_id(mocker, tmpdir):
-    mocker.patch('watchdog.get_utc_now', return_value=FIXED_DT)
-    config = _get_config()
-    pk_path = _get_mock_private_key_path(mocker, tmpdir)
-    four_hours_back = (FIXED_DT - timedelta(hours=4)).strftime(DT_PATTERN)
-    tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, security_credentials=CREDENTIALS,
-                                          credentials_source=CREDENTIALS_SOURCE)
-
-    watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
-
-    with open(os.path.join(str(tmpdir), STATE_FILE), 'r') as state_json:
-        state = json.load(state_json)
-
-    assert datetime.strptime(state['certificateCreationTime'], DT_PATTERN) > datetime.strptime(four_hours_back, DT_PATTERN)
-    assert 'accessPoint' not in state
-    assert state['awsCredentialsMethod'] == CREDENTIALS_SOURCE
-    assert os.path.exists(pk_path)
-    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
-    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
-    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
+def test_refresh_self_signed_certificate_with_iam_without_ap_id(mocker, caplog, tmpdir):
+    _test_refresh_certificate_helper(mocker, tmpdir, caplog, 240, with_ap=False)
 
 
-def test_refresh_self_signed_certificate_with_iam_with_ap_id(mocker, tmpdir):
-    mocker.patch('watchdog.get_utc_now', return_value=FIXED_DT)
-    config = _get_config()
-    pk_path = _get_mock_private_key_path(mocker, tmpdir)
-    four_hours_back = (FIXED_DT - timedelta(hours=4)).strftime(DT_PATTERN)
-    tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    state = _create_certificate_and_state(tls_dict, str(tmpdir), pk_path, four_hours_back, security_credentials=CREDENTIALS,
-                                          credentials_source=CREDENTIALS_SOURCE, ap_id=AP_ID)
+def test_refresh_self_signed_certificate_with_iam_with_ap_id(mocker, caplog, tmpdir):
+    _test_refresh_certificate_helper(mocker, tmpdir, caplog, 240)
 
-    watchdog.check_certificate(config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir))
 
-    with open(os.path.join(str(tmpdir), STATE_FILE), 'r') as state_json:
-        state = json.load(state_json)
+def test_refresh_self_signed_certificate_custom_renewal_interval(mocker, caplog, tmpdir):
+    _test_refresh_certificate_helper(mocker, tmpdir, caplog, 45, renewal_interval=30)
 
-    assert datetime.strptime(state['certificateCreationTime'], DT_PATTERN) > datetime.strptime(four_hours_back, DT_PATTERN)
-    assert state['accessPoint'] == AP_ID
-    assert state['awsCredentialsMethod'] == CREDENTIALS_SOURCE
-    assert os.path.exists(pk_path)
-    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
-    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
-    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
+
+def test_refresh_self_signed_certificate_invalid_refresh_interval(mocker, caplog, tmpdir):
+    caplog.set_level(logging.WARNING)
+    caplog = _test_refresh_certificate_helper(mocker, tmpdir, caplog, 240, renewal_interval='not_an_int')
+
+    assert 'Bad tls_cert_renewal_interval_min value, "not_an_int", in config file "/etc/amazon/efs/efs-utils.conf". Defaulting' \
+           ' to 60 minutes.' in caplog.text
+
+
+def test_refresh_self_signed_certificate_too_low_refresh_interval(mocker, caplog, tmpdir):
+    caplog.set_level(logging.WARNING)
+    caplog = _test_refresh_certificate_helper(mocker, tmpdir, caplog, 240, renewal_interval=0)
+
+    assert 'tls_cert_renewal_interval_min value in config file "/etc/amazon/efs/efs-utils.conf" is lower than 1 minute. ' \
+           'Defaulting to 60 minutes.' in caplog.text
 
 
 def test_refresh_self_signed_certificate_send_sighup(mocker, tmpdir, caplog):

@@ -45,7 +45,7 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.21'
+VERSION = '1.22'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -57,7 +57,7 @@ LOG_FILE = 'mount-watchdog.log'
 STATE_FILE_DIR = '/var/run/efs'
 
 PRIVATE_KEY_FILE = '/etc/amazon/efs/privateKey.pem'
-REFRESH_SELF_SIGNED_CERT_INTERVAL_SEC = 60 * 60
+DEFAULT_REFRESH_SELF_SIGNED_CERT_INTERVAL_MIN = 60
 NOT_BEFORE_MINS = 15
 NOT_AFTER_HOURS = 3
 DATE_ONLY_FORMAT = '%Y%m%d'
@@ -116,7 +116,7 @@ REQUEST_PAYLOAD = ''
 
 AP_ID_RE = re.compile('^fsap-[0-9a-f]{17}$')
 
-ECS_TASK_METADATA_API = '169.254.170.2'
+ECS_TASK_METADATA_API = 'http://169.254.170.2'
 INSTANCE_IAM_URL = 'http://169.254.169.254/latest/meta-data/iam/security-credentials/'
 SECURITY_CREDS_ECS_URI_HELP_URL = 'https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html'
 SECURITY_CREDS_IAM_ROLE_HELP_URL = 'https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html'
@@ -512,8 +512,9 @@ def read_config(config_file=CONFIG_FILE):
 def check_certificate(config, state, state_file_dir, state_file, base_path=STATE_FILE_DIR):
     certificate_creation_time = datetime.strptime(state['certificateCreationTime'], CERT_DATETIME_FORMAT)
     certificate_exists = os.path.isfile(state['certificate'])
+    certificate_renewal_interval_secs = get_certificate_renewal_interval_mins(config) * 60
     # creation instead of NOT_BEFORE datetime is used for refresh of cert because NOT_BEFORE derives from creation datetime
-    should_refresh_cert = (get_utc_now() - certificate_creation_time).total_seconds() > REFRESH_SELF_SIGNED_CERT_INTERVAL_SEC
+    should_refresh_cert = (get_utc_now() - certificate_creation_time).total_seconds() > certificate_renewal_interval_secs
 
     if certificate_exists and not should_refresh_cert:
         return
@@ -906,6 +907,26 @@ def calculate_signature(string_to_sign, date, secret_access_key, region):
     return _sign(signing_key, string_to_sign).hexdigest()
 
 
+def get_certificate_renewal_interval_mins(config):
+    interval = DEFAULT_REFRESH_SELF_SIGNED_CERT_INTERVAL_MIN
+    try:
+        mins_from_config = config.get(CONFIG_SECTION, 'tls_cert_renewal_interval_min')
+        try:
+            if int(mins_from_config) > 0:
+                interval = int(mins_from_config)
+            else:
+                logging.warning('tls_cert_renewal_interval_min value in config file "%s" is lower than 1 minute. Defaulting '
+                                'to %d minutes.', CONFIG_FILE, DEFAULT_REFRESH_SELF_SIGNED_CERT_INTERVAL_MIN)
+        except ValueError:
+            logging.warning('Bad tls_cert_renewal_interval_min value, "%s", in config file "%s". Defaulting to %d minutes.',
+                            mins_from_config, CONFIG_FILE, DEFAULT_REFRESH_SELF_SIGNED_CERT_INTERVAL_MIN)
+    except NoOptionError:
+        logging.warning('No tls_cert_renewal_interval_min value in config file "%s". Defaulting to %d minutes.', CONFIG_FILE,
+                        DEFAULT_REFRESH_SELF_SIGNED_CERT_INTERVAL_MIN)
+
+    return interval
+
+
 def get_credential_scope(date, region):
     return '/'.join([date.strftime(DATE_ONLY_FORMAT), region, SERVICE, AWS4_REQUEST])
 
@@ -932,10 +953,12 @@ def main():
     child_procs = []
 
     if config.getboolean(CONFIG_SECTION, 'enabled'):
+        logging.info('amazon-efs-mount-watchdog, version %s, is enabled and started', VERSION)
         poll_interval_sec = config.getint(CONFIG_SECTION, 'poll_interval_sec')
         unmount_grace_period_sec = config.getint(CONFIG_SECTION, 'unmount_grace_period_sec')
 
         while True:
+            config = read_config()
             check_efs_mounts(config, child_procs, unmount_grace_period_sec)
             check_child_procs(child_procs)
 

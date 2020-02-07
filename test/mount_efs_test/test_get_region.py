@@ -12,9 +12,9 @@ import json
 import pytest
 
 try:
-    from urllib2 import URLError
+    from urllib2 import URLError, HTTPError
 except ImportError:
-    from urllib.error import URLError
+    from urllib.error import URLError, HTTPError
 
 INSTANCE_DATA = {
   'devpayProductCodes': None,
@@ -57,13 +57,20 @@ class MockUrlLibResponse(object):
         return self.data
 
 
-def test_get_region(mocker):
+def test_get_region_with_token(mocker):
+    mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value='ABCDEFG==')
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse())
+    assert 'us-east-1' == mount_efs.get_region()
 
+
+def test_get_region_without_token(mocker):
+    mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value=None)
+    mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse())
     assert 'us-east-1' == mount_efs.get_region()
 
 
 def test_get_region_py3_no_charset(mocker):
+    mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value=None)
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse(data=bytearray(INSTANCE_DOCUMENT, 'us-ascii')))
 
     assert 'us-east-1' == mount_efs.get_region()
@@ -71,6 +78,7 @@ def test_get_region_py3_no_charset(mocker):
 
 def test_get_region_py3_utf8_charset(mocker):
     charset = 'utf-8'
+    mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value=None)
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse(data=bytearray(INSTANCE_DOCUMENT, charset)),
                  headers=MockHeaders(content_charset=charset))
 
@@ -78,6 +86,7 @@ def test_get_region_py3_utf8_charset(mocker):
 
 
 def _test_get_region_error(mocker, capsys, response=None, error=None):
+    mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value=None)
     if (response and error) or (not response and not error):
         raise ValueError('Invalid arguments')
     elif response:
@@ -95,7 +104,7 @@ def _test_get_region_error(mocker, capsys, response=None, error=None):
 
 
 def test_get_region_bad_response(mocker, capsys):
-    _test_get_region_error(mocker, capsys, response=MockUrlLibResponse(code=400))
+    _test_get_region_error(mocker, capsys, error=HTTPError('url', 400, 'Bad Request Error', None, None))
 
 
 def test_get_region_error_response(mocker, capsys):

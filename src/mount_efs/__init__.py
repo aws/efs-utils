@@ -63,12 +63,13 @@ except ImportError:
     from urllib import quote_plus
 
 try:
-    from urllib2 import urlopen, URLError
+    from urllib2 import URLError, HTTPError, build_opener, urlopen, Request, HTTPHandler
 except ImportError:
-    from urllib.error import URLError
-    from urllib.request import urlopen
+    from urllib.request import urlopen, Request
+    from urllib.error import URLError, HTTPError
 
-VERSION = '1.21'
+
+VERSION = '1.22'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -136,7 +137,8 @@ FS_ID_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)$')
 EFS_FQDN_RE = re.compile(r'^(?P<fs_id>fs-[0-9a-f]+)\.efs\.(?P<region>[a-z0-9-]+)\.(?P<dns_name_suffix>[a-z0-9.]+)$')
 AP_ID_RE = re.compile('^fsap-[0-9a-f]{17}$')
 
-ECS_TASK_METADATA_API = '169.254.170.2'
+ECS_TASK_METADATA_API = 'http://169.254.170.2'
+INSTANCE_METADATA_TOKEN_URL = 'http://169.254.169.254/latest/api/token'
 INSTANCE_METADATA_SERVICE_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document/'
 INSTANCE_IAM_URL = 'http://169.254.169.254/latest/meta-data/iam/security-credentials/'
 SECURITY_CREDS_ECS_URI_HELP_URL = 'https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html'
@@ -205,19 +207,16 @@ def get_region():
         fatal_error('Error retrieving region', message)
 
     try:
-        resource = urlopen(INSTANCE_METADATA_SERVICE_URL, timeout=1)
-
-        if resource.getcode() != 200:
-            _fatal_error('Unable to reach instance metadata service at %s: status=%d'
-                         % (INSTANCE_METADATA_SERVICE_URL, resource.getcode()))
-
-        data = resource.read()
-        if type(data) is str:
-            instance_identity = json.loads(data)
-        else:
-            instance_identity = json.loads(data.decode(resource.headers.get_content_charset() or 'us-ascii'))
+        token = get_aws_ec2_metadata_token()
+        headers = {}
+        if token:
+            headers = {'X-aws-ec2-metadata-token': token}
+        instance_identity = get_aws_ec2_metadata(headers)
 
         return instance_identity['region']
+    except HTTPError as e:
+        _fatal_error('Unable to reach instance metadata service at %s: status=%d'
+                     % (INSTANCE_METADATA_SERVICE_URL, e.code))
     except URLError as e:
         _fatal_error('Unable to reach the instance metadata service at %s. If this is an on-premises instance, replace '
                      '"{region}" in the "dns_name_format" option in %s with the region of the EFS file system you are mounting.\n'
@@ -227,6 +226,32 @@ def get_region():
         _fatal_error('Error parsing json: %s' % (e,))
     except KeyError as e:
         _fatal_error('Region not present in %s: %s' % (instance_identity, e))
+
+
+def get_aws_ec2_metadata_token():
+    try:
+        opener = build_opener(HTTPHandler)
+        request = Request(INSTANCE_METADATA_TOKEN_URL)
+        request.add_header('X-aws-ec2-metadata-token-ttl-seconds', 21600)
+        request.get_method = lambda: 'PUT'
+        res = opener.open(request)
+        return res.read()
+    except NameError:
+        headers = {'X-aws-ec2-metadata-token-ttl-seconds': 21600}
+        req = Request(INSTANCE_METADATA_TOKEN_URL, headers=headers, method='PUT')
+        res = urlopen(req)
+        return res.read()
+
+
+def get_aws_ec2_metadata(headers):
+    request = Request(INSTANCE_METADATA_SERVICE_URL, headers=headers)
+    response = urlopen(request, timeout=1)
+    data = response.read()
+    if type(data) is str:
+        instance_identity = json.loads(data)
+    else:
+        instance_identity = json.loads(data.decode(response.headers.get_content_charset() or 'us-ascii'))
+    return instance_identity
 
 
 def get_region_helper(config):

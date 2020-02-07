@@ -15,6 +15,7 @@ The `efs-utils` package has been verified against the following Linux distributi
 | RHEL 8 | `rpm`| `systemd` |
 | Debian 9 | `deb` | `systemd` |
 | Ubuntu 16.04 | `deb` | `systemd` |
+| Ubuntu 18.04 | `deb` | `systemd` |
 
 ## Prerequisites
 
@@ -37,17 +38,12 @@ $ sudo yum -y install amazon-efs-utils
 
 Other distributions require building the package from source and installing it.
 
-- Clone this repository:
-
-```
-$ git clone https://github.com/aws/efs-utils
-$ cd efs-utils
-```
-
 - To build and install an RPM:
 
 ```
-$ sudo yum -y install rpm-build
+$ sudo yum -y install git rpm-build
+$ git clone https://github.com/aws/efs-utils
+$ cd efs-utils
 $ make rpm
 $ sudo yum -y install build/amazon-efs-utils*rpm
 ```
@@ -56,7 +52,9 @@ $ sudo yum -y install build/amazon-efs-utils*rpm
 
 ```
 $ sudo apt-get update
-$ sudo apt-get -y install binutils
+$ sudo apt-get -y install git binutils
+$ git clone https://github.com/aws/efs-utils
+$ cd efs-utils
 $ ./build-deb.sh
 $ sudo apt-get -y install ./build/amazon-efs-utils*deb
 ```
