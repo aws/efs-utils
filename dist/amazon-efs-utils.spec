@@ -20,7 +20,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.22
+Version   : 1.23
 Release   : 1%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -36,6 +36,8 @@ BuildArch : noarch
 Requires  : nfs-utils
 Requires  : stunnel >= 4.56
 Requires  : %{python_requires}
+Requires  : openssl >= 1.0.2
+Requires  : util-linux
 
 %if %{with_systemd}
 BuildRequires    : systemd

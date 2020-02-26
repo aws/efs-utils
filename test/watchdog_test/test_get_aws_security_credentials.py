@@ -177,7 +177,6 @@ def test_get_aws_security_credentials_instance_metadata(mocker):
         'Token': SESSION_TOKEN_VAL,
         'Expiration': '2019-10-25T21:17:24Z'
     })
-    mocker.patch.dict(os.environ, {})
     mocker.patch('watchdog.urlopen', return_value=MockUrlLibResponse(data=response))
 
     credentials = watchdog.get_aws_security_credentials('metadata:')

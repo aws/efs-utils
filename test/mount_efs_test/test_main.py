@@ -23,6 +23,7 @@ BAD_AP_ID_TOO_SHORT = 'fsap-0123456789abcdef'
 BAD_AP_ID_BAD_CHAR = 'fsap-0123456789abcdefg'
 PORT = 3000
 AWSPROFILE = 'test_profile'
+AWSCREDSURI = '/v2/credentials/{uuid}'
 TLSPORT_INCORRECT = 'incorrect'
 
 
@@ -32,7 +33,7 @@ def dummy_contextmanager(*args, **kwargs):
 
 
 def _test_main(mocker, tls=False, root=True, ap_id=None, iam=False, awsprofile=None, ocsp=False, noocsp=False, port=None,
-               tlsport=None):
+               tlsport=None, awscredsuri=None):
     options = {}
     if tls:
         options['tls'] = None
@@ -50,6 +51,8 @@ def _test_main(mocker, tls=False, root=True, ap_id=None, iam=False, awsprofile=N
         options['port'] = port
     if tlsport is not None:
         options['tlsport'] = tlsport
+    if awscredsuri is not None:
+        options['awscredsuri'] = AWSCREDSURI
 
     if root:
         mocker.patch('os.geteuid', return_value=0)
@@ -142,6 +145,11 @@ def test_main_awsprofile_without_iam(mocker, capsys):
     _test_main_assert_error(mocker, capsys, expected_err, tls=True, awsprofile=AWSPROFILE)
 
 
+def test_main_awscredsuri_without_iam(mocker, capsys):
+    expected_err = 'The "iam" option is required when mounting with "awscredsuri"'
+    _test_main_assert_error(mocker, capsys, expected_err, tls=True, awscredsuri=AWSCREDSURI)
+
+
 def test_main_tls_ocsp_option(mocker):
     _test_main(mocker, tls=True, ocsp=True)
 
@@ -162,6 +170,12 @@ def test_main_port_without_tls(mocker):
 def test_main_port_with_tls(mocker, capsys):
     expected_err = 'The "port" and "tls" options are mutually exclusive'
     _test_main_assert_error(mocker, capsys, expected_err, tls=True, port=PORT)
+
+
+def test_main_aws_creds_uri_with_aws_profile(mocker, capsys):
+    expected_err = 'The "awscredsuri" and "awsprofile" options are mutually exclusive'
+    _test_main_assert_error(mocker, capsys, expected_err, tls=True, iam=True,
+                            awscredsuri=AWSCREDSURI, awsprofile=AWSPROFILE)
 
 
 def test_main_tlsport_is_integer(mocker):

@@ -31,6 +31,7 @@ WRONG_SESSION_TOKEN_VAL = 'WRONG_SESSION_TOKEN'
 AWS_CONFIG_FILE = 'fake_aws_config'
 DEFAULT_PROFILE = 'DEFAULT'
 AWSPROFILE = 'test_profile'
+AWSCREDSURI = '/v2/credentials/{uuid}'
 
 
 class MockHeaders(object):
@@ -118,7 +119,7 @@ def test_get_aws_security_credentials_do_not_use_iam():
     assert not credentials_source
 
 
-def test_get_aws_security_credentials_get_ecs(mocker):
+def test_get_aws_security_credentials_get_ecs_from_env_url(mocker):
     mocker.patch.dict(os.environ, {})
     mocker.patch('os.path.exists', return_value=False)
     response = json.dumps({
@@ -139,6 +140,23 @@ def test_get_aws_security_credentials_get_ecs(mocker):
     assert credentials_source == 'ecs:fake_uri'
 
 
+def test_get_aws_security_credentials_get_ecs_from_option_url(mocker):
+    response = json.dumps({
+        'AccessKeyId': ACCESS_KEY_ID_VAL,
+        'Expiration': 'EXPIRATION_DATE',
+        'RoleArn': 'TASK_ROLE_ARN',
+        'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
+        'Token': SESSION_TOKEN_VAL
+    })
+    mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse(data=response))
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, None, AWSCREDSURI)
+
+    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
+    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
+    assert credentials['Token'] == SESSION_TOKEN_VAL
+    assert credentials_source == 'ecs:' + AWSCREDSURI
+
+
 def test_get_aws_security_credentials_get_instance_metadata(mocker):
     mocker.patch.dict(os.environ, {})
     mocker.patch('os.path.exists', return_value=False)
@@ -151,7 +169,6 @@ def test_get_aws_security_credentials_get_instance_metadata(mocker):
         'Token': SESSION_TOKEN_VAL,
         'Expiration': '2019-10-25T21:17:24Z'
     })
-    mocker.patch.dict(os.environ, {})
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse(data=response))
 
     credentials, credentials_source = mount_efs.get_aws_security_credentials(True, None)
@@ -190,6 +207,18 @@ def test_get_aws_security_credentials_credentials_not_found_in_files(mocker, cap
     out, err = capsys.readouterr()
     assert 'AWS security credentials not found in' in err
     assert 'under named profile [default]' in err
+
+
+def test_get_aws_security_credentials_credentials_not_found_in_aws_creds_uri(mocker, capsys):
+    mocker.patch('mount_efs.urlopen')
+
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.get_aws_security_credentials(True, 'default', AWSCREDSURI)
+
+    assert 0 != ex.value.code
+
+    out, err = capsys.readouterr()
+    assert 'Unsuccessful retrieval of AWS security credentials at' in err
 
 
 def test_credentials_file_helper_awsprofile_found_with_token(tmpdir):

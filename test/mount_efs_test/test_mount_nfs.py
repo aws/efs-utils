@@ -23,6 +23,13 @@ NFS_MOUNT_POINT_IDX = 2
 NFS_OPTION_FLAG_IDX = 3
 NFS_OPTIONS_IDX = 4
 
+# indices of different arguments to the NFS call to certain network namespace
+NETNS_NSENTER_ARG_IDX = 0
+NETNS_PATH_ARG_IDX = 1
+NETNS_NFS_OFFSET = 2
+
+NETNS = '/proc/1/net/ns'
+
 
 def _mock_popen(mocker, returncode=0):
     popen_mock = MagicMock()
@@ -67,3 +74,23 @@ def test_mount_nfs_failure(mocker):
         mount_efs.mount_nfs(DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
 
     assert 0 != ex.value.code
+
+
+def test_mount_nfs_tls_netns(mocker):
+    mock = _mock_popen(mocker)
+
+    options = dict(DEFAULT_OPTIONS)
+    options['tls'] = None
+    options['netns'] = NETNS
+
+    mount_efs.mount_nfs(DNS_NAME, '/', '/mnt', options)
+
+    args, _ = mock.call_args
+    args = args[0]
+
+    assert 'nsenter' == args[NETNS_NSENTER_ARG_IDX]
+    assert '--net=' + NETNS == args[NETNS_PATH_ARG_IDX]
+    assert '/sbin/mount.nfs4' == args[NFS_BIN_ARG_IDX + NETNS_NFS_OFFSET]
+    assert DNS_NAME not in args[NFS_MOUNT_PATH_IDX + NETNS_NFS_OFFSET]
+    assert '127.0.0.1' in args[NFS_MOUNT_PATH_IDX + NETNS_NFS_OFFSET]
+    assert '/mnt' in args[NFS_MOUNT_POINT_IDX + NETNS_NFS_OFFSET]

@@ -107,6 +107,11 @@ sudo mount -t efs fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 "/mnt/efs" without encryption of data in transit\&.
 .TP
+sudo mount -t efs -o netns=/proc/1/net/ns fs-abcd1234 /mnt/efs
+Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
+"/mnt/efs" without encryption of data in transit in given network namespace \
+'/proc/1/net/ns'
+.TP
 sudo mount -t efs fs-abcd1234:/child /mnt/efs
 Mount a non-root directory of an EFS file system with file system ID \
 "fs-abcd1234" at mount point "/mnt/efs" without encryption of data in transit\&.

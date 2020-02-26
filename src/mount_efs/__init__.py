@@ -69,7 +69,7 @@ except ImportError:
     from urllib.error import URLError, HTTPError
 
 
-VERSION = '1.22'
+VERSION = '1.23'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -137,6 +137,8 @@ FS_ID_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)$')
 EFS_FQDN_RE = re.compile(r'^(?P<fs_id>fs-[0-9a-f]+)\.efs\.(?P<region>[a-z0-9-]+)\.(?P<dns_name_suffix>[a-z0-9.]+)$')
 AP_ID_RE = re.compile('^fsap-[0-9a-f]{17}$')
 
+CREDENTIALS_KEYS = ['AccessKeyId', 'SecretAccessKey', 'Token']
+ECS_URI_ENV = 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'
 ECS_TASK_METADATA_API = 'http://169.254.170.2'
 INSTANCE_METADATA_TOKEN_URL = 'http://169.254.169.254/latest/api/token'
 INSTANCE_METADATA_SERVICE_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document/'
@@ -151,12 +153,14 @@ NOT_BEFORE_MINS = 15
 NOT_AFTER_HOURS = 3
 
 EFS_ONLY_OPTIONS = [
-    'iam',
-    'noocsp',
-    'ocsp',
     'accesspoint',
+    'awscredsuri',
     'awsprofile',
     'cafile',
+    'iam',
+    'netns',
+    'noocsp',
+    'ocsp',
     'tls',
     'tlsport',
     'verify'
@@ -262,7 +266,7 @@ def get_region_helper(config):
         return dns_name_format.split('.')[-3]
 
 
-def get_aws_security_credentials(use_iam, awsprofile):
+def get_aws_security_credentials(use_iam, awsprofile=None, aws_creds_uri=None):
     """
     Lookup AWS security credentials (access key ID and secret access key). Adapted credentials provider chain from:
     https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html and
@@ -271,51 +275,87 @@ def get_aws_security_credentials(use_iam, awsprofile):
     if not use_iam:
         return None, None
 
-    # attempt to lookup AWS security credentials in AWS credentials file (~/.aws/credentials) and configs file (~/.aws/config)
+    # attempt to lookup AWS security credentials through the credentials URI the ECS agent generated
+    if aws_creds_uri:
+        return get_aws_security_credentials_from_ecs(aws_creds_uri, True)
+
+    # attempt to lookup AWS security credentials in AWS credentials file (~/.aws/credentials)
+    # and configs file (~/.aws/config) with given awsprofile
     if awsprofile:
-        for file_path in [AWS_CREDENTIALS_FILE, AWS_CONFIG_FILE]:
-            if os.path.exists(file_path):
-                credentials = credentials_file_helper(file_path, awsprofile)
-                if credentials['AccessKeyId']:
-                    return credentials, os.path.basename(file_path) + ':' + awsprofile
+        return get_aws_security_credentials_from_awsprofile(awsprofile, True)
 
-        log_message = 'AWS security credentials not found in %s or %s under named profile [%s]' % \
-                      (AWS_CREDENTIALS_FILE, AWS_CONFIG_FILE, awsprofile)
-        fatal_error(log_message)
+    # attempt to lookup AWS security credentials through AWS_CONTAINER_CREDENTIALS_RELATIVE_URI environment variable
+    if ECS_URI_ENV in os.environ:
+        credentials, credentials_source = get_aws_security_credentials_from_ecs(os.environ[ECS_URI_ENV], False)
+        if credentials and credentials_source:
+            return credentials, credentials_source
 
-    dict_keys = ['AccessKeyId', 'SecretAccessKey', 'Token']
-
-    # through ECS security credentials uri found in AWS_CONTAINER_CREDENTIALS_RELATIVE_URI environment variable
-    ecs_uri_env = 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'
-    if ecs_uri_env in os.environ:
-        ecs_uri = ECS_TASK_METADATA_API + os.environ[ecs_uri_env]
-        ecs_unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % ecs_uri
-        ecs_url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.', ecs_uri, \
-                            SECURITY_CREDS_ECS_URI_HELP_URL
-        ecs_security_dict = url_request_helper(ecs_uri, ecs_unsuccessful_resp, ecs_url_error_msg)
-
-        if ecs_security_dict and all(k in ecs_security_dict for k in dict_keys):
-            return ecs_security_dict, 'ecs:' + os.environ[ecs_uri_env]
-
-    # through IAM role name security credentials lookup uri (after lookup for IAM role name attached to instance)
-    iam_role_unsuccessful_resp = 'Unsuccessful retrieval of IAM role name at %s.' % INSTANCE_IAM_URL
-    iam_role_url_error_msg = 'Unable to reach %s to retrieve IAM role name. See %s for more info.', INSTANCE_IAM_URL, \
-                             SECURITY_CREDS_IAM_ROLE_HELP_URL
-    iam_role_name = url_request_helper(INSTANCE_IAM_URL, iam_role_unsuccessful_resp, iam_role_url_error_msg)
+    # attempt to lookup AWS security credentials with IAM role name attached to instance
+    # through IAM role name security credentials lookup uri
+    iam_role_name = get_iam_role_name()
     if iam_role_name:
-        security_creds_lookup_url = INSTANCE_IAM_URL + str(iam_role_name)
-        unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % security_creds_lookup_url
-        url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.',\
-                        security_creds_lookup_url, SECURITY_CREDS_IAM_ROLE_HELP_URL
-        iam_security_dict = url_request_helper(security_creds_lookup_url, unsuccessful_resp, url_error_msg)
-
-        if iam_security_dict and all(k in iam_security_dict for k in dict_keys):
-            return iam_security_dict, 'metadata:'
+        credentials, credentials_source = get_aws_security_credentials_from_instance_metadata(iam_role_name)
+        if credentials and credentials_source:
+            return credentials, credentials_source
 
     error_msg = 'AWS Access Key ID and Secret Access Key are not found in AWS credentials file (%s), config file (%s), ' \
                 'from ECS credentials relative uri, or from the instance security credentials service' % \
                 (AWS_CREDENTIALS_FILE, AWS_CONFIG_FILE)
     fatal_error(error_msg, error_msg)
+
+
+def get_aws_security_credentials_from_awsprofile(awsprofile, is_fatal=False):
+    for file_path in [AWS_CREDENTIALS_FILE, AWS_CONFIG_FILE]:
+        if os.path.exists(file_path):
+            credentials = credentials_file_helper(file_path, awsprofile)
+            if credentials['AccessKeyId']:
+                return credentials, os.path.basename(file_path) + ':' + awsprofile
+
+    # Fail if credentials cannot be fetched from the given awsprofile
+    if is_fatal:
+        log_message = 'AWS security credentials not found in %s or %s under named profile [%s]' % \
+                    (AWS_CREDENTIALS_FILE, AWS_CONFIG_FILE, awsprofile)
+        fatal_error(log_message)
+    else:
+        return None, None
+
+
+def get_aws_security_credentials_from_ecs(aws_creds_uri, is_fatal=False):
+    ecs_uri = ECS_TASK_METADATA_API + aws_creds_uri
+    ecs_unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % ecs_uri
+    ecs_url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.' \
+                        % (ecs_uri, SECURITY_CREDS_ECS_URI_HELP_URL)
+    ecs_security_dict = url_request_helper(ecs_uri, ecs_unsuccessful_resp, ecs_url_error_msg)
+
+    if ecs_security_dict and all(k in ecs_security_dict for k in CREDENTIALS_KEYS):
+        return ecs_security_dict, 'ecs:' + aws_creds_uri
+
+    # Fail if credentials cannot be fetched from the given aws_creds_uri
+    if is_fatal:
+        fatal_error(ecs_unsuccessful_resp, ecs_unsuccessful_resp)
+    else:
+        return None, None
+
+
+def get_aws_security_credentials_from_instance_metadata(iam_role_name):
+    security_creds_lookup_url = INSTANCE_IAM_URL + str(iam_role_name)
+    unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % security_creds_lookup_url
+    url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.',\
+                    security_creds_lookup_url, SECURITY_CREDS_IAM_ROLE_HELP_URL
+    iam_security_dict = url_request_helper(security_creds_lookup_url, unsuccessful_resp, url_error_msg)
+
+    if iam_security_dict and all(k in iam_security_dict for k in CREDENTIALS_KEYS):
+        return iam_security_dict, 'metadata:'
+    else:
+        return None, None
+
+
+def get_iam_role_name():
+    iam_role_unsuccessful_resp = 'Unsuccessful retrieval of IAM role name at %s.' % INSTANCE_IAM_URL
+    iam_role_url_error_msg = 'Unable to reach %s to retrieve IAM role name. See %s for more info.', INSTANCE_IAM_URL, \
+                             SECURITY_CREDS_IAM_ROLE_HELP_URL
+    iam_role_name = url_request_helper(INSTANCE_IAM_URL, iam_role_unsuccessful_resp, iam_role_url_error_msg)
+    return iam_role_name
 
 
 def credentials_file_helper(file_path, awsprofile):
@@ -717,8 +757,13 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
     cert_details = {}
 
     if use_iam or ap_id:
-        awsprofile = get_aws_profile(options, use_iam)
-        security_credentials, credentials_source = get_aws_security_credentials(use_iam, awsprofile)
+        aws_creds_uri = options.get('awscredsuri')
+        if aws_creds_uri:
+            kwargs = {'aws_creds_uri': aws_creds_uri}
+        else:
+            kwargs = {'awsprofile': get_aws_profile(options, use_iam)}
+
+        security_credentials, credentials_source = get_aws_security_credentials(use_iam, **kwargs)
 
         # additional symbol appended to avoid naming collisions
         cert_details['mountStateDir'] = get_mount_specific_filename(fs_id, mountpoint, tls_port) + '+'
@@ -749,6 +794,8 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
     stunnel_config_file = write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level,
                                                     ocsp_enabled, options, cert_details=cert_details)
     tunnel_args = ['stunnel', stunnel_config_file]
+    if 'netns' in options:
+        tunnel_args = ['nsenter', '--net=' + options['netns']] + tunnel_args
 
     # launch the tunnel in a process group so if it has any child processes, they can be killed easily by the mount watchdog
     logging.info('Starting TLS tunnel: "%s"', ' '.join(tunnel_args))
@@ -803,6 +850,9 @@ def mount_nfs(dns_name, path, mountpoint, options):
         mount_path = '%s:%s' % (dns_name, path)
 
     command = ['/sbin/mount.nfs4', mount_path, mountpoint, '-o', get_nfs_mount_options(options)]
+
+    if 'netns' in options:
+        command = ['nsenter', '--net=' + options['netns']] + command
 
     logging.info('Executing: "%s"', ' '.join(command))
 
@@ -1369,6 +1419,12 @@ def check_options_validity(options):
 
     if 'awsprofile' in options and 'iam' not in options:
         fatal_error('The "iam" option is required when mounting with named profile option, "awsprofile"')
+
+    if 'awscredsuri' in options and 'iam' not in options:
+        fatal_error('The "iam" option is required when mounting with "awscredsuri"')
+
+    if 'awscredsuri' in options and 'awsprofile' in options:
+        fatal_error('The "awscredsuri" and "awsprofile" options are mutually exclusive')
 
 
 def main():

@@ -41,7 +41,7 @@ Other distributions require building the package from source and installing it.
 - To build and install an RPM:
 
 ```
-$ sudo yum -y install git rpm-build
+$ sudo yum -y install git rpm-build make
 $ git clone https://github.com/aws/efs-utils
 $ cd efs-utils
 $ make rpm
@@ -85,6 +85,12 @@ To mount with the recommended default options, simply run:
 
 ```
 $ sudo mount -t efs file-system-id efs-mount-point/
+```
+
+To mount file system within a given network namespace, run:
+
+```
+$ sudo mount -t efs -o netns=netns-path file-system-id efs-mount-point/
 ```
 
 To mount over TLS, simply add the `tls` option:
