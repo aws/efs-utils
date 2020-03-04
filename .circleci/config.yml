@@ -10,23 +10,18 @@ commands:
   runtest:
     steps:
       - checkout
-      - restore_cache:
-          key: efs-utils-{{ .Branch }}-{{ checksum "requirements.txt" }}
       - run:
           name: Install Python dependencies in a virtual env
           command: |
-            python -m pip install --user virtualenv
-            python -m virtualenv ~/.env/efs-utils
-            source ~/.env/efs-utils/bin/activate
+            sudo pip install --upgrade pip
+            pip install virtualenv
+            virtualenv -p $(which python) ~/efs-utils-virtualenv
+            source ~/efs-utils-virtualenv/bin/activate
             pip install -r requirements.txt
-      - save_cache:
-          key: efs-utils-{{ .Branch }}-{{ checksum "requirements.txt" }}
-          paths:
-            - ~/.env/efs-utils
       - run:
           name: Run all tests
           command: |
-            source ~/.env/efs-utils/bin/activate
+            source ~/efs-utils-virtualenv/bin/activate
             make test
 jobs:
   test:

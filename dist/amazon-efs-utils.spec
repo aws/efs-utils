@@ -21,7 +21,7 @@
 
 Name      : amazon-efs-utils
 Version   : 1.23
-Release   : 1%{?dist}
+Release   : 2%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
 Group     : Amazon/Tools
@@ -117,3 +117,9 @@ fi
 %endif
 
 %clean
+
+%changelog
+* Tue Mar 02 2020 Yuan Gao <ygaochn@amazon.com> - 1.23-2
+- Support new option: netns, enable file system to mount in given network namespace
+- Support new option: awscredsuri, enable sourcing iam authorization from aws credentials relative uri
+- List openssl and util-linux as package dependency for IAM/AP authorization and command nsenter to mount file system to given network namespace
