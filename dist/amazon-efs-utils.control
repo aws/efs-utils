@@ -2,7 +2,7 @@ Package: amazon-efs-utils
 Architecture: all
 Version: 1.24
 Section: utils
-Depends: python|python2, nfs-common, stunnel4 (>= 4.56), openssl (>= 1.0.2), util-linux
+Depends: python|python2, nfs-common, stunnel4 (>= 4.56), openssl (>= 1.0.2), util-linux, which
 Priority: optional
 Copyright: MIT License
 Maintainer: Amazon.com, Inc. <efs-utils@amazon.com>

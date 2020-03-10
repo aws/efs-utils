@@ -38,6 +38,7 @@ Requires  : stunnel >= 4.56
 Requires  : %{python_requires}
 Requires  : openssl >= 1.0.2
 Requires  : util-linux
+Requires  : which
 
 %if %{with_systemd}
 BuildRequires    : systemd
