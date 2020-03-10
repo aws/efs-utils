@@ -69,11 +69,13 @@ except ImportError:
     from urllib.error import URLError, HTTPError
 
 
-VERSION = '1.23'
+VERSION = '1.24'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount'
+CLIENT_INFO_SECTION = 'client-info'
+CLIENT_SOURCE_STR_LEN_LIMIT = 100
 
 LOG_DIR = '/var/log/amazon/efs'
 LOG_FILE = 'mount.log'
@@ -114,6 +116,8 @@ distinguished_name = req_distinguished_name
 
 [ req_distinguished_name ]
 CN = %s
+
+%s
 
 %s
 
@@ -205,31 +209,67 @@ def fatal_error(user_message, log_message=None, exit_code=1):
     sys.exit(exit_code)
 
 
-def get_region():
-    """Return this instance's region via the instance metadata service."""
+def get_target_region(config):
     def _fatal_error(message):
-        fatal_error('Error retrieving region', message)
+        fatal_error('Error retrieving region. Please set the "region" parameter in the efs-utils configuration file.', message)
 
+    metadata_exception = 'Unknown error'
+    try:
+        return config.get(CONFIG_SECTION, 'region')
+    except NoOptionError:
+        pass
+
+    try:
+        return get_region_from_instance_metadata()
+    except Exception as e:
+        metadata_exception = e
+        logging.warn('Region not found in config file and metadata service call failed, falling back '
+                     'to legacy "dns_name_format" check')
+
+    try:
+        region = get_region_from_legacy_dns_format(config)
+        sys.stdout.write('Warning: region obtained from "dns_name_format" field. Please set the "region" '
+                         'parameter in the efs-utils configuration file.')
+        return region
+    except Exception:
+        logging.warn('Legacy check for region in "dns_name_format" failed')
+
+    _fatal_error(metadata_exception)
+
+
+def get_region_from_instance_metadata():
+    err_msg = None
     try:
         token = get_aws_ec2_metadata_token()
         headers = {}
         if token:
             headers = {'X-aws-ec2-metadata-token': token}
         instance_identity = get_aws_ec2_metadata(headers)
-
         return instance_identity['region']
-    except HTTPError as e:
-        _fatal_error('Unable to reach instance metadata service at %s: status=%d'
-                     % (INSTANCE_METADATA_SERVICE_URL, e.code))
-    except URLError as e:
-        _fatal_error('Unable to reach the instance metadata service at %s. If this is an on-premises instance, replace '
-                     '"{region}" in the "dns_name_format" option in %s with the region of the EFS file system you are mounting.\n'
-                     'See %s for more detail. %s'
-                     % (INSTANCE_METADATA_SERVICE_URL, CONFIG_FILE, 'https://docs.aws.amazon.com/console/efs/direct-connect', e))
+    except (HTTPError, URLError) as e:
+        err_msg = 'Unable to reach instance metadata service at %s: status=%d' % (INSTANCE_METADATA_SERVICE_URL, e.code)
     except ValueError as e:
-        _fatal_error('Error parsing json: %s' % (e,))
+        err_msg = 'Error parsing json: %s' % (e,)
     except KeyError as e:
-        _fatal_error('Region not present in %s: %s' % (instance_identity, e))
+        err_msg = 'Region not present in %s: %s' % (instance_identity, e)
+
+    if err_msg:
+        raise Exception(err_msg)
+
+
+def get_region_from_legacy_dns_format(config):
+    """
+    For backwards compatibility check dns_name_format to obtain the target region. This functionality
+    should only be used if region is not present in the config file and metadata calls fail.
+    """
+    dns_name_format = config.get(CONFIG_SECTION, 'dns_name_format')
+    if '{region}' not in dns_name_format:
+        split_dns_name_format = dns_name_format.split('.')
+        if '{dns_name_suffix}' in dns_name_format:
+            return split_dns_name_format[-2]
+        elif 'amazonaws.com' in dns_name_format:
+            return split_dns_name_format[-3]
+    raise Exception('Region not found in dns_name_format')
 
 
 def get_aws_ec2_metadata_token():
@@ -256,14 +296,6 @@ def get_aws_ec2_metadata(headers):
     else:
         instance_identity = json.loads(data.decode(response.headers.get_content_charset() or 'us-ascii'))
     return instance_identity
-
-
-def get_region_helper(config):
-    dns_name_format = config.get(CONFIG_SECTION, 'dns_name_format')
-    if '{region}' in dns_name_format:
-        return get_region()
-    else:
-        return dns_name_format.split('.')[-3]
 
 
 def get_aws_security_credentials(use_iam, awsprofile=None, aws_creds_uri=None):
@@ -547,17 +579,34 @@ def is_stunnel_option_supported(stunnel_output, stunnel_option_name):
     return supported
 
 
-def get_version_specific_stunnel_options(config):
-    proc = subprocess.Popen(['stunnel', '-help'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
+def get_version_specific_stunnel_options():
+    stunnel_command = [_stunnel_bin(), '-help']
+    proc = subprocess.Popen(stunnel_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
     proc.wait()
     _, err = proc.communicate()
 
     stunnel_output = err.splitlines()
 
-    check_host_supported = is_stunnel_option_supported(stunnel_output, 'checkHost')
-    ocsp_aia_supported = is_stunnel_option_supported(stunnel_output, 'OCSPaia')
+    check_host_supported = is_stunnel_option_supported(stunnel_output, b'checkHost')
+    ocsp_aia_supported = is_stunnel_option_supported(stunnel_output, b'OCSPaia')
 
     return check_host_supported, ocsp_aia_supported
+
+
+def _stunnel_bin():
+    return find_command_path('stunnel',
+                             'Please install it following the instructions at '
+                             'https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html#upgrading-stunnel')
+
+
+def find_command_path(command, install_method):
+    try:
+        env_path = '/sbin:/usr/sbin:/usr/local/sbin:/root/bin:/usr/local/bin:/usr/bin:/bin'
+        os.putenv('PATH', env_path)
+        path = subprocess.check_output(['which', command])
+    except subprocess.CalledProcessError as e:
+        fatal_error('Failed to locate %s in %s - %s' % (command, env_path, install_method), e)
+    return path.strip().decode()
 
 
 def get_system_release_version():
@@ -596,7 +645,7 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
         efs_config['cert'] = cert_details['certificate']
         efs_config['key'] = cert_details['privateKey']
 
-    check_host_supported, ocsp_aia_supported = get_version_specific_stunnel_options(config)
+    check_host_supported, ocsp_aia_supported = get_version_specific_stunnel_options()
 
     tls_controls_message = 'WARNING: Your client lacks sufficient controls to properly enforce TLS. Please upgrade stunnel, ' \
         'or disable "%%s" in %s.\nSee %s for more detail.' % (CONFIG_FILE,
@@ -769,7 +818,7 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
         cert_details['mountStateDir'] = get_mount_specific_filename(fs_id, mountpoint, tls_port) + '+'
         # common name for certificate signing request is max 64 characters
         cert_details['commonName'] = socket.gethostname()[0:64]
-        cert_details['region'] = get_region_helper(config)
+        cert_details['region'] = get_target_region(config)
         cert_details['certificateCreationTime'] = create_certificate(config, cert_details['mountStateDir'],
                                                                      cert_details['commonName'], cert_details['region'], fs_id,
                                                                      security_credentials, ap_id=ap_id, base_path=state_file_dir)
@@ -793,14 +842,14 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
 
     stunnel_config_file = write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level,
                                                     ocsp_enabled, options, cert_details=cert_details)
-    tunnel_args = ['stunnel', stunnel_config_file]
+    tunnel_args = [_stunnel_bin(), stunnel_config_file]
     if 'netns' in options:
         tunnel_args = ['nsenter', '--net=' + options['netns']] + tunnel_args
 
     # launch the tunnel in a process group so if it has any child processes, they can be killed easily by the mount watchdog
     logging.info('Starting TLS tunnel: "%s"', ' '.join(tunnel_args))
     tunnel_proc = subprocess.Popen(
-            tunnel_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid, close_fds=True)
+        tunnel_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid, close_fds=True)
     logging.info('Started TLS tunnel, pid: %d', tunnel_proc.pid)
 
     temp_tls_state_file = write_tls_tunnel_state_file(fs_id, mountpoint, tls_port, tunnel_proc.pid, tunnel_args,
@@ -909,6 +958,18 @@ def parse_arguments(config, args=None):
     return fs_id, path, mountpoint, options
 
 
+def get_client_info(config):
+    client_info = {}
+
+    # source key/value pair in config file
+    if config.has_option(CLIENT_INFO_SECTION, 'source'):
+        client_source = config.get(CLIENT_INFO_SECTION, 'source')
+        if 0 < len(client_source) <= CLIENT_SOURCE_STR_LEN_LIMIT:
+            client_info['source'] = client_source
+
+    return client_info
+
+
 def create_certificate(config, mount_name, common_name, region, fs_id, security_credentials, ap_id, base_path=STATE_FILE_DIR):
     current_time = get_utc_now()
     tls_paths = tls_paths_dictionary(mount_name, base_path)
@@ -926,8 +987,9 @@ def create_certificate(config, mount_name, common_name, region, fs_id, security_
         public_key = os.path.join(tls_paths['mount_dir'], 'publicKey.pem')
         create_public_key(private_key, public_key)
 
+    client_info = get_client_info(config)
     create_ca_conf(certificate_config, common_name, tls_paths['mount_dir'], private_key, current_time, region, fs_id,
-                   security_credentials, ap_id)
+                   security_credentials, ap_id, client_info)
     create_certificate_signing_request(certificate_config, private_key, certificate_signing_request)
 
     not_before = get_certificate_timestamp(current_time, minutes=-NOT_BEFORE_MINS)
@@ -992,14 +1054,17 @@ def create_certificate_signing_request(config_path, private_key, csr_path):
     subprocess_call(cmd, 'Failed to create certificate signing request (csr)')
 
 
-def create_ca_conf(config_path, common_name, directory, private_key, date, region, fs_id, security_credentials, ap_id):
+def create_ca_conf(config_path, common_name, directory, private_key, date,
+                   region, fs_id, security_credentials, ap_id, client_info):
     """Populate ca/req configuration file with fresh configurations at every mount since SigV4 signature can change"""
     public_key_path = os.path.join(directory, 'publicKey.pem')
-    ca_extension_body = ca_extension_builder(ap_id, security_credentials, fs_id) if security_credentials or ap_id else ''
+    ca_extension_body = ca_extension_builder(ap_id, security_credentials, fs_id, client_info)
     efs_client_auth_body = efs_client_auth_builder(public_key_path, security_credentials['AccessKeyId'],
                                                    security_credentials['SecretAccessKey'], date, region, fs_id,
                                                    security_credentials['Token']) if security_credentials else ''
-    full_config_body = CA_CONFIG_BODY % (directory, private_key, common_name, ca_extension_body, efs_client_auth_body)
+    efs_client_info_body = efs_client_info_builder(client_info) if client_info else ''
+    full_config_body = CA_CONFIG_BODY % (directory, private_key, common_name, ca_extension_body,
+                                         efs_client_auth_body, efs_client_info_body)
 
     with open(config_path, 'w') as f:
         f.write(full_config_body)
@@ -1007,7 +1072,7 @@ def create_ca_conf(config_path, common_name, directory, private_key, date, regio
     return full_config_body
 
 
-def ca_extension_builder(ap_id, security_credentials, fs_id):
+def ca_extension_builder(ap_id, security_credentials, fs_id, client_info):
     ca_extension_str = '[ v3_ca ]\nsubjectKeyIdentifier = hash'
     if ap_id:
         ca_extension_str += '\n1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:' + ap_id
@@ -1015,6 +1080,9 @@ def ca_extension_builder(ap_id, security_credentials, fs_id):
         ca_extension_str += '\n1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth'
 
     ca_extension_str += '\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:' + fs_id
+
+    if client_info:
+        ca_extension_str += '\n1.3.6.1.4.1.4843.7.4 = ASN1:SEQUENCE:efs_client_info'
 
     return ca_extension_str
 
@@ -1033,6 +1101,13 @@ def efs_client_auth_builder(public_key_path, access_key_id, secret_access_key, d
         efs_client_auth_str += '\nsessionToken = EXPLICIT:0,UTF8String:' + session_token
 
     return efs_client_auth_str
+
+
+def efs_client_info_builder(client_info):
+    efs_client_info_str = '[ efs_client_info ]'
+    for key, value in client_info.items():
+        efs_client_info_str += '\n%s = UTF8String: %s' % (key, value)
+    return efs_client_info_str
 
 
 def create_public_key(private_key, public_key):
@@ -1149,7 +1224,7 @@ def get_dns_name(config, fs_id):
 
     if '{region}' in dns_name_format:
         expected_replacement_field_ct += 1
-        format_args['region'] = get_region()
+        format_args['region'] = get_target_region(config)
 
     if '{dns_name_suffix}' in dns_name_format:
         expected_replacement_field_ct += 1

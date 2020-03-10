@@ -15,9 +15,12 @@ import os
 
 import pytest
 
-from mock import MagicMock
-
 from datetime import datetime, timedelta
+
+try:
+    import ConfigParser
+except ImportError:
+    from configparser import ConfigParser
 
 DT_PATTERN = watchdog.CERT_DATETIME_FORMAT
 FS_ID = 'fs-deadbeef'
@@ -35,6 +38,7 @@ ACCESS_KEY_ID_VAL = 'FAKE_AWS_ACCESS_KEY_ID'
 SECRET_ACCESS_KEY_VAL = 'FAKE_AWS_SECRET_ACCESS_KEY'
 SESSION_TOKEN_VAL = 'FAKE_SESSION_TOKEN'
 FIXED_DT = datetime(2000, 1, 1, 12, 0, 0)
+CLIENT_INFO = {'source': 'test'}
 CREDENTIALS = {
     'AccessKeyId': ACCESS_KEY_ID_VAL,
     'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
@@ -52,26 +56,27 @@ PUBLIC_KEY_BODY = '-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AM
 @pytest.fixture(autouse=True)
 def setup(mocker):
     mocker.patch('socket.gethostbyname')
-    mocker.patch('mount_efs.get_region', return_value=REGION)
-    mocker.patch('mount_efs.get_region_helper', return_value=REGION)
+    mocker.patch('mount_efs.get_region_from_instance_metadata', return_value=REGION)
+    mocker.patch('mount_efs.get_target_region', return_value=REGION)
     mocker.patch('mount_efs.get_aws_security_credentials', return_value=CREDENTIALS)
     mocker.patch('watchdog.get_aws_security_credentials', return_value=CREDENTIALS)
 
 
-def _get_config(dns_name_format='{fs_id}.efs.{region}.amazonaws.com', certificate_renewal_interval=60):
-    def config_get_side_effect(section, field):
-        if field == 'state_file_dir_mode':
-            return '0755'
-        elif field == 'dns_name_format':
-            return dns_name_format
-        elif field == 'tls_cert_renewal_interval_min':
-            return certificate_renewal_interval
-        else:
-            raise ValueError('Unexpected arguments')
-
-    mock_config = MagicMock()
-    mock_config.get.side_effect = config_get_side_effect
-    return mock_config
+def _get_config(certificate_renewal_interval=60, client_info=CLIENT_INFO):
+    try:
+        config = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        config = ConfigParser()
+    config.add_section(mount_efs.CONFIG_SECTION)
+    config.set(mount_efs.CONFIG_SECTION, 'state_file_dir_mode', '0755')
+    config.set(mount_efs.CONFIG_SECTION, 'dns_name_format', '{fs_id}.efs.{region}.amazonaws.com')
+    config.add_section(watchdog.CONFIG_SECTION)
+    config.set(watchdog.CONFIG_SECTION, 'tls_cert_renewal_interval_min', str(certificate_renewal_interval))
+    if CLIENT_INFO:
+        config.add_section(watchdog.CLIENT_INFO_SECTION)
+        for key, value in client_info.items():
+            config.set(watchdog.CLIENT_INFO_SECTION, key, value)
+    return config
 
 
 def _get_mock_private_key_path(mocker, tmpdir):
@@ -123,7 +128,7 @@ def _create_certificate_and_state(tls_dict, temp_dir, pk_path, timestamp, securi
     return state
 
 
-def _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True):
+def _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True, client_info=True):
     tls_dict = mount_efs.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     mount_efs.create_required_directory({}, tls_dict['mount_dir'])
     tls_dict['certificate_path'] = os.path.join(tls_dict['mount_dir'], 'config.conf')
@@ -137,8 +142,10 @@ def _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True):
     mocker.patch('watchdog.get_aws_security_credentials', return_value=CREDENTIALS)
     credentials = 'dummy:lookup' if iam else None
     ap_id = AP_ID if ap else None
+    client_info = CLIENT_INFO if client_info else None
     full_config_body = watchdog.create_ca_conf(tls_dict['certificate_path'], COMMON_NAME, tls_dict['mount_dir'],
-                                               tls_dict['private_key'], current_time, REGION, FS_ID, credentials, ap_id)
+                                               tls_dict['private_key'], current_time, REGION, FS_ID, credentials,
+                                               ap_id, client_info)
     assert os.path.exists(tls_dict['certificate_path'])
 
     return tls_dict, full_config_body
@@ -411,6 +418,37 @@ def test_recreate_certificate_primary_assets_created(mocker, tmpdir):
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
 
 
+def _test_recreate_certificate_with_invalid_client_source_config(mocker, tmpdir, client_source):
+    config = _get_config(client_info={'source': client_source})
+    pk_path = _get_mock_private_key_path(mocker, tmpdir)
+    tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
+    tmp_config_path = os.path.join(str(tmpdir), MOUNT_NAME, 'tmpConfig')
+    current_time = mount_efs.get_utc_now()
+    watchdog.recreate_certificate(config, MOUNT_NAME, COMMON_NAME, FS_ID, CREDENTIALS, AP_ID, REGION, base_path=str(tmpdir))
+
+    with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
+        conf_body = f.read()
+        assert conf_body == watchdog.create_ca_conf(tmp_config_path, COMMON_NAME, tls_dict['mount_dir'],
+                                                    pk_path, current_time, REGION, FS_ID, CREDENTIALS,
+                                                    AP_ID, None)
+    assert os.path.exists(pk_path)
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
+
+
+def test_certificate_with_iam_with_ap_with_empty_client_source_config(mocker, tmpdir):
+    _test_recreate_certificate_with_invalid_client_source_config(mocker, tmpdir, None)
+
+
+def test_certificate_with_iam_with_ap_with_empty_client_source_config(mocker, tmpdir):
+    _test_recreate_certificate_with_invalid_client_source_config(mocker, tmpdir, '')
+
+
+def test_certificate_with_iam_with_ap_with_long_client_source_config(mocker, tmpdir):
+    _test_recreate_certificate_with_invalid_client_source_config(mocker, tmpdir, 'a' * 101)
+
+
 def test_create_ca_supporting_dirs(tmpdir):
     config = _get_config()
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
@@ -445,49 +483,85 @@ def test_create_ca_supporting_files(tmpdir):
 
 def test_create_ca_conf_with_awsprofile_no_credentials_found(mocker, caplog, tmpdir):
     mocker.patch('watchdog.get_aws_security_credentials', return_value=None)
-    watchdog.create_ca_conf(None, None, str(tmpdir), None, None, None, None, CREDENTIALS_SOURCE)
+    watchdog.create_ca_conf(None, None, str(tmpdir), None, None, None, None, CREDENTIALS_SOURCE, None)
     assert 'Failed to retrieve AWS security credentials using lookup method: %s' % CREDENTIALS_SOURCE in \
            [rec.message for rec in caplog.records][0]
 
 
-def test_create_ca_conf_with_iam_and_accesspoint(mocker, tmpdir):
+def test_create_ca_conf_without_client_info(mocker, tmpdir):
     current_time = mount_efs.get_utc_now()
-    tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True)
+    tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True, client_info=False)
 
-    ca_extension_body = '[ v3_ca ]\nsubjectKeyIdentifier = hash\n1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n1.3.6.1.4.1.4843.' \
-                        '7.2 = ASN1:SEQUENCE:efs_client_auth\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s' % (AP_ID, FS_ID)
+    ca_extension_body = ('[ v3_ca ]\n'
+                         'subjectKeyIdentifier = hash\n' 
+                        '1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n' 
+                        '1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth\n' 
+                        '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s'
+                         ) % (AP_ID, FS_ID)
+    efs_client_auth_body = watchdog.efs_client_auth_builder(tls_dict['public_key'], CREDENTIALS['AccessKeyId'],
+                                                             CREDENTIALS['SecretAccessKey'], current_time, REGION,
+                                                             FS_ID, CREDENTIALS['Token'])
+    efs_client_info_body = ''
+    matching_config_body = watchdog.CA_CONFIG_BODY % (tls_dict['mount_dir'], tls_dict['private_key'], COMMON_NAME,
+                                                       ca_extension_body, efs_client_auth_body, efs_client_info_body)
+
+    assert full_config_body == matching_config_body
+
+
+def test_create_ca_conf_with_all(mocker, tmpdir):
+    current_time = mount_efs.get_utc_now()
+    tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True, client_info=True)
+
+    ca_extension_body = ('[ v3_ca ]\n' 
+                        'subjectKeyIdentifier = hash\n' 
+                        '1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n' 
+                        '1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth\n' 
+                        '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s\n' 
+                        '1.3.6.1.4.1.4843.7.4 = ASN1:SEQUENCE:efs_client_info'
+                         ) % (AP_ID, FS_ID)
     efs_client_auth_body = watchdog.efs_client_auth_builder(tls_dict['public_key'], CREDENTIALS['AccessKeyId'],
                                                             CREDENTIALS['SecretAccessKey'], current_time, REGION, FS_ID,
                                                             CREDENTIALS['Token'])
+    efs_client_info_body = watchdog.efs_client_info_builder(CLIENT_INFO)
     matching_config_body = watchdog.CA_CONFIG_BODY % (tls_dict['mount_dir'], tls_dict['private_key'], COMMON_NAME,
-                                                      ca_extension_body, efs_client_auth_body)
+                                                      ca_extension_body, efs_client_auth_body, efs_client_info_body)
 
     assert full_config_body == matching_config_body
 
 
 def test_create_ca_conf_with_iam_no_accesspoint(mocker, tmpdir):
     current_time = mount_efs.get_utc_now()
-    tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=False)
+    tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=False, client_info=True)
 
-    ca_extension_body = '[ v3_ca ]\nsubjectKeyIdentifier = hash\n1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth' \
-                        '\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s' % FS_ID
+    ca_extension_body = ('[ v3_ca ]\n' 
+                        'subjectKeyIdentifier = hash\n' 
+                        '1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth\n' 
+                        '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s\n' 
+                        '1.3.6.1.4.1.4843.7.4 = ASN1:SEQUENCE:efs_client_info'
+                         ) % (FS_ID)
     efs_client_auth_body = watchdog.efs_client_auth_builder(tls_dict['public_key'], CREDENTIALS['AccessKeyId'],
                                                             CREDENTIALS['SecretAccessKey'], current_time, REGION, FS_ID,
                                                             CREDENTIALS['Token'])
+    efs_client_info_body = watchdog.efs_client_info_builder(CLIENT_INFO)
     matching_config_body = watchdog.CA_CONFIG_BODY % (tls_dict['mount_dir'], tls_dict['private_key'], COMMON_NAME,
-                                                      ca_extension_body, efs_client_auth_body)
+                                                      ca_extension_body, efs_client_auth_body, efs_client_info_body)
 
     assert full_config_body == matching_config_body
 
 
 def test_create_ca_conf_with_accesspoint_no_iam(mocker, tmpdir):
     current_time = mount_efs.get_utc_now()
-    tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=False, ap=True)
+    tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=False, ap=True, client_info=True)
 
-    ca_extension_body = '[ v3_ca ]\nsubjectKeyIdentifier = hash\n1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n1.3.6.1.4.1.4843' \
-                        '.7.3 = ASN1:UTF8String:%s' % (AP_ID, FS_ID)
+    ca_extension_body = ('[ v3_ca ]\n' 
+                        'subjectKeyIdentifier = hash\n' 
+                        '1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n' 
+                        '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s\n' 
+                        '1.3.6.1.4.1.4843.7.4 = ASN1:SEQUENCE:efs_client_info'
+                         ) % (AP_ID, FS_ID)
     efs_client_auth_body = ''
+    efs_client_info_body = watchdog.efs_client_info_builder(CLIENT_INFO)
     matching_config_body = watchdog.CA_CONFIG_BODY % (tls_dict['mount_dir'], tls_dict['private_key'], COMMON_NAME,
-                                                      ca_extension_body, efs_client_auth_body)
+                                                      ca_extension_body, efs_client_auth_body, efs_client_info_body)
 
     assert full_config_body == matching_config_body

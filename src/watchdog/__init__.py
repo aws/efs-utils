@@ -45,11 +45,13 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.23'
+VERSION = '1.24'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount-watchdog'
+CLIENT_INFO_SECTION = 'client-info'
+CLIENT_SOURCE_STR_LEN_LIMIT = 100
 
 LOG_DIR = '/var/log/amazon/efs'
 LOG_FILE = 'mount-watchdog.log'
@@ -95,6 +97,8 @@ distinguished_name = req_distinguished_name
 
 [ req_distinguished_name ]
 CN = %s
+
+%s
 
 %s
 
@@ -565,6 +569,18 @@ def create_required_directory(config, directory):
             raise
 
 
+def get_client_info(config):
+    client_info = {}
+
+    # source key/value pair in config file
+    if config.has_option(CLIENT_INFO_SECTION, 'source'):
+        client_source = config.get(CLIENT_INFO_SECTION, 'source')
+        if 0 < len(client_source) <= CLIENT_SOURCE_STR_LEN_LIMIT:
+            client_info['source'] = client_source
+
+    return client_info
+
+
 def recreate_certificate(config, mount_name, common_name, fs_id, credentials_source, ap_id, region,
                          base_path=STATE_FILE_DIR):
     current_time = get_utc_now()
@@ -583,8 +599,9 @@ def recreate_certificate(config, mount_name, common_name, fs_id, credentials_sou
         public_key = os.path.join(tls_paths['mount_dir'], 'publicKey.pem')
         create_public_key(private_key, public_key)
 
+    client_info = get_client_info(config)
     config_body = create_ca_conf(certificate_config, common_name, tls_paths['mount_dir'], private_key, current_time, region,
-                                 fs_id, credentials_source, ap_id=ap_id)
+                                 fs_id, credentials_source, ap_id=ap_id, client_info=client_info)
 
     if not config_body:
         logging.error('Cannot recreate self-signed certificate')
@@ -657,7 +674,7 @@ def create_certificate_signing_request(config_path, key_path, csr_path):
 
 
 def create_ca_conf(config_path, common_name, directory, private_key, date, region, fs_id, credentials_source,
-                   ap_id=None):
+                   ap_id=None, client_info=None):
     """Populate ca/req configuration file with fresh configurations at every mount since SigV4 signature can change"""
     public_key_path = os.path.join(directory, 'publicKey.pem')
     security_credentials = get_aws_security_credentials(credentials_source) if credentials_source else ''
@@ -666,16 +683,16 @@ def create_ca_conf(config_path, common_name, directory, private_key, date, regio
         logging.error('Failed to retrieve AWS security credentials using lookup method: %s', credentials_source)
         return None
 
-    ca_extension_body = ca_extension_builder(ap_id, security_credentials, fs_id)
+    ca_extension_body = ca_extension_builder(ap_id, security_credentials, fs_id, client_info)
     efs_client_auth_body = efs_client_auth_builder(public_key_path, security_credentials['AccessKeyId'],
                                                    security_credentials['SecretAccessKey'], date, region, fs_id,
                                                    security_credentials['Token']) if credentials_source else ''
-
     if credentials_source and not efs_client_auth_body:
         logging.error('Failed to create AWS SigV4 signature section for OpenSSL config. Public Key path: %s', public_key_path)
         return None
-
-    full_config_body = CA_CONFIG_BODY % (directory, private_key, common_name, ca_extension_body, efs_client_auth_body)
+    efs_client_info_body = efs_client_info_builder(client_info) if client_info else ''
+    full_config_body = CA_CONFIG_BODY % (directory, private_key, common_name, ca_extension_body,
+                                         efs_client_auth_body, efs_client_info_body)
 
     with open(config_path, 'w') as f:
         f.write(full_config_body)
@@ -683,7 +700,7 @@ def create_ca_conf(config_path, common_name, directory, private_key, date, regio
     return full_config_body
 
 
-def ca_extension_builder(ap_id, security_credentials, fs_id):
+def ca_extension_builder(ap_id, security_credentials, fs_id, client_info):
     ca_extension_str = '[ v3_ca ]\nsubjectKeyIdentifier = hash'
     if ap_id:
         ca_extension_str += '\n1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:' + ap_id
@@ -691,6 +708,8 @@ def ca_extension_builder(ap_id, security_credentials, fs_id):
         ca_extension_str += '\n1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth'
 
     ca_extension_str += '\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:' + fs_id
+    if client_info:
+        ca_extension_str += '\n1.3.6.1.4.1.4843.7.4 = ASN1:SEQUENCE:efs_client_info'
 
     return ca_extension_str
 
@@ -713,6 +732,13 @@ def efs_client_auth_builder(public_key_path, access_key_id, secret_access_key, d
         efs_client_auth_str += '\nsessionToken = EXPLICIT:0,UTF8String:' + session_token
 
     return efs_client_auth_str
+
+
+def efs_client_info_builder(client_info):
+    efs_client_info_str = '[ efs_client_info ]'
+    for key, value in client_info.items():
+        efs_client_info_str += '\n%s = UTF8String: %s' % (key, value)
+    return efs_client_info_str
 
 
 def create_public_key(private_key, public_key):
