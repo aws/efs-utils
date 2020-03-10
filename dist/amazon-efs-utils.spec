@@ -21,7 +21,7 @@
 
 Name      : amazon-efs-utils
 Version   : 1.24
-Release   : 1%{?dist}
+Release   : 2%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
 Group     : Amazon/Tools
@@ -120,6 +120,9 @@ fi
 %clean
 
 %changelog
+* Tue Mar 10 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-2
+- List which as dependency
+
 * Tue Mar 10 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-1
 - Enable efs-utils to source region from config file for sigv4 auth
 - Fix the issue that stunnel bin exec cannot be found in certain linux distributions
