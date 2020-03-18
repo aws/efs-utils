@@ -45,9 +45,9 @@ specfile: clean
 .PHONY: sources
 sources: tarball specfile
 
-.PHONY: rhel8-support
-rhel8-support:
-	./rhel8-support.sh
+.PHONY: shebang-support
+shebang-support:
+	./mangle-shebangs.sh
 
 .PHONY: rpm-only
 rpm-only:
@@ -58,7 +58,7 @@ rpm-only:
 	cp $(BUILD_DIR)/RPMS/*/*rpm build
 
 .PHONY: rpm
-rpm: rhel8-support sources rpm-only
+rpm: shebang-support sources rpm-only
 
 .PHONY: deb
 deb:
