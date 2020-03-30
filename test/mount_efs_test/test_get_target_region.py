@@ -11,8 +11,6 @@ import json
 
 import pytest
 
-from .. import utils
-
 try:
     import ConfigParser
 except ImportError:
@@ -98,21 +96,6 @@ def test_get_target_region_without_token(mocker):
     assert 'us-east-1' == get_target_region_helper()
 
 
-def test_get_target_region_metadata_endpoint_unauthorized(mocker):
-    mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value='ABCDEFG==')
-    mocker.patch('mount_efs.urlopen', side_effect=[HTTPError('url', 401, 'Unauthorized', None, None), MockUrlLibResponse()])
-    assert 'us-east-1' == get_target_region_helper()
-
-
-# Reproduce https://github.com/aws/efs-utils/issues/46
-def test_get_target_region_token_endpoint_not_allowed(mocker):
-    get_aws_ec2_metadata_token_mock = mocker.patch('mount_efs.get_aws_ec2_metadata_token',
-                                                   side_effect=HTTPError('url', 405, 'Not allowed', None, None))
-    mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse())
-    assert 'us-east-1' == get_target_region_helper()
-    utils.assert_not_called(get_aws_ec2_metadata_token_mock)
-
-
 def test_get_target_region_py3_no_charset(mocker):
     mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value=None)
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse(data=bytearray(INSTANCE_DOCUMENT, 'us-ascii')))
@@ -145,7 +128,6 @@ def test_get_target_region_config_metadata_unavailable(mocker, capsys):
     out, err = capsys.readouterr()
     assert 'Error retrieving region' in err
 
-
 def _test_get_target_region_error(mocker, capsys, response=None, error=None):
     mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value=None)
     if (response and error) or (not response and not error):
@@ -162,7 +144,6 @@ def _test_get_target_region_error(mocker, capsys, response=None, error=None):
 
     out, err = capsys.readouterr()
     assert 'Error retrieving region' in err
-
 
 def test_get_target_region_bad_response(mocker, capsys):
     _test_get_target_region_error(mocker, capsys, error=HTTPError('url', 400, 'Bad Request Error', None, None))

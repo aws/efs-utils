@@ -240,20 +240,14 @@ def get_target_region(config):
 def get_region_from_instance_metadata():
     err_msg = None
     try:
+        token = get_aws_ec2_metadata_token()
         headers = {}
+        if token:
+            headers = {'X-aws-ec2-metadata-token': token}
         instance_identity = get_aws_ec2_metadata(headers)
         return instance_identity['region']
-    except HTTPError as e:
-        # 401:Unauthorized, the GET request uses an invalid token, so generate a new one
-        if e.code == 401:
-            token = get_aws_ec2_metadata_token()
-            headers = {'X-aws-ec2-metadata-token': token}
-            instance_identity = get_aws_ec2_metadata(headers)
-            return instance_identity['region']
-        err_msg = 'Unable to reach instance metadata service at %s: status=%d, reason is %s' \
-                  % (INSTANCE_METADATA_SERVICE_URL, e.code, e.reason)
-    except URLError as e:
-        err_msg = 'Unable to reach instance metadata service at %s, reason is %s' % (INSTANCE_METADATA_SERVICE_URL, e.reason)
+    except (HTTPError, URLError) as e:
+        err_msg = 'Unable to reach instance metadata service at %s: status=%d' % (INSTANCE_METADATA_SERVICE_URL, e.code)
     except ValueError as e:
         err_msg = 'Error parsing json: %s' % (e,)
     except KeyError as e:
