@@ -21,7 +21,7 @@
 
 Name      : amazon-efs-utils
 Version   : 1.24
-Release   : 2%{?dist}
+Release   : 3%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
 Group     : Amazon/Tools
