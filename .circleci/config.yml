@@ -6,6 +6,12 @@ executors:
         type: string
     docker:
       - image: << parameters.image >>
+  linux:
+    parameters:
+      image:
+        type: string
+    docker:
+      - image: << parameters.image >>
 commands:
   runtest:
     steps:
@@ -23,6 +29,52 @@ commands:
           command: |
             source ~/efs-utils-virtualenv/bin/activate
             make test
+  build-deb:
+    steps:
+      - checkout
+      - run:
+          name: Repo update
+          command: |
+            apt-get update
+      - run:
+          name: Install dependencies
+          command: |
+            apt-get -y install binutils
+      - run:
+          name: Build DEB
+          command: |
+            ./build-deb.sh
+      - run:
+          name: Install package
+          command: |
+            apt-get -y install ./build/amazon-efs-utils*deb
+      - run:
+          name: Check installed successfully
+          command: |
+            mount.efs --version
+  build-rpm:
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            yum -y install rpm-build make
+      - run:
+          name: Build RPM
+          command: |
+            make rpm
+      - run:
+          name: Install package
+          command: |
+            yum -y install build/amazon-efs-utils*rpm
+      - run:
+          name: Check installed successfully
+          command: |
+            mount.efs --version
+      - run:
+          name: Check changelog
+          command: |
+            rpm -q --changelog amazon-efs-utils
 jobs:
   test:
     parameters:
@@ -33,6 +85,24 @@ jobs:
       image: << parameters.image >>
     steps:
       - runtest
+  build-deb-package:
+    parameters:
+      image:
+        type: string
+    executor:
+      name: linux
+      image: << parameters.image >>
+    steps:
+      - build-deb
+  build-rpm-package:
+    parameters:
+      image:
+        type: string
+    executor:
+      name: linux
+      image: << parameters.image >>
+    steps:
+      - build-rpm
 workflows:
   workflow:
     jobs:
@@ -54,3 +124,33 @@ workflows:
       - test:
           name: python27
           image: circleci/python:2.7.13
+      - build-deb-package:
+          name: ubuntu16
+          image: ubuntu:16.04
+      - build-deb-package:
+          name: ubuntu18
+          image: ubuntu:18.04
+      - build-deb-package:
+          name: debian9
+          image: debian:9
+      - build-rpm-package:
+          name: centos7
+          image: centos:centos7
+      - build-rpm-package:
+          name: amazon-linux-2
+          image: amazonlinux:2
+      - build-rpm-package:
+          name: amazon-linux
+          image: amazonlinux:1
+      - build-rpm-package:
+          name: fedora30
+          image: fedora:30
+      - build-rpm-package:
+          name: fedora31
+          image: fedora:31
+      - build-rpm-package:
+          name: fedora32
+          image: fedora:32
+      - build-rpm-package:
+          name: fedora33
+          image: fedora:33
