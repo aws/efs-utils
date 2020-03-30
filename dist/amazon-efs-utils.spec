@@ -120,6 +120,9 @@ fi
 %clean
 
 %changelog
+* Fri Mar 27 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-3
+- Use IMDSv1 by default, and use IMDSv2 where required
+
 * Tue Mar 10 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-2
 - List which as dependency
 
@@ -127,7 +130,7 @@ fi
 - Enable efs-utils to source region from config file for sigv4 auth
 - Fix the issue that stunnel bin exec cannot be found in certain linux distributions
 
-* Tue Mar 02 2020 Yuan Gao <ygaochn@amazon.com> - 1.23-2
+* Tue Mar 03 2020 Yuan Gao <ygaochn@amazon.com> - 1.23-2
 - Support new option: netns, enable file system to mount in given network namespace
 - Support new option: awscredsuri, enable sourcing iam authorization from aws credentials relative uri
 - List openssl and util-linux as package dependency for IAM/AP authorization and command nsenter to mount file system to given network namespace
