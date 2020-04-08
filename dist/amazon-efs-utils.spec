@@ -21,7 +21,7 @@
 
 Name      : amazon-efs-utils
 Version   : 1.24
-Release   : 3%{?dist}
+Release   : 4%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
 Group     : Amazon/Tools
@@ -120,6 +120,9 @@ fi
 %clean
 
 %changelog
+* Tue Apr 7 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-4
+- Fix the malformed certificate info
+
 * Fri Mar 27 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-3
 - Use IMDSv1 by default, and use IMDSv2 where required
 

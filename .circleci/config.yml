@@ -142,15 +142,3 @@ workflows:
       - build-rpm-package:
           name: amazon-linux
           image: amazonlinux:1
-      - build-rpm-package:
-          name: fedora30
-          image: fedora:30
-      - build-rpm-package:
-          name: fedora31
-          image: fedora:31
-      - build-rpm-package:
-          name: fedora32
-          image: fedora:32
-      - build-rpm-package:
-          name: fedora33
-          image: fedora:33

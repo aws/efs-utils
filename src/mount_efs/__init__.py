@@ -223,8 +223,8 @@ def get_target_region(config):
         return get_region_from_instance_metadata()
     except Exception as e:
         metadata_exception = e
-        logging.warn('Region not found in config file and metadata service call failed, falling back '
-                     'to legacy "dns_name_format" check')
+        logging.warning('Region not found in config file and metadata service call failed, falling back '
+                        'to legacy "dns_name_format" check')
 
     try:
         region = get_region_from_legacy_dns_format(config)
@@ -232,7 +232,7 @@ def get_target_region(config):
                          'parameter in the efs-utils configuration file.')
         return region
     except Exception:
-        logging.warn('Legacy check for region in "dns_name_format" failed')
+        logging.warning('Legacy check for region in "dns_name_format" failed')
 
     _fatal_error(metadata_exception)
 
@@ -1112,7 +1112,7 @@ def efs_client_auth_builder(public_key_path, access_key_id, secret_access_key, d
 def efs_client_info_builder(client_info):
     efs_client_info_str = '[ efs_client_info ]'
     for key, value in client_info.items():
-        efs_client_info_str += '\n%s = UTF8String: %s' % (key, value)
+        efs_client_info_str += '\n%s = UTF8String:%s' % (key, value)
     return efs_client_info_str
 
 

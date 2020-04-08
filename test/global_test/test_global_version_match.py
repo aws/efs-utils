@@ -29,6 +29,14 @@ def test_global_version_match():
             'version in {} is {}, does not match global version {}'.format(f, version_in_file, global_version)
 
 
+def test_global_release_match():
+    global_release = get_global_value('release')
+
+    release_in_file = get_release_for_file(RPM_FILE)
+    assert release_in_file == global_release, \
+        'release in {} is {}, does not match global release {}'.format(RPM_FILE, release_in_file, global_release)
+
+
 def test_changelog_version_match():
     global_version = get_global_value('version')
     global_release = get_global_value('release')
@@ -64,6 +72,17 @@ def get_version_for_file(file_path):
             return line.split('=')[1].strip().replace("'", '')
         if line.startswith('Version'):
             return line.split(':')[1].strip()
+    return None
+
+
+def get_release_for_file(file_path):
+    mount_helper_root_folder = uppath(os.path.abspath(__file__), 3)
+    file_to_check = os.path.join(mount_helper_root_folder, file_path)
+    with open(file_to_check) as fp:
+        lines = fp.readlines()
+    for line in lines:
+        if line.startswith('Release'):
+            return line.split(':')[1].strip().split('%')[0]
     return None
 
 
