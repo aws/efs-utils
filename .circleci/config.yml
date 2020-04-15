@@ -137,6 +137,9 @@ workflows:
           name: centos7
           image: centos:centos7
       - build-rpm-package:
+          name: centos8
+          image: centos:centos8
+      - build-rpm-package:
           name: amazon-linux-2
           image: amazonlinux:2
       - build-rpm-package:
