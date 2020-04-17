@@ -11,7 +11,6 @@ The `efs-utils` package has been verified against the following Linux distributi
 | Amazon Linux 2017.09 | `rpm` | `upstart` |
 | Amazon Linux 2 | `rpm` | `systemd` |
 | CentOS 7 | `rpm` | `systemd` |
-| CentOS 8 | `rpm` | `systemd` |
 | RHEL 7 | `rpm`| `systemd` |
 | RHEL 8 | `rpm`| `systemd` |
 | Debian 9 | `deb` | `systemd` |
@@ -133,7 +132,7 @@ or refer to the [documentation](https://docs.aws.amazon.com/efs/latest/ug/using-
 
 ## Upgrading stunnel for RHEL/CentOS
 
-By default, when using the EFS mount helper with TLS, it enforces certificate hostname checking. The EFS mount helper uses the `stunnel` program for its TLS functionality. Please note that some versions of Linux do not include a version of `stunnel` that supports TLS features by default. When using such a Linux version, mounting an EFS file system using TLS will fail.
+By default, when using the EFS mount helper with TLS, it enforces certificate hostname checking. The EFS mount helper uses the `stunnel` program for its TLS functionality. Please note that some versions of Linux do not include a version of `stunnel` that supports TLS features by default. When using such a Linux version, mounting an EFS file system using TLS will fail. 
 
 Once you’ve installed the `amazon-efs-utils` package, to upgrade your system’s version of `stunnel`, see [Upgrading Stunnel](https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html#upgrading-stunnel).
 
