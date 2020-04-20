@@ -87,10 +87,10 @@ def _get_mock_private_key_path(mocker, tmpdir):
 
 
 def _create_certificate_and_state(tls_dict, temp_dir, pk_path, timestamp, security_credentials=None,
-                                  credentials_source=None, ap_id=None, remove_cert=False):
+                                  credentials_source=None, ap_id=None, remove_cert=False, client_info=None):
     config = _get_config()
     good_ap_id = AP_ID if ap_id else None
-    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, security_credentials, good_ap_id,
+    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, security_credentials, good_ap_id, client_info,
                                  base_path=str(temp_dir))
 
     assert os.path.exists(pk_path)

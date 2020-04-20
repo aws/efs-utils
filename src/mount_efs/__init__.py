@@ -69,7 +69,7 @@ except ImportError:
     from urllib.error import URLError, HTTPError
 
 
-VERSION = '1.24'
+VERSION = '1.25'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -810,8 +810,10 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
     use_iam = 'iam' in options
     ap_id = options.get('accesspoint')
     cert_details = {}
+    security_credentials = None
+    client_info = get_client_info(config)
 
-    if use_iam or ap_id:
+    if use_iam:
         aws_creds_uri = options.get('awscredsuri')
         if aws_creds_uri:
             kwargs = {'aws_creds_uri': aws_creds_uri}
@@ -820,23 +822,24 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
 
         security_credentials, credentials_source = get_aws_security_credentials(use_iam, **kwargs)
 
-        # additional symbol appended to avoid naming collisions
-        cert_details['mountStateDir'] = get_mount_specific_filename(fs_id, mountpoint, tls_port) + '+'
-        # common name for certificate signing request is max 64 characters
-        cert_details['commonName'] = socket.gethostname()[0:64]
-        cert_details['region'] = get_target_region(config)
-        cert_details['certificateCreationTime'] = create_certificate(config, cert_details['mountStateDir'],
-                                                                     cert_details['commonName'], cert_details['region'], fs_id,
-                                                                     security_credentials, ap_id=ap_id, base_path=state_file_dir)
-        cert_details['certificate'] = os.path.join(state_file_dir, cert_details['mountStateDir'], 'certificate.pem')
-        cert_details['privateKey'] = get_private_key_path()
-        cert_details['fsId'] = fs_id
-
         if credentials_source:
             cert_details['awsCredentialsMethod'] = credentials_source
 
-        if ap_id:
-            cert_details['accessPoint'] = ap_id
+    if ap_id:
+        cert_details['accessPoint'] = ap_id
+
+    # additional symbol appended to avoid naming collisions
+    cert_details['mountStateDir'] = get_mount_specific_filename(fs_id, mountpoint, tls_port) + '+'
+    # common name for certificate signing request is max 64 characters
+    cert_details['commonName'] = socket.gethostname()[0:64]
+    cert_details['region'] = get_target_region(config)
+    cert_details['certificateCreationTime'] = create_certificate(config, cert_details['mountStateDir'],
+                                                                 cert_details['commonName'], cert_details['region'], fs_id,
+                                                                 security_credentials, ap_id, client_info,
+                                                                 base_path=state_file_dir)
+    cert_details['certificate'] = os.path.join(state_file_dir, cert_details['mountStateDir'], 'certificate.pem')
+    cert_details['privateKey'] = get_private_key_path()
+    cert_details['fsId'] = fs_id
 
     start_watchdog(init_system)
 
@@ -976,7 +979,8 @@ def get_client_info(config):
     return client_info
 
 
-def create_certificate(config, mount_name, common_name, region, fs_id, security_credentials, ap_id, base_path=STATE_FILE_DIR):
+def create_certificate(config, mount_name, common_name, region, fs_id, security_credentials, ap_id, client_info,
+                       base_path=STATE_FILE_DIR):
     current_time = get_utc_now()
     tls_paths = tls_paths_dictionary(mount_name, base_path)
 
@@ -993,7 +997,6 @@ def create_certificate(config, mount_name, common_name, region, fs_id, security_
         public_key = os.path.join(tls_paths['mount_dir'], 'publicKey.pem')
         create_public_key(private_key, public_key)
 
-    client_info = get_client_info(config)
     create_ca_conf(certificate_config, common_name, tls_paths['mount_dir'], private_key, current_time, region, fs_id,
                    security_credentials, ap_id, client_info)
     create_certificate_signing_request(certificate_config, private_key, certificate_signing_request)
@@ -1123,14 +1126,18 @@ def create_public_key(private_key, public_key):
 
 def subprocess_call(cmd, error_message):
     """Helper method to run shell openssl command and to handle response error messages"""
-    process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
-    (output, err) = process.communicate()
-    rc = process.poll()
-    if rc != 0:
-        logging.error('Command %s failed, rc=%s, stdout="%s", stderr="%s"' % (cmd, rc, output, err))
-        fatal_error(error_message, error_message)
-    else:
-        return output, err
+    retry_times = 3
+    for retry in range(retry_times):
+        process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
+        (output, err) = process.communicate()
+        rc = process.poll()
+        if rc != 0:
+            logging.error('Command %s failed, rc=%s, stdout="%s", stderr="%s"' % (cmd, rc, output, err), exc_info=True)
+            process.kill()
+        else:
+            return output, err
+    error_message = '%s, error is: %s' % (error_message, err)
+    fatal_error(error_message, error_message)
 
 
 def ca_dirs_check(config, database_dir, certs_dir):

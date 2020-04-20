@@ -85,6 +85,8 @@ def test_bootstrap_tls_state_file_nonexistent_dir(mocker, tmpdir):
             return '0755'
         elif section == mount_efs.CONFIG_SECTION and field == 'dns_name_format':
             return '{fs_id}.efs.{region}.amazonaws.com'
+        elif section == mount_efs.CLIENT_INFO_SECTION and field == 'source':
+            return CLIENT_SOURCE
         else:
             raise ValueError('Unexpected arguments')
 
@@ -97,38 +99,6 @@ def test_bootstrap_tls_state_file_nonexistent_dir(mocker, tmpdir):
         pass
 
     assert os.path.exists(state_file_dir)
-
-
-def test_bootstrap_tls_no_cert_creation(mocker, tmpdir):
-    setup_mocks_without_popen(mocker)
-    mocker.patch('mount_efs.get_mount_specific_filename', return_value=DNS_NAME)
-    state_file_dir = str(tmpdir)
-    tls_dict = mount_efs.tls_paths_dictionary(DNS_NAME, state_file_dir)
-
-    pk_path = os.path.join(str(tmpdir), 'privateKey.pem')
-    mocker.patch('mount_efs.get_private_key_path', return_value=pk_path)
-
-    def config_get_side_effect(section, field):
-        if section == mount_efs.CONFIG_SECTION and field == 'state_file_dir_mode':
-            return '0755'
-        elif section == mount_efs.CONFIG_SECTION and field == 'dns_name_format':
-            return '{fs_id}.efs.{region}.amazonaws.com'
-        else:
-            raise ValueError('Unexpected arguments')
-
-    MOCK_CONFIG.get.side_effect = config_get_side_effect
-
-    mocker.patch('mount_efs._stunnel_bin', return_value='/usr/bin/stunnel')
-    try:
-        with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {}, state_file_dir):
-            pass
-    except OSError as e:
-        assert '[Errno 2] No such file or directory' in str(e)
-
-    assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
-    assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
-    assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'config.conf'))
-    assert not os.path.exists(pk_path)
 
 
 def test_bootstrap_tls_cert_created(mocker, tmpdir):

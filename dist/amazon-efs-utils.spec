@@ -20,8 +20,8 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.24
-Release   : 4%{?dist}
+Version   : 1.25
+Release   : 1%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
 Group     : Amazon/Tools
@@ -120,6 +120,9 @@ fi
 %clean
 
 %changelog
+* Mon Apr 20 2020 Yuan Gao <ygaochn@amazon.com> - 1.25-1
+- Create self-signed certificate for tls-only mount
+
 * Tue Apr 7 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-4
 - Fix the malformed certificate info
 

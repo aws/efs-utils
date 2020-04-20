@@ -112,7 +112,7 @@ def test_certificate_without_iam_with_ap_id(mocker, tmpdir):
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     tls_dict = mount_efs.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     tmp_config_path = os.path.join(str(tmpdir), MOUNT_NAME, 'tmpConfig')
-    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, None, AP_ID, base_path=str(tmpdir))
+    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, None, AP_ID, CLIENT_INFO, base_path=str(tmpdir))
     with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
         conf_body = f.read()
         assert conf_body == mount_efs.create_ca_conf(tmp_config_path, COMMON_NAME, tls_dict['mount_dir'], pk_path, FIXED_DT, REGION,
@@ -128,7 +128,7 @@ def test_certificate_with_iam_with_ap_id(mocker, tmpdir):
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     tls_dict = mount_efs.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     tmp_config_path = os.path.join(str(tmpdir), MOUNT_NAME, 'tmpConfig')
-    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, CREDENTIALS, AP_ID, base_path=str(tmpdir))
+    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, CREDENTIALS, AP_ID, CLIENT_INFO, base_path=str(tmpdir))
     with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
         conf_body = f.read()
         assert conf_body == mount_efs.create_ca_conf(tmp_config_path, COMMON_NAME, tls_dict['mount_dir'], pk_path, FIXED_DT, REGION,
@@ -144,7 +144,7 @@ def _test_certificate_with_iam_with_ap_with_invalid_client_source_config(mocker,
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     tls_dict = mount_efs.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     tmp_config_path = os.path.join(str(tmpdir), MOUNT_NAME, 'tmpConfig')
-    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, CREDENTIALS, AP_ID,
+    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, CREDENTIALS, AP_ID, None,
                                  base_path=str(tmpdir))
     with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
         conf_body = f.read()
@@ -173,13 +173,45 @@ def test_certificate_with_iam_without_ap_id(mocker, tmpdir):
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     tls_dict = mount_efs.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     tmp_config_path = os.path.join(str(tmpdir), MOUNT_NAME, 'tmpConfig')
-    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, CREDENTIALS, None, base_path=str(tmpdir))
+    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, CREDENTIALS, None, CLIENT_INFO, base_path=str(tmpdir))
     with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
         conf_body = f.read()
         assert conf_body == mount_efs.create_ca_conf(tmp_config_path, COMMON_NAME, tls_dict['mount_dir'], pk_path, FIXED_DT, REGION,
                                                      FS_ID, CREDENTIALS, None, CLIENT_INFO)
     assert os.path.exists(pk_path)
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
+
+
+def test_certificate_without_iam_without_ap_id_without_client_source(mocker, tmpdir):
+    config = _get_config()
+    pk_path = _get_mock_private_key_path(mocker, tmpdir)
+    tls_dict = mount_efs.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
+    tmp_config_path = os.path.join(str(tmpdir), MOUNT_NAME, 'tmpConfig')
+    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, None, None, None, base_path=str(tmpdir))
+    with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
+        conf_body = f.read()
+        assert conf_body == mount_efs.create_ca_conf(tmp_config_path, COMMON_NAME, tls_dict['mount_dir'], pk_path, FIXED_DT,
+                                                     REGION, FS_ID, None, None, None)
+    assert os.path.exists(pk_path)
+    assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
+
+
+def test_certificate_without_iam_without_ap_id_with_client_source(mocker, tmpdir):
+    config = _get_mock_config()
+    pk_path = _get_mock_private_key_path(mocker, tmpdir)
+    tls_dict = mount_efs.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
+    tmp_config_path = os.path.join(str(tmpdir), MOUNT_NAME, 'tmpConfig')
+    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, None, None, CLIENT_INFO, base_path=str(tmpdir))
+    with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
+        conf_body = f.read()
+        assert conf_body == mount_efs.create_ca_conf(tmp_config_path, COMMON_NAME, tls_dict['mount_dir'], pk_path, FIXED_DT,
+                                                     REGION, FS_ID, None, None, CLIENT_INFO)
+    assert os.path.exists(pk_path)
+    assert not os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
 
@@ -336,6 +368,39 @@ def test_create_ca_conf_with_accesspoint_no_iam(tmpdir):
                         '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s\n' 
                         '1.3.6.1.4.1.4843.7.4 = ASN1:SEQUENCE:efs_client_info'
                          ) % (AP_ID, FS_ID)
+    efs_client_auth_body = ''
+    efs_client_info_body = mount_efs.efs_client_info_builder(CLIENT_INFO)
+    matching_config_body = mount_efs.CA_CONFIG_BODY % (tls_dict['mount_dir'], tls_dict['private_key'], COMMON_NAME,
+                                                       ca_extension_body, efs_client_auth_body, efs_client_info_body)
+
+    assert full_config_body == matching_config_body
+
+
+def test_create_ca_conf_no_ap_no_iam_no_client_source(tmpdir):
+    current_time = mount_efs.get_utc_now()
+    tls_dict, full_config_body = _create_ca_conf_helper(tmpdir, current_time, iam=False, ap=False, client_info=False)
+
+    ca_extension_body = ('[ v3_ca ]\n'
+                         'subjectKeyIdentifier = hash\n'
+                         '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s'
+                         ) % (FS_ID)
+    efs_client_auth_body = ''
+    efs_client_info_body = ''
+    matching_config_body = mount_efs.CA_CONFIG_BODY % (tls_dict['mount_dir'], tls_dict['private_key'], COMMON_NAME,
+                                                       ca_extension_body, efs_client_auth_body, efs_client_info_body)
+
+    assert full_config_body == matching_config_body
+
+
+def test_create_ca_conf_no_ap_no_iam_with_client_source(tmpdir):
+    current_time = mount_efs.get_utc_now()
+    tls_dict, full_config_body = _create_ca_conf_helper(tmpdir, current_time, iam=False, ap=False, client_info=True)
+
+    ca_extension_body = ('[ v3_ca ]\n'
+                         'subjectKeyIdentifier = hash\n'
+                         '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s\n' 
+                        '1.3.6.1.4.1.4843.7.4 = ASN1:SEQUENCE:efs_client_info'
+                         ) % (FS_ID)
     efs_client_auth_body = ''
     efs_client_info_body = mount_efs.efs_client_info_builder(CLIENT_INFO)
     matching_config_body = mount_efs.CA_CONFIG_BODY % (tls_dict['mount_dir'], tls_dict['private_key'], COMMON_NAME,
