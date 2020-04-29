@@ -175,8 +175,8 @@ def get_aws_security_credentials_from_ecs(uri):
     dict_keys = ['AccessKeyId', 'SecretAccessKey', 'Token']
     ecs_uri = ECS_TASK_METADATA_API + uri
     ecs_unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % ecs_uri
-    ecs_url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.', ecs_uri, \
-                        SECURITY_CREDS_ECS_URI_HELP_URL
+    ecs_url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.' % \
+                        (ecs_uri, SECURITY_CREDS_ECS_URI_HELP_URL)
     ecs_security_dict = url_request_helper(ecs_uri, ecs_unsuccessful_resp, ecs_url_error_msg)
 
     if ecs_security_dict and all(k in ecs_security_dict for k in dict_keys):
@@ -189,14 +189,14 @@ def get_aws_security_credentials_from_instance_metadata():
     # through IAM role name security credentials lookup uri (after lookup for IAM role name attached to instance)
     dict_keys = ['AccessKeyId', 'SecretAccessKey', 'Token']
     iam_role_unsuccessful_resp = 'Unsuccessful retrieval of IAM role name at %s.' % INSTANCE_IAM_URL
-    iam_role_url_error_msg = 'Unable to reach %s to retrieve IAM role name. See %s for more info.', INSTANCE_IAM_URL, \
-                             SECURITY_CREDS_IAM_ROLE_HELP_URL
+    iam_role_url_error_msg = 'Unable to reach %s to retrieve IAM role name. See %s for more info.' % \
+                             (INSTANCE_IAM_URL, SECURITY_CREDS_IAM_ROLE_HELP_URL)
     iam_role_name = url_request_helper(INSTANCE_IAM_URL, iam_role_unsuccessful_resp, iam_role_url_error_msg)
     if iam_role_name:
-        security_creds_lookup_url = INSTANCE_IAM_URL + str(iam_role_name)
+        security_creds_lookup_url = INSTANCE_IAM_URL + iam_role_name
         unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % security_creds_lookup_url
-        url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.', \
-                        security_creds_lookup_url, SECURITY_CREDS_IAM_ROLE_HELP_URL
+        url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.' % \
+                        (security_creds_lookup_url, SECURITY_CREDS_IAM_ROLE_HELP_URL)
         iam_security_dict = url_request_helper(security_creds_lookup_url, unsuccessful_resp, url_error_msg)
 
         if iam_security_dict and all(k in iam_security_dict for k in dict_keys):
@@ -240,17 +240,17 @@ def url_request_helper(url, unsuccessful_resp, url_error_msg):
             return None
 
         resp_body = request_resp.read()
+        resp_body_type = type(resp_body)
         try:
-            if type(resp_body) is str:
+            if resp_body_type is str:
                 resp_dict = json.loads(resp_body)
             else:
                 resp_dict = json.loads(resp_body.decode(request_resp.headers.get_content_charset() or 'us-ascii'))
 
             return resp_dict
         except ValueError as e:
-            logging.debug('Error parsing json: %s, returning raw response body: %s' % (e, str(resp_body)))
-            return resp_body
-
+            logging.info('ValueError parsing "%s" into json: %s. Returning response body.' % (str(resp_body), e))
+            return resp_body if resp_body_type is str else resp_body.decode('utf-8')
     except URLError as e:
         logging.debug('%s %s', url_error_msg, e)
         return None

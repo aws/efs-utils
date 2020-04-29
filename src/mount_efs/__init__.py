@@ -198,6 +198,8 @@ STUNNEL_EFS_CONFIG = {
 WATCHDOG_SERVICE = 'amazon-efs-mount-watchdog'
 SYSTEM_RELEASE_PATH = '/etc/system-release'
 RHEL8_RELEASE_NAME = 'Red Hat Enterprise Linux release 8'
+CENTOS8_RELEASE_NAME = 'CentOS Linux release 8'
+SKIP_NO_LIBWRAP_RELEASES = [RHEL8_RELEASE_NAME, CENTOS8_RELEASE_NAME]
 
 
 def fatal_error(user_message, log_message=None, exit_code=1):
@@ -376,10 +378,10 @@ def get_aws_security_credentials_from_ecs(aws_creds_uri, is_fatal=False):
 
 
 def get_aws_security_credentials_from_instance_metadata(iam_role_name):
-    security_creds_lookup_url = INSTANCE_IAM_URL + str(iam_role_name)
+    security_creds_lookup_url = INSTANCE_IAM_URL + iam_role_name
     unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % security_creds_lookup_url
-    url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.',\
-                    security_creds_lookup_url, SECURITY_CREDS_IAM_ROLE_HELP_URL
+    url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.' % \
+                    (security_creds_lookup_url, SECURITY_CREDS_IAM_ROLE_HELP_URL)
     iam_security_dict = url_request_helper(security_creds_lookup_url, unsuccessful_resp, url_error_msg)
 
     if iam_security_dict and all(k in iam_security_dict for k in CREDENTIALS_KEYS):
@@ -390,8 +392,8 @@ def get_aws_security_credentials_from_instance_metadata(iam_role_name):
 
 def get_iam_role_name():
     iam_role_unsuccessful_resp = 'Unsuccessful retrieval of IAM role name at %s.' % INSTANCE_IAM_URL
-    iam_role_url_error_msg = 'Unable to reach %s to retrieve IAM role name. See %s for more info.', INSTANCE_IAM_URL, \
-                             SECURITY_CREDS_IAM_ROLE_HELP_URL
+    iam_role_url_error_msg = 'Unable to reach %s to retrieve IAM role name. See %s for more info.' % \
+                             (INSTANCE_IAM_URL, SECURITY_CREDS_IAM_ROLE_HELP_URL)
     iam_role_name = url_request_helper(INSTANCE_IAM_URL, iam_role_unsuccessful_resp, iam_role_url_error_msg)
     return iam_role_name
 
@@ -456,16 +458,17 @@ def url_request_helper(url, unsuccessful_resp, url_error_msg):
             return None
 
         resp_body = request_resp.read()
+        resp_body_type = type(resp_body)
         try:
-            if type(resp_body) is str:
+            if resp_body_type is str:
                 resp_dict = json.loads(resp_body)
             else:
                 resp_dict = json.loads(resp_body.decode(request_resp.headers.get_content_charset() or 'us-ascii'))
 
             return resp_dict
         except ValueError as e:
-            logging.debug('Error parsing json: %s, returning raw response body: %s' % (e, str(resp_body)))
-            return resp_body
+            logging.info('ValueError parsing "%s" into json: %s. Returning response body.' % (str(resp_body), e))
+            return resp_body if resp_body_type is str else resp_body.decode('utf-8')
     except URLError as e:
         logging.debug('%s %s', url_error_msg, e)
         return None
@@ -670,7 +673,8 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
         else:
             fatal_error(tls_controls_message % 'stunnel_check_cert_validity')
 
-    if RHEL8_RELEASE_NAME not in get_system_release_version():
+    system_release_version = get_system_release_version()
+    if not any(release in system_release_version for release in SKIP_NO_LIBWRAP_RELEASES):
         efs_config['libwrap'] = 'no'
 
     stunnel_config = '\n'.join(serialize_stunnel_config(global_config) + serialize_stunnel_config(efs_config, 'efs'))

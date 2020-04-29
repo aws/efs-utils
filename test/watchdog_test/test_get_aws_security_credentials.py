@@ -165,7 +165,7 @@ def test_get_aws_security_credentials_ecs(mocker):
     assert credentials['Token'] == SESSION_TOKEN_VAL
 
 
-def test_get_aws_security_credentials_instance_metadata(mocker):
+def test_get_aws_security_credentials_instance_metadata_role_name_str(mocker):
     mocker.patch.dict(os.environ, {})
     mocker.patch('os.path.exists', return_value=False)
     response = json.dumps({
@@ -177,7 +177,30 @@ def test_get_aws_security_credentials_instance_metadata(mocker):
         'Token': SESSION_TOKEN_VAL,
         'Expiration': '2019-10-25T21:17:24Z'
     })
-    mocker.patch('watchdog.urlopen', return_value=MockUrlLibResponse(data=response))
+    side_effects = [MockUrlLibResponse(data='FAKE_IAM_ROLE_NAME'), MockUrlLibResponse(data=response)]
+    mocker.patch('watchdog.urlopen', side_effect=side_effects)
+
+    credentials = watchdog.get_aws_security_credentials('metadata:')
+
+    assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
+    assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
+    assert credentials['Token'] == SESSION_TOKEN_VAL
+
+
+def test_get_aws_security_credentials_instance_metadata_role_name_bytes(mocker):
+    mocker.patch.dict(os.environ, {})
+    mocker.patch('os.path.exists', return_value=False)
+    response = json.dumps({
+        'Code': 'Success',
+        'LastUpdated': '2019-10-25T14:41:42Z',
+        'Type': 'AWS-HMAC',
+        'AccessKeyId': ACCESS_KEY_ID_VAL,
+        'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
+        'Token': SESSION_TOKEN_VAL,
+        'Expiration': '2019-10-25T21:17:24Z'
+    })
+    side_effects = [MockUrlLibResponse(data=b'FAKE_IAM_ROLE_NAME'), MockUrlLibResponse(data=response)]
+    mocker.patch('watchdog.urlopen', side_effect=side_effects)
 
     credentials = watchdog.get_aws_security_credentials('metadata:')
 
