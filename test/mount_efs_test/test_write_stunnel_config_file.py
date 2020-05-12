@@ -24,11 +24,12 @@ MOUNT_POINT = '/mnt'
 PORT = 12345
 VERIFY_LEVEL = 2
 OCSP_ENABLED = False
+STUNNEL_LOGS_FILE = '/var/log/amazon/efs/%s.stunnel.log' % FS_ID
 
 
 def _get_config(mocker, stunnel_debug_enabled=False, stunnel_check_cert_hostname_supported=True,
                 stunnel_check_cert_validity_supported=True, stunnel_check_cert_hostname=None,
-                stunnel_check_cert_validity=False):
+                stunnel_check_cert_validity=False, stunnel_logs_file=None):
 
     mocker.patch('mount_efs.get_version_specific_stunnel_options',
                  return_value=(stunnel_check_cert_hostname_supported, stunnel_check_cert_validity_supported, ))
@@ -47,6 +48,11 @@ def _get_config(mocker, stunnel_debug_enabled=False, stunnel_check_cert_hostname
     config.set(mount_efs.CONFIG_SECTION, 'stunnel_debug_enabled', str(stunnel_debug_enabled))
     config.set(mount_efs.CONFIG_SECTION, 'stunnel_check_cert_hostname', str(stunnel_check_cert_hostname))
     config.set(mount_efs.CONFIG_SECTION, 'stunnel_check_cert_validity', str(stunnel_check_cert_validity))
+
+    # This option is only written if stunnel debug logs are enabled and a log file is specified
+    if stunnel_debug_enabled and stunnel_logs_file:
+        config.set(mount_efs.CONFIG_SECTION, 'stunnel_logs_file', str(stunnel_logs_file))
+
     return config
 
 
@@ -176,6 +182,23 @@ def test_write_stunnel_config_with_debug(mocker, tmpdir):
     expected_global_config['output'] = os.path.join(mount_efs.LOG_DIR,
                                                     '%s.stunnel.log' % mount_efs.get_mount_specific_filename(FS_ID, MOUNT_POINT,
                                                                                                              PORT))
+
+    _validate_config(config_file, expected_global_config, _get_expected_efs_config())
+
+
+def test_write_stunnel_config_with_debug_and_logs_file(mocker, tmpdir):
+    ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
+    state_file_dir = str(tmpdir)
+    config_file = mount_efs.write_stunnel_config_file(_get_config(mocker, stunnel_debug_enabled=True,
+                                                                  stunnel_logs_file=STUNNEL_LOGS_FILE),
+                                                      state_file_dir, FS_ID,
+                                                      MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL, OCSP_ENABLED,
+                                                      _get_mount_options())
+    utils.assert_called_once(ca_mocker)
+
+    expected_global_config = dict(mount_efs.STUNNEL_GLOBAL_CONFIG)
+    expected_global_config['debug'] = 'debug'
+    expected_global_config['output'] = STUNNEL_LOGS_FILE
 
     _validate_config(config_file, expected_global_config, _get_expected_efs_config())
 

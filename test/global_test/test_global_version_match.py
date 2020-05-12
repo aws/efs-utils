@@ -16,6 +16,7 @@ except ImportError:
 FILE_LIST = ['src/watchdog/__init__.py', 'src/mount_efs/__init__.py', 'dist/amazon-efs-utils.spec',
              'dist/amazon-efs-utils.control', 'build-deb.sh']
 RPM_FILE = 'dist/amazon-efs-utils.spec'
+DEB_FILE = 'build-deb.sh'
 
 GLOBAL_CONFIG = 'config.ini'
 
@@ -32,9 +33,12 @@ def test_global_version_match():
 def test_global_release_match():
     global_release = get_global_value('release')
 
-    release_in_file = get_release_for_file(RPM_FILE)
-    assert release_in_file == global_release, \
-        'release in {} is {}, does not match global release {}'.format(RPM_FILE, release_in_file, global_release)
+    release_in_rpm_file = get_release_for_file(RPM_FILE)
+    release_in_deb_file = get_release_for_file(DEB_FILE)
+    assert release_in_rpm_file == global_release, \
+        'release in {} is {}, does not match global release {}'.format(RPM_FILE, release_in_rpm_file, global_release)
+    assert release_in_deb_file == global_release, \
+        'release in {} is {}, does not match global release {}'.format(RPM_FILE, release_in_deb_file, global_release)
 
 
 def test_changelog_version_match():
@@ -83,6 +87,8 @@ def get_release_for_file(file_path):
     for line in lines:
         if line.startswith('Release'):
             return line.split(':')[1].strip().split('%')[0]
+        elif line.startswith('RELEASE'):
+            return line.split('=')[1].strip()
     return None
 
 

@@ -34,7 +34,6 @@ import base64
 import errno
 import hashlib
 import hmac
-import itertools
 import json
 import logging
 import os
@@ -424,27 +423,18 @@ def credentials_file_helper(file_path, awsprofile):
     return credentials
 
 
-def get_correct_default_case_combination(aws_credentials_configs):
-    default_str = 'default'
-    for perm in map(''.join, itertools.product(*zip(default_str.upper(), default_str.lower()))):
-        try:
-            access_key = aws_credentials_configs.get(perm, 'aws_access_key_id')
-            if access_key is not None:
-                return perm
-        except (NoSectionError, NoOptionError):
-            continue
-
-    return None
-
-
 def get_aws_profile(options, use_iam):
     awsprofile = options.get('awsprofile')
     if not awsprofile and use_iam:
         for file_path in [AWS_CREDENTIALS_FILE, AWS_CONFIG_FILE]:
             aws_credentials_configs = read_config(file_path)
-            awsprofile = get_correct_default_case_combination(aws_credentials_configs)
-            if awsprofile:
-                break
+            # check if aws access key id is found under [default] section in current file and return 'default' if so
+            try:
+                access_key = aws_credentials_configs.get('default', 'aws_access_key_id')
+                if access_key is not None:
+                    return 'default'
+            except (NoSectionError, NoOptionError):
+                continue
 
     return awsprofile
 
@@ -641,7 +631,11 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
     global_config = dict(STUNNEL_GLOBAL_CONFIG)
     if config.getboolean(CONFIG_SECTION, 'stunnel_debug_enabled'):
         global_config['debug'] = 'debug'
-        global_config['output'] = os.path.join(log_dir, '%s.stunnel.log' % mount_filename)
+
+        if config.has_option(CONFIG_SECTION, 'stunnel_logs_file'):
+            global_config['output'] = config.get(CONFIG_SECTION, 'stunnel_logs_file').replace('{fs_id}', fs_id)
+        else:
+            global_config['output'] = os.path.join(log_dir, '%s.stunnel.log' % mount_filename)
 
     efs_config = dict(STUNNEL_EFS_CONFIG)
     efs_config['accept'] = efs_config['accept'] % tls_port
