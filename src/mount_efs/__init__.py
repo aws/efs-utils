@@ -63,9 +63,11 @@ except ImportError:
 
 try:
     from urllib2 import URLError, HTTPError, build_opener, urlopen, Request, HTTPHandler
+    from urllib import urlencode
 except ImportError:
     from urllib.request import urlopen, Request
     from urllib.error import URLError, HTTPError
+    from urllib.parse import urlencode
 
 
 VERSION = '1.26.3'
@@ -143,10 +145,14 @@ AP_ID_RE = re.compile('^fsap-[0-9a-f]{17}$')
 CREDENTIALS_KEYS = ['AccessKeyId', 'SecretAccessKey', 'Token']
 ECS_URI_ENV = 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'
 ECS_TASK_METADATA_API = 'http://169.254.170.2'
+WEB_IDENTITY_ROLE_ARN_ENV = 'AWS_ROLE_ARN'
+WEB_IDENTITY_TOKEN_FILE_ENV = 'AWS_WEB_IDENTITY_TOKEN_FILE'
+STS_ENDPOINT_URL = 'https://sts.amazonaws.com/'
 INSTANCE_METADATA_TOKEN_URL = 'http://169.254.169.254/latest/api/token'
 INSTANCE_METADATA_SERVICE_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document/'
 INSTANCE_IAM_URL = 'http://169.254.169.254/latest/meta-data/iam/security-credentials/'
 SECURITY_CREDS_ECS_URI_HELP_URL = 'https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html'
+SECURITY_CREDS_WEBIDENTITY_HELP_URL = 'https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html'
 SECURITY_CREDS_IAM_ROLE_HELP_URL = 'https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html'
 
 DEFAULT_STUNNEL_VERIFY_LEVEL = 2
@@ -332,6 +338,17 @@ def get_aws_security_credentials(use_iam, awsprofile=None, aws_creds_uri=None):
         if credentials and credentials_source:
             return credentials, credentials_source
 
+    # attempt to lookup AWS security credentials through AssumeRoleWithWebIdentity
+    # (e.g. for IAM Role for Service Accounts (IRSA) approach on EKS)
+    if WEB_IDENTITY_ROLE_ARN_ENV in os.environ and WEB_IDENTITY_TOKEN_FILE_ENV in os.environ:
+        credentials, credentials_source = get_aws_security_credentials_from_webidentity(
+            os.environ[WEB_IDENTITY_ROLE_ARN_ENV],
+            os.environ[WEB_IDENTITY_TOKEN_FILE_ENV],
+            False
+        )
+        if credentials and credentials_source:
+            return credentials, credentials_source
+
     # attempt to lookup AWS security credentials with IAM role name attached to instance
     # through IAM role name security credentials lookup uri
     iam_role_name = get_iam_role_name()
@@ -375,6 +392,49 @@ def get_aws_security_credentials_from_ecs(aws_creds_uri, is_fatal=False):
     # Fail if credentials cannot be fetched from the given aws_creds_uri
     if is_fatal:
         fatal_error(ecs_unsuccessful_resp, ecs_unsuccessful_resp)
+    else:
+        return None, None
+
+
+def get_aws_security_credentials_from_webidentity(role_arn, token_file, is_fatal=False):
+    try:
+        with open(token_file, 'r') as f:
+            token = f.read()
+    except Exception as e:
+        if is_fatal:
+            unsuccessful_resp = 'Error reading token file %s: %s' % (token_file, e)
+            fatal_error(unsuccessful_resp, unsuccessful_resp)
+        else:
+            return None, None
+
+    webidentity_url = STS_ENDPOINT_URL + '?' + urlencode({
+        'Version': '2011-06-15',
+        'Action': 'AssumeRoleWithWebIdentity',
+        'RoleArn': role_arn,
+        'RoleSessionName': 'efs-mount-helper',
+        'WebIdentityToken': token
+    })
+
+    unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % STS_ENDPOINT_URL
+    url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.' % \
+                    (STS_ENDPOINT_URL, SECURITY_CREDS_WEBIDENTITY_HELP_URL)
+    resp = url_request_helper(webidentity_url, unsuccessful_resp, url_error_msg, headers={'Accept': 'application/json'})
+
+    if resp:
+        creds = resp \
+                .get('AssumeRoleWithWebIdentityResponse', {}) \
+                .get('AssumeRoleWithWebIdentityResult', {}) \
+                .get('Credentials', {})
+        if all(k in creds for k in ['AccessKeyId', 'SecretAccessKey', 'SessionToken']):
+            return {
+                'AccessKeyId': creds['AccessKeyId'],
+                'SecretAccessKey': creds['SecretAccessKey'],
+                'Token': creds['SessionToken']
+            }, 'webidentity:' + ','.join([role_arn, token_file])
+
+    # Fail if credentials cannot be fetched from the given aws_creds_uri
+    if is_fatal:
+        fatal_error(unsuccessful_resp, unsuccessful_resp)
     else:
         return None, None
 
@@ -442,9 +502,12 @@ def get_aws_profile(options, use_iam):
     return awsprofile
 
 
-def url_request_helper(url, unsuccessful_resp, url_error_msg):
+def url_request_helper(url, unsuccessful_resp, url_error_msg, headers={}):
     try:
-        request_resp = urlopen(url, timeout=1)
+        req = Request(url)
+        for k, v in headers.items():
+            req.add_header(k, v)
+        request_resp = urlopen(req, timeout=1)
 
         if request_resp.getcode() != 200:
             logging.debug(unsuccessful_resp + ' %s: ResponseCode=%d', url, request_resp.getcode())
