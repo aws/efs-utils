@@ -40,10 +40,12 @@ except ImportError:
     from urllib import quote_plus
 
 try:
-    from urllib2 import urlopen, URLError
+    from urllib2 import urlopen, URLError, Request
+    from urllib import urlencode
 except ImportError:
     from urllib.error import URLError
-    from urllib.request import urlopen
+    from urllib.request import urlopen, Request
+    from urllib.parse import urlencode
 
 VERSION = '1.26.3'
 SERVICE = 'elasticfilesystem'
@@ -121,8 +123,10 @@ REQUEST_PAYLOAD = ''
 AP_ID_RE = re.compile('^fsap-[0-9a-f]{17}$')
 
 ECS_TASK_METADATA_API = 'http://169.254.170.2'
+STS_ENDPOINT_URL = 'https://sts.amazonaws.com/'
 INSTANCE_IAM_URL = 'http://169.254.169.254/latest/meta-data/iam/security-credentials/'
 SECURITY_CREDS_ECS_URI_HELP_URL = 'https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html'
+SECURITY_CREDS_WEBIDENTITY_HELP_URL = 'https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html'
 SECURITY_CREDS_IAM_ROLE_HELP_URL = 'https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html'
 
 Mount = namedtuple('Mount', ['server', 'mountpoint', 'type', 'options', 'freq', 'passno'])
@@ -151,6 +155,8 @@ def get_aws_security_credentials(credentials_source):
         return get_aws_security_credentials_from_file('config', value)
     elif method == 'ecs':
         return get_aws_security_credentials_from_ecs(value)
+    elif method == 'webidentity':
+        return get_aws_security_credentials_from_webidentity(*(value.split(',')))
     elif method == 'metadata':
         return get_aws_security_credentials_from_instance_metadata()
     else:
@@ -181,6 +187,42 @@ def get_aws_security_credentials_from_ecs(uri):
 
     if ecs_security_dict and all(k in ecs_security_dict for k in dict_keys):
         return ecs_security_dict
+
+    return None
+
+
+def get_aws_security_credentials_from_webidentity(role_arn, token_file):
+    try:
+        with open(token_file, 'r') as f:
+            token = f.read()
+    except Exception as e:
+        logging.error('Error reading token file %s: %s', token_file, e)
+        return None
+
+    webidentity_url = STS_ENDPOINT_URL + '?' + urlencode({
+        'Version': '2011-06-15',
+        'Action': 'AssumeRoleWithWebIdentity',
+        'RoleArn': role_arn,
+        'RoleSessionName': 'efs-mount-helper',
+        'WebIdentityToken': token
+    })
+
+    unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % STS_ENDPOINT_URL
+    url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.' % \
+                    (STS_ENDPOINT_URL, SECURITY_CREDS_WEBIDENTITY_HELP_URL)
+    resp = url_request_helper(webidentity_url, unsuccessful_resp, url_error_msg, headers={'Accept': 'application/json'})
+
+    if resp:
+        creds = resp \
+                .get('AssumeRoleWithWebIdentityResponse', {}) \
+                .get('AssumeRoleWithWebIdentityResult', {}) \
+                .get('Credentials', {})
+        if all(k in creds for k in ['AccessKeyId', 'SecretAccessKey', 'SessionToken']):
+            return {
+                'AccessKeyId': creds['AccessKeyId'],
+                'SecretAccessKey': creds['SecretAccessKey'],
+                'Token': creds['SessionToken']
+            }
 
     return None
 
@@ -231,9 +273,12 @@ def credentials_file_helper(file_path, awsprofile):
     return credentials
 
 
-def url_request_helper(url, unsuccessful_resp, url_error_msg):
+def url_request_helper(url, unsuccessful_resp, url_error_msg, headers={}):
     try:
-        request_resp = urlopen(url, timeout=1)
+        req = Request(url)
+        for k, v in headers.items():
+            req.add_header(k, v)
+        request_resp = urlopen(req, timeout=1)
 
         if request_resp.getcode() != 200:
             logging.debug(unsuccessful_resp + ' %s: ResponseCode=%d', url, request_resp.getcode())
