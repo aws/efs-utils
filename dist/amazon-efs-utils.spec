@@ -27,7 +27,7 @@
 
 Name      : amazon-efs-utils
 Version   : 1.25
-Release   : 2%{?dist}
+Release   : 3%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
 Group     : Amazon/Tools
@@ -126,6 +126,11 @@ fi
 %clean
 
 %changelog
+* Tue May 26 2020 Yuan Gao <ygaochn@amazon.com> - 1.25-3
+- Fix an issue where subprocess was not killed successfully
+- Stop emitting unrecognized init system supervisord if the watchdog daemon has already been launched by supervisor
+- Support Fedora
+
 * Tue May 05 2020 Yuan Gao <ygaochn@amazon.com> - 1.25-2
 - Fix the issue that IAM role name format is not correctly encoded in python3
 - Add optional override for stunnel debug log output location

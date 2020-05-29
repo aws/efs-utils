@@ -11,8 +11,7 @@ set -ex
 
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
-VERSION=1.25
-RELEASE=2
+VERSION=1.25-3
 DEB_SYSTEM_RELEASE_PATH=/etc/os-release
 UBUNTU18_REGEX="Ubuntu 18"
 DEBIAN11_REGEX="Debian GNU/Linux bullseye"
@@ -74,7 +73,7 @@ tar czf data.tar.gz etc sbin usr var --owner=0 --group=0
 cd ${BASE_DIR}
 
 echo 'Building deb'
-DEB=${BUILD_ROOT}/amazon-efs-utils-${VERSION}-${RELEASE}.deb
+DEB=${BUILD_ROOT}/amazon-efs-utils-${VERSION}.deb
 ar r ${DEB} ${BUILD_ROOT}/debian-binary
 ar r ${DEB} ${BUILD_ROOT}/control.tar.gz
 ar r ${DEB} ${BUILD_ROOT}/data.tar.gz

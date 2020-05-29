@@ -13,6 +13,8 @@ The `efs-utils` package has been verified against the following Linux distributi
 | CentOS 7 | `rpm` | `systemd` |
 | RHEL 7 | `rpm`| `systemd` |
 | RHEL 8 | `rpm`| `systemd` |
+| Fedora 28 | `rpm` | `systemd` |
+| Fedora 29 | `rpm` | `systemd` |
 | Debian 9 | `deb` | `systemd` |
 | Debian 10 | `deb` | `systemd` |
 | Ubuntu 16.04 | `deb` | `systemd` |
@@ -20,7 +22,7 @@ The `efs-utils` package has been verified against the following Linux distributi
 
 ## Prerequisites
 
-* `nfs-utils` (RHEL/CentOS/Amazon Linux) or `nfs-common` (Debian/Ubuntu)
+* `nfs-utils` (RHEL/CentOS/Amazon Linux/Fedora) or `nfs-common` (Debian/Ubuntu)
 * OpenSSL 1.0.2+
 * Python 2.7+
 * `stunnel` 4.56+

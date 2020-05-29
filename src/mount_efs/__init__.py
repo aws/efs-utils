@@ -68,7 +68,7 @@ except ImportError:
     from urllib.error import URLError, HTTPError
 
 
-VERSION = '1.25'
+VERSION = '1.25-3'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -198,7 +198,8 @@ WATCHDOG_SERVICE = 'amazon-efs-mount-watchdog'
 SYSTEM_RELEASE_PATH = '/etc/system-release'
 RHEL8_RELEASE_NAME = 'Red Hat Enterprise Linux release 8'
 CENTOS8_RELEASE_NAME = 'CentOS Linux release 8'
-SKIP_NO_LIBWRAP_RELEASES = [RHEL8_RELEASE_NAME, CENTOS8_RELEASE_NAME]
+FEDORA_RELEASE_NAME = 'Fedora release'
+SKIP_NO_LIBWRAP_RELEASES = [RHEL8_RELEASE_NAME, CENTOS8_RELEASE_NAME, FEDORA_RELEASE_NAME]
 
 
 def fatal_error(user_message, log_message=None, exit_code=1):
@@ -774,6 +775,31 @@ def start_watchdog(init_system):
         else:
             logging.debug('%s is already running', WATCHDOG_SERVICE)
 
+    elif init_system == 'supervisord':
+        error_message = None
+        proc = subprocess.Popen(
+            ['supervisorctl', 'status', WATCHDOG_SERVICE], stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
+        stdout, stderr = proc.communicate()
+        rc = proc.returncode
+
+        if rc != 0:
+            if rc == 4:  # No such process
+                error_message = \
+                    '%s process is not started, please use supervisor to launch the watchdog daemon' % WATCHDOG_SERVICE
+            elif rc == 2:  # Supervisorctl is not properly setup
+                error_message = 'Cannot invoke supervisorctl to check status of %s' % WATCHDOG_SERVICE
+            else:
+                error_message = 'Unknown error %s' % stderr
+        else:
+            if 'RUNNING' in stdout:
+                logging.debug('%s is already running', WATCHDOG_SERVICE)
+            else:
+                logging.debug('%s is not running', WATCHDOG_SERVICE)
+
+        if error_message:
+            sys.stderr.write('%s\n' % error_message)
+            logging.warning(error_message)
+
     else:
         error_message = 'Could not start %s, unrecognized init system "%s"' % (WATCHDOG_SERVICE, init_system)
         sys.stderr.write('%s\n' % error_message)
@@ -1131,7 +1157,11 @@ def subprocess_call(cmd, error_message):
         rc = process.poll()
         if rc != 0:
             logging.error('Command %s failed, rc=%s, stdout="%s", stderr="%s"' % (cmd, rc, output, err), exc_info=True)
-            process.kill()
+            try:
+                process.kill()
+            except OSError:
+                # Silently fail if the subprocess has exited already
+                pass
         else:
             return output, err
     error_message = '%s, error is: %s' % (error_message, err)
