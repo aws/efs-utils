@@ -11,8 +11,14 @@ import mount_efs
 import pytest
 
 from mock import MagicMock
+from .. import utils
 
+CONFIG = MagicMock()
 DNS_NAME = 'fs-deadbeef.efs.us-east-1.amazonaws.com'
+FS_ID = 'fs-deadbeef'
+INIT_SYSTEM = 'upstart'
+MOUNT_POINT = '/mnt'
+PATH = '/'
 
 DEFAULT_OPTIONS = {'nfsvers': 4.1, 'rsize': 1048576, 'wsize': 1048576, 'hard': None, 'timeo': 600, 'retrans': 2, 'tlsport': 3049}
 
@@ -94,3 +100,15 @@ def test_mount_nfs_tls_netns(mocker):
     assert DNS_NAME not in args[NFS_MOUNT_PATH_IDX + NETNS_NFS_OFFSET]
     assert '127.0.0.1' in args[NFS_MOUNT_PATH_IDX + NETNS_NFS_OFFSET]
     assert '/mnt' in args[NFS_MOUNT_POINT_IDX + NETNS_NFS_OFFSET]
+
+
+def test_mount_tls_mountpoint_mounted(mocker, capsys):
+    options = dict(DEFAULT_OPTIONS)
+    options['tls'] = None
+
+    bootstrap_tls_mock = mocker.patch('mount_efs.bootstrap_tls')
+    mocker.patch('os.path.ismount', return_value=True)
+    mount_efs.mount_tls(CONFIG, INIT_SYSTEM, DNS_NAME, PATH, FS_ID, MOUNT_POINT, options)
+    out, err = capsys.readouterr()
+    assert 'is already mounted' in out
+    utils.assert_not_called(bootstrap_tls_mock)

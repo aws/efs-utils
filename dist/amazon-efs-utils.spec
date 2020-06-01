@@ -130,6 +130,7 @@ fi
 - Fix an issue where subprocess was not killed successfully
 - Stop emitting unrecognized init system supervisord if the watchdog daemon has already been launched by supervisor
 - Support Fedora
+- Check if mountpoint is already mounted beforehand for tls mount
 
 * Tue May 05 2020 Yuan Gao <ygaochn@amazon.com> - 1.25-2
 - Fix the issue that IAM role name format is not correctly encoded in python3

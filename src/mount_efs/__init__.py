@@ -1490,6 +1490,11 @@ def match_device(config, device):
 
 
 def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
+    if os.path.ismount(mountpoint):
+        sys.stdout.write("%s is already mounted, please run 'mount' command to verify\n" % mountpoint)
+        logging.warn("%s is already mounted, mount aborted" % mountpoint)
+        return
+
     with bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options) as tunnel_proc:
         mount_completed = threading.Event()
         t = threading.Thread(target=poll_tunnel_process, args=(tunnel_proc, fs_id, mount_completed))
