@@ -68,7 +68,7 @@ except ImportError:
     from urllib.error import URLError, HTTPError
 
 
-VERSION = '1.25-3'
+VERSION = '1.26.1'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
