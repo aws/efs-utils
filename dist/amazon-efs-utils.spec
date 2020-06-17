@@ -26,8 +26,8 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.26
-Release   : 1%{?dist}
+Version   : 1.25
+Release   : 3%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
 Group     : Amazon/Tools
@@ -126,36 +126,33 @@ fi
 %clean
 
 %changelog
-* Tue Jun 16 2020 Karthik Basavaraj <kbbasav@amazon.com> - 1.26.1
-- Clean up stunnel PIDs in state files persisted by previous efs-csi-driver to ensure watchdog spawns a new stunnel after driver restarts.
-
-* Tue May 26 2020 Yuan Gao <ygaochn@amazon.com> - 1.25.3
+* Tue May 26 2020 Yuan Gao <ygaochn@amazon.com> - 1.25-3
 - Fix an issue where subprocess was not killed successfully
 - Stop emitting unrecognized init system supervisord if the watchdog daemon has already been launched by supervisor
 - Support Fedora
 - Check if mountpoint is already mounted beforehand for tls mount
 
-* Tue May 05 2020 Yuan Gao <ygaochn@amazon.com> - 1.25.2
+* Tue May 05 2020 Yuan Gao <ygaochn@amazon.com> - 1.25-2
 - Fix the issue that IAM role name format is not correctly encoded in python3
 - Add optional override for stunnel debug log output location
 
-* Mon Apr 20 2020 Yuan Gao <ygaochn@amazon.com> - 1.25.1
+* Mon Apr 20 2020 Yuan Gao <ygaochn@amazon.com> - 1.25-1
 - Create self-signed certificate for tls-only mount
 
-* Tue Apr 7 2020 Yuan Gao <ygaochn@amazon.com> - 1.24.4
+* Tue Apr 7 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-4
 - Fix the malformed certificate info
 
-* Fri Mar 27 2020 Yuan Gao <ygaochn@amazon.com> - 1.24.3
+* Fri Mar 27 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-3
 - Use IMDSv1 by default, and use IMDSv2 where required
 
-* Tue Mar 10 2020 Yuan Gao <ygaochn@amazon.com> - 1.24.2
+* Tue Mar 10 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-2
 - List which as dependency
 
-* Tue Mar 10 2020 Yuan Gao <ygaochn@amazon.com> - 1.24.1
+* Tue Mar 10 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-1
 - Enable efs-utils to source region from config file for sigv4 auth
 - Fix the issue that stunnel bin exec cannot be found in certain linux distributions
 
-* Tue Mar 03 2020 Yuan Gao <ygaochn@amazon.com> - 1.23.2
+* Tue Mar 03 2020 Yuan Gao <ygaochn@amazon.com> - 1.23-2
 - Support new option: netns, enable file system to mount in given network namespace
 - Support new option: awscredsuri, enable sourcing iam authorization from aws credentials relative uri
 - List openssl and util-linux as package dependency for IAM/AP authorization and command nsenter to mount file system to given network namespace

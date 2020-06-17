@@ -144,22 +144,6 @@ def test_tls_not_running(mocker, tmpdir):
     utils.assert_called_once(restart_tls_mock)
 
 
-def test_tls_not_running_due_to_pid_clean_up(mocker, tmpdir):
-    state = dict(STATE)
-    state.pop('pid')
-
-    state_file_dir, state_file = create_state_file(tmpdir, content=json.dumps(state))
-
-    clean_up_mock, restart_tls_mock, _ = setup_mocks(mocker,
-                                                     mounts={'mnt': watchdog.Mount('127.0.0.1', '/mnt', 'nfs4', '', '0', '0')},
-                                                     state_files={'mnt': state_file}, is_pid_running=True)
-
-    watchdog.check_efs_mounts(_get_config(), [], GRACE_PERIOD, state_file_dir)
-
-    utils.assert_not_called(clean_up_mock)
-    utils.assert_called_once(restart_tls_mock)
-
-
 def test_ap_mount_with_extra_mount(mocker, tmpdir):
     state_file_dir, state_file = create_state_file(tmpdir)
 

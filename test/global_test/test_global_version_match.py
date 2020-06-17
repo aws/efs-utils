@@ -52,7 +52,7 @@ def test_changelog_version_match():
 def get_expected_version_release():
     global_version = get_global_value('version')
     global_release = get_global_value('release')
-    return global_version + '.' + global_release
+    return global_version + '-' + global_release
 
 
 def get_version_for_changelog(file_path):
