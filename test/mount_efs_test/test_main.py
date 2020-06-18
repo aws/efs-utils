@@ -185,3 +185,9 @@ def test_main_tlsport_is_integer(mocker):
 def test_main_tlsport_is_not_integer(mocker, capsys):
     expected_err = 'is not an integer'
     _test_main_assert_error(mocker, capsys, expected_err, tls=True, tlsport=TLSPORT_INCORRECT)
+
+
+def test_main_tls_mount_point_mounted_with_non_nfs(mocker):
+    mocker.patch('os.path.ismount', return_value=True)
+    mocker.patch('mount_efs.is_nfs_mount', return_value=False)
+    _test_main(mocker, tls=True)

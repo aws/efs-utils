@@ -68,7 +68,7 @@ except ImportError:
     from urllib.error import URLError, HTTPError
 
 
-VERSION = '1.25-3'
+VERSION = '1.26.2'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -1489,8 +1489,15 @@ def match_device(config, device):
                     % (remote, 'https://docs.aws.amazon.com/efs/latest/ug/mounting-fs-mount-cmd-dns-name.html'))
 
 
+def is_nfs_mount(mountpoint):
+    cmd = ['stat', '-f', '-L', '-c', '%T', mountpoint]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
+    output, _ = p.communicate()
+    return output and 'nfs' in str(output)
+
+
 def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
-    if os.path.ismount(mountpoint):
+    if os.path.ismount(mountpoint) and is_nfs_mount(mountpoint):
         sys.stdout.write("%s is already mounted, please run 'mount' command to verify\n" % mountpoint)
         logging.warn("%s is already mounted, mount aborted" % mountpoint)
         return

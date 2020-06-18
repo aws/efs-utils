@@ -45,7 +45,7 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.25-3'
+VERSION = '1.26.2'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -454,7 +454,12 @@ def check_efs_mounts(config, child_procs, unmount_grace_period_sec, state_file_d
                 logging.exception('Unable to parse json in %s', state_file_path)
                 continue
 
-        is_running = is_pid_running(state['pid'])
+        try:
+            pid = state['pid']
+            is_running = is_pid_running(pid)
+        except KeyError:
+            logging.debug('Did not find PID in state file. Assuming stunnel is not running')
+            is_running = False
 
         current_time = time.time()
         if 'unmount_time' in state:
@@ -969,6 +974,49 @@ def get_utc_now():
     return datetime.utcnow()
 
 
+def check_process_name(pid):
+    cmd = ['cat', '/proc/{pid}/cmdline'.format(pid=pid)]
+
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
+    return p.communicate()[0]
+
+
+def clean_up_previous_stunnel_pids(state_file_dir=STATE_FILE_DIR):
+    """
+    Cleans up stunnel pids created by mount watchdog spawned by a previous efs-csi-driver after driver restart, upgrade
+    or crash. This method attempts to clean PIDs from persisted state files after efs-csi-driver restart to
+    ensure watchdog creates a new stunnel.
+    """
+    state_files = get_state_files(state_file_dir)
+    logging.debug('Persisted state files in "%s": %s', state_file_dir, list(state_files.values()))
+
+    for state_file in state_files.values():
+        state_file_path = os.path.join(state_file_dir, state_file)
+        with open(state_file_path) as f:
+            try:
+                state = json.load(f)
+            except ValueError:
+                logging.exception('Unable to parse json in %s', state_file_path)
+                continue
+
+            try:
+                pid = state['pid']
+            except KeyError:
+                logging.debug('No PID found in state file %s', state_file)
+                continue
+
+            out = check_process_name(pid)
+
+            if out and 'stunnel' in str(out):
+                logging.debug('PID %s in state file %s is active. Skipping clean up', pid, state_file)
+                continue
+
+            state.pop('pid')
+            logging.debug('Cleaning up pid %s in state file %s', pid, state_file)
+
+            rewrite_state_file(state, state_file_dir, state_file)
+
+
 def main():
     parse_arguments()
     assert_root()
@@ -982,6 +1030,8 @@ def main():
         logging.info('amazon-efs-mount-watchdog, version %s, is enabled and started', VERSION)
         poll_interval_sec = config.getint(CONFIG_SECTION, 'poll_interval_sec')
         unmount_grace_period_sec = config.getint(CONFIG_SECTION, 'unmount_grace_period_sec')
+
+        clean_up_previous_stunnel_pids()
 
         while True:
             config = read_config()
