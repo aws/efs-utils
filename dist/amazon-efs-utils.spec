@@ -25,8 +25,7 @@
 %global with_systemd 1
 %endif
 
-# Discard this when efs-utils gotes to semver
-%global tiny_version %{nil}
+# Tarball name does not match tarball contents or package name
 %global src_name efs-utils
 
 Name      : amazon-efs-utils
@@ -59,22 +58,22 @@ Requires(preun)  : /sbin/service /sbin/chkconfig
 Requires(postun) : /sbin/service
 %endif
 
-Source    : https://github.com/aws/efs-utils/archive/v%{version}%{?tiny_version}.tar.gz
+Source    : https://github.com/aws/efs-utils/archive/v%{version}.tar.gz
 
 %description
 This package provides utilities for simplifying the use of EFS file systems
 
 %prep
-%setup -n %{src_name}-%{version}%{?tiny_version}
+%setup -n %{src_name}-%{version}
 
 %install
 mkdir -p %{buildroot}%{_sysconfdir}/amazon/efs
 %if %{with_systemd}
 mkdir -p %{buildroot}%{_unitdir}
-install -p -m 644 %{_builddir}/%{src_name}-%{version}%{?tiny_version}/dist/amazon-efs-mount-watchdog.service %{buildroot}%{_unitdir}
+install -p -m 644 %{_builddir}/%{src_name}-%{version}/dist/amazon-efs-mount-watchdog.service %{buildroot}%{_unitdir}
 %else
 mkdir -p %{buildroot}%{_sysconfdir}/init
-install -p -m 644 %{_builddir}/%{src_name}-%{version}%{?tiny_version}/dist/amazon-efs-mount-watchdog.conf %{buildroot}%{_sysconfdir}/init
+install -p -m 644 %{_builddir}/%{src_name}-%{version}/dist/amazon-efs-mount-watchdog.conf %{buildroot}%{_sysconfdir}/init
 %endif
 
 mkdir -p %{buildroot}/sbin
@@ -82,13 +81,13 @@ mkdir -p %{buildroot}%{_bindir}
 mkdir -p %{buildroot}%{_localstatedir}/log/amazon/efs
 mkdir -p  %{buildroot}%{_mandir}/man8
 
-%global base_dir %{src_name}-%{version}%{?tiny_version}
+%global base_dir %{src_name}-%{version}
 
-install -p -m 644 %{_builddir}/%{src_name}-%{version}%{?tiny_version}/dist/efs-utils.conf %{buildroot}%{_sysconfdir}/amazon/efs
-install -p -m 444 %{_builddir}/%{src_name}-%{version}%{?tiny_version}/dist/efs-utils.crt %{buildroot}%{_sysconfdir}/amazon/efs
-install -p -m 755 %{_builddir}/%{src_name}-%{version}%{?tiny_version}/src/mount_efs/__init__.py %{buildroot}/sbin/mount.efs
-install -p -m 755 %{_builddir}/%{src_name}-%{version}%{?tiny_version}/src/watchdog/__init__.py %{buildroot}%{_bindir}/amazon-efs-mount-watchdog
-install -p -m 644 %{_builddir}/%{src_name}-%{version}%{?tiny_version}/man/mount.efs.8 %{buildroot}%{_mandir}/man8
+install -p -m 644 %{_builddir}/%{src_name}-%{version}/dist/efs-utils.conf %{buildroot}%{_sysconfdir}/amazon/efs
+install -p -m 444 %{_builddir}/%{src_name}-%{version}/dist/efs-utils.crt %{buildroot}%{_sysconfdir}/amazon/efs
+install -p -m 755 %{_builddir}/%{src_name}-%{version}/src/mount_efs/__init__.py %{buildroot}/sbin/mount.efs
+install -p -m 755 %{_builddir}/%{src_name}-%{version}/src/watchdog/__init__.py %{buildroot}%{_bindir}/amazon-efs-mount-watchdog
+install -p -m 644 %{_builddir}/%{src_name}-%{version}/man/mount.efs.8 %{buildroot}%{_mandir}/man8
 
 %files
 %defattr(-,root,root,-)
