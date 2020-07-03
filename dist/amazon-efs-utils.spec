@@ -26,11 +26,11 @@
 %endif
 
 # Discard this when efs-utils gotes to semver
-%global tiny_version -3
+%global tiny_version %{nil}
 %global src_name efs-utils
 
 Name      : amazon-efs-utils
-Version   : 1.26
+Version   : 1.26.2
 Release   : 2%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
