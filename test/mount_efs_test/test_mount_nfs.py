@@ -102,12 +102,13 @@ def test_mount_nfs_tls_netns(mocker):
     assert '/mnt' in args[NFS_MOUNT_POINT_IDX + NETNS_NFS_OFFSET]
 
 
-def test_mount_tls_mountpoint_mounted(mocker, capsys):
+def test_mount_tls_mountpoint_mounted_with_nfs(mocker, capsys):
     options = dict(DEFAULT_OPTIONS)
     options['tls'] = None
 
     bootstrap_tls_mock = mocker.patch('mount_efs.bootstrap_tls')
     mocker.patch('os.path.ismount', return_value=True)
+    mocker.patch('mount_efs.is_nfs_mount', return_value=True)
     mount_efs.mount_tls(CONFIG, INIT_SYSTEM, DNS_NAME, PATH, FS_ID, MOUNT_POINT, options)
     out, err = capsys.readouterr()
     assert 'is already mounted' in out

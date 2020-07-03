@@ -11,7 +11,7 @@ set -ex
 
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
-VERSION=1.25-3
+VERSION=1.26.2
 DEB_SYSTEM_RELEASE_PATH=/etc/os-release
 UBUNTU18_REGEX="Ubuntu 18"
 DEBIAN11_REGEX="Debian GNU/Linux bullseye"
