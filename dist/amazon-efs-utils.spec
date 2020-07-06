@@ -11,7 +11,7 @@
 
 %else
 
-%if 0%{?fedora} || 0%{?el8}
+%if 0%{?fedora} || 0%{?el8} || 0%{?is_opensuse}
 %global python_requires python3
 %else
 %global python_requires python2
@@ -131,37 +131,45 @@ fi
 %clean
 
 %changelog
-* Mon Jul 6 3030 Nico Kadel-Garcia <nkadel@gmail.com> - 1.25.2=0
+* Mon Jul 6 3030 Nico Kadel-Garcia <nkadel@gmail.com> - 1.25.3=0
 - Switch to semver package numbering
 - Add download URL to Source
 
-* Tue May 26 2020 Yuan Gao <ygaochn@amazon.com> - 1.25-3
+* Wed Jul 1 2020 Yuan Gao <ygaochn@amazon.com> - 1.26.3
+- Fix an issue where watchdog crashed during restart because stunnel was killed and pid key was removed from state file
+
+* Tue Jun 16 2020 Karthik Basavaraj <kbbasav@amazon.com> - 1.26.2
+- Clean up stunnel PIDs in state files persisted by previous efs-csi-driver to ensure watchdog spawns a new stunnel after driver restarts.
+- Fix an issue where fs cannot be mounted with tls using systemd.automount-units due to mountpoint check
+
+* Tue May 26 2020 Yuan Gao <ygaochn@amazon.com> - 1.25.3
+>>>>>>> upstream/master
 - Fix an issue where subprocess was not killed successfully
 - Stop emitting unrecognized init system supervisord if the watchdog daemon has already been launched by supervisor
 - Support Fedora
 - Check if mountpoint is already mounted beforehand for tls mount
 
-* Tue May 05 2020 Yuan Gao <ygaochn@amazon.com> - 1.25-2
+* Tue May 05 2020 Yuan Gao <ygaochn@amazon.com> - 1.25.2
 - Fix the issue that IAM role name format is not correctly encoded in python3
 - Add optional override for stunnel debug log output location
 
-* Mon Apr 20 2020 Yuan Gao <ygaochn@amazon.com> - 1.25-1
+* Mon Apr 20 2020 Yuan Gao <ygaochn@amazon.com> - 1.25.1
 - Create self-signed certificate for tls-only mount
 
-* Tue Apr 7 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-4
+* Tue Apr 7 2020 Yuan Gao <ygaochn@amazon.com> - 1.24.4
 - Fix the malformed certificate info
 
-* Fri Mar 27 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-3
+* Fri Mar 27 2020 Yuan Gao <ygaochn@amazon.com> - 1.24.3
 - Use IMDSv1 by default, and use IMDSv2 where required
 
-* Tue Mar 10 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-2
+* Tue Mar 10 2020 Yuan Gao <ygaochn@amazon.com> - 1.24.2
 - List which as dependency
 
-* Tue Mar 10 2020 Yuan Gao <ygaochn@amazon.com> - 1.24-1
+* Tue Mar 10 2020 Yuan Gao <ygaochn@amazon.com> - 1.24.1
 - Enable efs-utils to source region from config file for sigv4 auth
 - Fix the issue that stunnel bin exec cannot be found in certain linux distributions
 
-* Tue Mar 03 2020 Yuan Gao <ygaochn@amazon.com> - 1.23-2
+* Tue Mar 03 2020 Yuan Gao <ygaochn@amazon.com> - 1.23.2
 - Support new option: netns, enable file system to mount in given network namespace
 - Support new option: awscredsuri, enable sourcing iam authorization from aws credentials relative uri
 - List openssl and util-linux as package dependency for IAM/AP authorization and command nsenter to mount file system to given network namespace

@@ -68,7 +68,7 @@ except ImportError:
     from urllib.error import URLError, HTTPError
 
 
-VERSION = '1.25-3'
+VERSION = '1.26.3'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -196,10 +196,12 @@ STUNNEL_EFS_CONFIG = {
 
 WATCHDOG_SERVICE = 'amazon-efs-mount-watchdog'
 SYSTEM_RELEASE_PATH = '/etc/system-release'
+OS_RELEASE_PATH = '/etc/os-release'
 RHEL8_RELEASE_NAME = 'Red Hat Enterprise Linux release 8'
 CENTOS8_RELEASE_NAME = 'CentOS Linux release 8'
 FEDORA_RELEASE_NAME = 'Fedora release'
-SKIP_NO_LIBWRAP_RELEASES = [RHEL8_RELEASE_NAME, CENTOS8_RELEASE_NAME, FEDORA_RELEASE_NAME]
+SUSE_RELEASE_NAME = 'openSUSE Leap'
+SKIP_NO_LIBWRAP_RELEASES = [RHEL8_RELEASE_NAME, CENTOS8_RELEASE_NAME, FEDORA_RELEASE_NAME, SUSE_RELEASE_NAME]
 
 
 def fatal_error(user_message, log_message=None, exit_code=1):
@@ -610,14 +612,21 @@ def find_command_path(command, install_method):
 
 
 def get_system_release_version():
-    system_release_version = 'unknown'
     try:
         with open(SYSTEM_RELEASE_PATH) as f:
-            system_release_version = f.read().strip()
+            return f.read().strip()
     except IOError:
         logging.debug('Unable to read %s', SYSTEM_RELEASE_PATH)
 
-    return system_release_version
+    try:
+        with open(OS_RELEASE_PATH) as f:
+            for line in f:
+                if 'PRETTY_NAME' in line:
+                    return line.split('=')[1].strip()
+    except IOError:
+        logging.debug('Unable to read %s', OS_RELEASE_PATH)
+
+    return 'unknown'
 
 
 def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level, ocsp_enabled,
@@ -1489,8 +1498,15 @@ def match_device(config, device):
                     % (remote, 'https://docs.aws.amazon.com/efs/latest/ug/mounting-fs-mount-cmd-dns-name.html'))
 
 
+def is_nfs_mount(mountpoint):
+    cmd = ['stat', '-f', '-L', '-c', '%T', mountpoint]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
+    output, _ = p.communicate()
+    return output and 'nfs' in str(output)
+
+
 def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
-    if os.path.ismount(mountpoint):
+    if os.path.ismount(mountpoint) and is_nfs_mount(mountpoint):
         sys.stdout.write("%s is already mounted, please run 'mount' command to verify\n" % mountpoint)
         logging.warn("%s is already mounted, mount aborted" % mountpoint)
         return
