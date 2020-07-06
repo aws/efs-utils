@@ -132,7 +132,7 @@ fi
 %clean
 
 %changelog
-* Mon Jul 6 3030 Nico Kadel-Garcia <nkadel@gmail.com> - 1.25.3=0
+* Mon Jul 6 2020 Nico Kadel-Garcia <nkadel@gmail.com> - 1.25.3=0
 - Switch to semver package numbering
 - Add download URL to Source
 
