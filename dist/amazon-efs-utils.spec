@@ -25,12 +25,13 @@
 %global with_systemd 1
 %endif
 
-# Discard this when efs-utils gotes to semver
+# Tarball name does not match tarball contents or package name
 %global src_name efs-utils
 
 Name      : amazon-efs-utils
 Version   : 1.26.3
-Release   : 0%{?dist}
+Release   : 1%{?dist}
+
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
 Group     : Amazon/Tools
