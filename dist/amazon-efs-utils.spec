@@ -11,7 +11,7 @@
 
 %else
 
-%if 0%{?fedora} || 0%{?el8}
+%if 0%{?fedora} || 0%{?el8} || 0%{?is_opensuse}
 %global python_requires python3
 %else
 %global python_requires python2
@@ -27,7 +27,7 @@
 
 Name      : amazon-efs-utils
 Version   : 1.26
-Release   : 2%{?dist}
+Release   : 3%{?dist}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
 Group     : Amazon/Tools
@@ -126,6 +126,9 @@ fi
 %clean
 
 %changelog
+* Wed Jul 1 2020 Yuan Gao <ygaochn@amazon.com> - 1.26.3
+- Fix an issue where watchdog crashed during restart because stunnel was killed and pid key was removed from state file
+
 * Tue Jun 16 2020 Karthik Basavaraj <kbbasav@amazon.com> - 1.26.2
 - Clean up stunnel PIDs in state files persisted by previous efs-csi-driver to ensure watchdog spawns a new stunnel after driver restarts.
 - Fix an issue where fs cannot be mounted with tls using systemd.automount-units due to mountpoint check

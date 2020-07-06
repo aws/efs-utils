@@ -75,6 +75,34 @@ commands:
           name: Check changelog
           command: |
             rpm -q --changelog amazon-efs-utils
+  build-suse-rpm:
+    steps:
+      - checkout
+      - run:
+          name: Refresh source
+          command: |
+            zypper refresh
+      - run:
+          name: Install dependencies
+          command: |
+            zypper install -y --force-resolution rpm-build
+            zypper install -y make systemd
+      - run:
+          name: Build RPM
+          command: |
+            make rpm
+      - run:
+          name: Install package
+          command: |
+            zypper install -y --allow-unsigned-rpm build/amazon-efs-utils*rpm
+      - run:
+          name: Check installed successfully
+          command: |
+            mount.efs --version
+      - run:
+          name: Check changelog
+          command: |
+            rpm -q --changelog amazon-efs-utils
 jobs:
   test:
     parameters:
@@ -103,6 +131,15 @@ jobs:
       image: << parameters.image >>
     steps:
       - build-rpm
+  build-suse-rpm-package:
+    parameters:
+      image:
+        type: string
+    executor:
+      name: linux
+      image: << parameters.image >>
+    steps:
+      - build-suse-rpm
 workflows:
   workflow:
     jobs:
@@ -169,3 +206,6 @@ workflows:
       - build-rpm-package:
           name: fedora33
           image: fedora:33
+      - build-suse-rpm-package:
+          name: opensuse-leap15.1
+          image: opensuse/leap:15.1

@@ -99,6 +99,21 @@ def test_clean_up_pid_still_lives(mocker, tmpdir):
     assert os.path.exists(abs_state_file)
 
 
+def test_clean_up_pid_already_killed(mocker, tmpdir):
+    pid = None
+    is_running = watchdog.is_pid_running(pid)
+    killpg_mock = setup_mock(mocker, is_running)
+
+    state_dir, state_file, abs_state_file = create_state_file(tmpdir)
+
+    assert os.path.exists(abs_state_file)
+
+    watchdog.clean_up_mount_state(state_dir, state_file, pid, is_running=is_running)
+
+    utils.assert_not_called(killpg_mock)
+    assert not os.path.exists(abs_state_file)
+
+
 def test_pid_not_running(mocker, tmpdir):
     killpg_mock = setup_mock(mocker, False)
 

@@ -45,7 +45,7 @@ except ImportError:
     from urllib.error import URLError
     from urllib.request import urlopen
 
-VERSION = '1.26.2'
+VERSION = '1.26.3'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -354,6 +354,8 @@ def get_state_files(state_file_dir):
 
 
 def is_pid_running(pid):
+    if not pid:
+        return False
     try:
         os.kill(pid, 0)
         return True
@@ -384,7 +386,10 @@ def clean_up_mount_state(state_file_dir, state_file, pid, is_running, mount_stat
     if is_pid_running(pid):
         logging.info('TLS tunnel: %d is still running, will retry termination', pid)
     else:
-        logging.info('TLS tunnel: %d is no longer running, cleaning up state', pid)
+        if not pid:
+            logging.info('TLS tunnel has been killed, cleaning up state')
+        else:
+            logging.info('TLS tunnel: %d is no longer running, cleaning up state', pid)
         state_file_path = os.path.join(state_file_dir, state_file)
         with open(state_file_path) as f:
             state = json.load(f)
@@ -465,7 +470,7 @@ def check_efs_mounts(config, child_procs, unmount_grace_period_sec, state_file_d
         if 'unmount_time' in state:
             if state['unmount_time'] + unmount_grace_period_sec < current_time:
                 logging.info('Unmount grace period expired for %s', state_file)
-                clean_up_mount_state(state_file_dir, state_file, state['pid'], is_running, state.get('mountStateDir'))
+                clean_up_mount_state(state_file_dir, state_file, state.get('pid'), is_running, state.get('mountStateDir'))
 
         elif mount not in nfs_mounts:
             logging.info('No mount found for "%s"', state_file)
@@ -546,12 +551,12 @@ def check_certificate(config, state, state_file_dir, state_file, base_path=STATE
         rewrite_state_file(state, state_file_dir, state_file)
 
         # send SIGHUP to force a reload of the configuration file to trigger the stunnel process to notice the new certificate
-        if is_pid_running(state['pid']):
-            process_group = os.getpgid(state['pid'])
-            logging.info('SIGHUP signal to stunnel. PID: %d, group ID: %s', state['pid'], process_group)
+        pid = state.get('pid')
+        if is_pid_running(pid):
+            process_group = os.getpgid(pid)
+            logging.info('SIGHUP signal to stunnel. PID: %d, group ID: %s', pid, process_group)
             os.killpg(process_group, SIGHUP)
-
-        if not is_pid_running(state['pid']):
+        else:
             logging.warning('TLS tunnel is not running for %s', state_file)
 
 
