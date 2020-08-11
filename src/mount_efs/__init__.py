@@ -70,7 +70,7 @@ except ImportError:
     from urllib.parse import urlencode
 
 
-VERSION = '1.26.3'
+VERSION = '1.27.1'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -1571,7 +1571,7 @@ def is_nfs_mount(mountpoint):
 def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
     if os.path.ismount(mountpoint) and is_nfs_mount(mountpoint):
         sys.stdout.write("%s is already mounted, please run 'mount' command to verify\n" % mountpoint)
-        logging.warn("%s is already mounted, mount aborted" % mountpoint)
+        logging.warning("%s is already mounted, mount aborted" % mountpoint)
         return
 
     with bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options) as tunnel_proc:

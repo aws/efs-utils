@@ -14,45 +14,45 @@ except ImportError:
     from configparser import ConfigParser
 
 
-SPEC_FILE = 'dist/amazon-efs-utils.spec'
-NON_SPEC_FILE_LIST = ['build-deb.sh', 'src/watchdog/__init__.py', 'src/mount_efs/__init__.py',
-                      'dist/amazon-efs-utils.control', 'build-deb.sh']
+SPEC_FILE = 'amazon-efs-utils.spec'
+DEB_FILE = 'build-deb.sh'
+FILE_LIST = ['build-deb.sh', 'src/watchdog/__init__.py', 'src/mount_efs/__init__.py',
+                  'dist/amazon-efs-utils.control', 'build-deb.sh', 'amazon-efs-utils.spec']
 
 GLOBAL_CONFIG = 'config.ini'
 
 
-def test_spec_file_version_release_match():
-    global_version = get_global_value('version')
-    global_release = get_global_value('release')
-    version_in_spec_file = get_version_for_file(SPEC_FILE)
-    release_in_spec_file = get_release_for_file(SPEC_FILE)
-    assert version_in_spec_file == global_version, \
-        'version in {} is {}, does not match global version {}'.format(SPEC_FILE, version_in_spec_file, global_version)
-    assert release_in_spec_file == global_release, \
-        'release in {} is {}, does not match global release {}'.format(SPEC_FILE, release_in_spec_file, global_release)
+def test_file_version_match():
+    global_version = get_global_version()
+    for f in FILE_LIST:
+        version_in_file = get_version_for_file(f)
+        assert version_in_file == global_version, 'version in {} is {}, does not match global version {}'\
+            .format(f, version_in_file, global_version)
 
 
-def test_non_spec_file_version_release_match():
-    global_version_release = get_expected_version_release()
-    for f in NON_SPEC_FILE_LIST:
-        version_release_in_file = get_version_for_file(f)
-        assert version_release_in_file == global_version_release, 'version-release in {} is {}, does not match global version {}'\
-            .format(f, version_release_in_file, global_version_release)
+def test_file_release_match():
+    global_release = get_global_release()
+    for f in [DEB_FILE, SPEC_FILE]:
+        release_in_file = get_release_for_file(f)
+        assert release_in_file == global_release, 'release in {} is {}, does not match global release {}'\
+            .format(f, release_in_file, global_release)
 
 
 def test_changelog_version_match():
-    expected_version_release = get_expected_version_release()
+    global_version = get_global_version()
 
-    version_release_in_changelog = get_version_for_changelog(SPEC_FILE)
-    assert version_release_in_changelog is not None and version_release_in_changelog == expected_version_release, \
+    version_in_changelog = get_version_for_changelog(SPEC_FILE)
+    assert version_in_changelog is not None and version_in_changelog == global_version, \
         'version in {} is {}, does not match expected_version_release {}, you need to add changelog in the spec file'\
-            .format(SPEC_FILE, version_release_in_changelog, expected_version_release)
+            .format(SPEC_FILE, version_in_changelog, global_version)
 
 
-def get_expected_version_release():
-    global_version = get_global_value('version')
-    global_release = get_global_value('release')
-    return global_version + '.' + global_release
+def get_global_version():
+    return get_global_value('version')
+
+
+def get_global_release():
+    return get_global_value('release')
 
 
 def get_version_for_changelog(file_path):
@@ -88,6 +88,8 @@ def get_release_for_file(file_path):
     with open(file_to_check) as fp:
         lines = fp.readlines()
     for line in lines:
+        if line.startswith('RELEASE'):
+            return line.split('=')[1].strip()
         if line.startswith('Release'):
             return line.split(':')[1].strip().split('%')[0]
     return None

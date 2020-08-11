@@ -29,6 +29,8 @@ commands:
           command: |
             source ~/efs-utils-virtualenv/bin/activate
             make test
+      - store_artifacts:
+          path: build
   build-deb:
     steps:
       - checkout
@@ -58,7 +60,7 @@ commands:
       - run:
           name: Install dependencies
           command: |
-            yum -y install rpm-build make
+            yum -y install rpm-build make systemd
       - run:
           name: Build RPM
           command: |

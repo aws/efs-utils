@@ -1,4 +1,5 @@
 /amazon-efs-utils*
+!amazon-efs-utils.spec
 
 .coverage
 .pytest_cache

@@ -25,9 +25,15 @@
 %global with_systemd 1
 %endif
 
+%if 0%{?is_opensuse}
+%global platform .opensuse
+%else
+%global platform %{dist}
+%endif
+
 Name      : amazon-efs-utils
-Version   : 1.26
-Release   : 3%{?dist}
+Version   : 1.27.1
+Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
 Group     : Amazon/Tools
@@ -126,6 +132,9 @@ fi
 %clean
 
 %changelog
+* Tue Aug 4 2020 Karthik Basavaraj <kbbasav@amazon.com> - 1.27.1
+- Merge PR #60 on GitHub. Adds support for AssumeRoleWithWebIdentity
+
 * Wed Jul 1 2020 Yuan Gao <ygaochn@amazon.com> - 1.26.3
 - Fix an issue where watchdog crashed during restart because stunnel was killed and pid key was removed from state file
 

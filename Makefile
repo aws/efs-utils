@@ -17,7 +17,6 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -rf $(PACKAGE_NAME)
 	rm -f $(SOURCE_TARBALL)
-	rm -f $(SPECFILE)
 
 .PHONY: tarball
 tarball: clean
@@ -38,13 +37,6 @@ tarball: clean
 
 	tar -czf $(SOURCE_TARBALL) $(PACKAGE_NAME)/*
 
-.PHONY: specfile
-specfile: clean
-	ln -sf dist/$(SPECFILE) $(SPECFILE)
-
-.PHONY: sources
-sources: tarball specfile
-
 .PHONY: shebang-support
 shebang-support:
 	./mangle-shebangs.sh
@@ -58,7 +50,7 @@ rpm-only:
 	cp $(BUILD_DIR)/RPMS/*/*rpm build
 
 .PHONY: rpm
-rpm: shebang-support sources rpm-only
+rpm: shebang-support tarball rpm-only
 
 .PHONY: deb
 deb:
