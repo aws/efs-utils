@@ -69,14 +69,27 @@ except ImportError:
     from urllib.error import URLError, HTTPError
     from urllib.parse import urlencode
 
+try:
+    import botocore.session
+    from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
+    BOTOCORE_PRESENT = True
+except ImportError:
+    BOTOCORE_PRESENT = False
 
-VERSION = '1.27.1'
+
+VERSION = '1.28.1'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount'
 CLIENT_INFO_SECTION = 'client-info'
 CLIENT_SOURCE_STR_LEN_LIMIT = 100
+
+CLOUDWATCH_LOG_SECTION = 'cloudwatch-log'
+DEFAULT_CLOUDWATCH_LOG_GROUP = '/aws/efs/utils'
+DEFAULT_RETENTION_DAYS = 14
+# Cloudwatchlog agent dict includes cloudwatchlog botocore client, cloudwatchlog group name, cloudwatchlog stream name
+CLOUDWATCHLOG_AGENT = None
 
 LOG_DIR = '/var/log/amazon/efs'
 LOG_FILE = 'mount.log'
@@ -216,6 +229,7 @@ def fatal_error(user_message, log_message=None, exit_code=1):
 
     sys.stderr.write('%s\n' % user_message)
     logging.error(log_message)
+    publish_cloudwatch_log(CLOUDWATCHLOG_AGENT, 'Mount failed, %s' % log_message)
     sys.exit(exit_code)
 
 
@@ -248,18 +262,36 @@ def get_target_region(config):
 
 
 def get_region_from_instance_metadata():
+    instance_identity, err_msg = get_instance_identity_info_from_instance_metadata('region')
+
+    if err_msg:
+        raise Exception(err_msg)
+
+    return instance_identity
+
+
+def get_instance_id_from_instance_metadata():
+    instance_id, err_msg = get_instance_identity_info_from_instance_metadata('instanceId')
+
+    if err_msg:
+        logging.warning('Cannot get instance id from instance metadata, %s' % err_msg)
+
+    return instance_id
+
+
+def get_instance_identity_info_from_instance_metadata(property):
     err_msg = None
     try:
         headers = {}
         instance_identity = get_aws_ec2_metadata(headers)
-        return instance_identity['region']
+        return instance_identity[property], err_msg
     except HTTPError as e:
         # 401:Unauthorized, the GET request uses an invalid token, so generate a new one
         if e.code == 401:
             token = get_aws_ec2_metadata_token()
             headers = {'X-aws-ec2-metadata-token': token}
             instance_identity = get_aws_ec2_metadata(headers)
-            return instance_identity['region']
+            return instance_identity[property], err_msg
         err_msg = 'Unable to reach instance metadata service at %s: status=%d, reason is %s' \
                   % (INSTANCE_METADATA_SERVICE_URL, e.code, e.reason)
     except URLError as e:
@@ -267,10 +299,9 @@ def get_region_from_instance_metadata():
     except ValueError as e:
         err_msg = 'Error parsing json: %s' % (e,)
     except KeyError as e:
-        err_msg = 'Region not present in %s: %s' % (instance_identity, e)
+        err_msg = '%s not present in %s: %s' % (property, instance_identity, e)
 
-    if err_msg:
-        raise Exception(err_msg)
+    return None, err_msg
 
 
 def get_region_from_legacy_dns_format(config):
@@ -847,31 +878,6 @@ def start_watchdog(init_system):
         else:
             logging.debug('%s is already running', WATCHDOG_SERVICE)
 
-    elif init_system == 'supervisord':
-        error_message = None
-        proc = subprocess.Popen(
-            ['supervisorctl', 'status', WATCHDOG_SERVICE], stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
-        stdout, stderr = proc.communicate()
-        rc = proc.returncode
-
-        if rc != 0:
-            if rc == 4:  # No such process
-                error_message = \
-                    '%s process is not started, please use supervisor to launch the watchdog daemon' % WATCHDOG_SERVICE
-            elif rc == 2:  # Supervisorctl is not properly setup
-                error_message = 'Cannot invoke supervisorctl to check status of %s' % WATCHDOG_SERVICE
-            else:
-                error_message = 'Unknown error %s' % stderr
-        else:
-            if 'RUNNING' in stdout:
-                logging.debug('%s is already running', WATCHDOG_SERVICE)
-            else:
-                logging.debug('%s is not running', WATCHDOG_SERVICE)
-
-        if error_message:
-            sys.stderr.write('%s\n' % error_message)
-            logging.warning(error_message)
-
     else:
         error_message = 'Could not start %s, unrecognized init system "%s"' % (WATCHDOG_SERVICE, init_system)
         sys.stderr.write('%s\n' % error_message)
@@ -1014,7 +1020,9 @@ def mount_nfs(dns_name, path, mountpoint, options):
     out, err = proc.communicate()
 
     if proc.returncode == 0:
-        logging.info('Successfully mounted %s at %s', dns_name, mountpoint)
+        message = 'Successfully mounted %s at %s' % (dns_name, mountpoint)
+        logging.info(message)
+        publish_cloudwatch_log(CLOUDWATCHLOG_AGENT, message)
     else:
         message = 'Failed to mount %s at %s: returncode=%d, stderr="%s"' % (dns_name, mountpoint, proc.returncode, err.strip())
         fatal_error(err.strip(), message, proc.returncode)
@@ -1534,6 +1542,7 @@ def match_device(config, device):
         primary, secondaries, _ = socket.gethostbyname_ex(remote)
         hostnames = list(filter(lambda e: e is not None, [primary] + secondaries))
     except socket.gaierror:
+        create_default_cloudwatchlog_agent_if_not_exist(config)
         fatal_error(
             'Failed to resolve "%s" - check that the specified DNS name is a CNAME record resolving to a valid EFS DNS '
             'name' % remote,
@@ -1541,6 +1550,7 @@ def match_device(config, device):
         )
 
     if not hostnames:
+        create_default_cloudwatchlog_agent_if_not_exist(config)
         fatal_error(
             'The specified domain name "%s" did not resolve to an EFS mount target' % remote
         )
@@ -1556,6 +1566,7 @@ def match_device(config, device):
             if hostname == expected_dns_name:
                 return fs_id, path
     else:
+        create_default_cloudwatchlog_agent_if_not_exist(config)
         fatal_error('The specified CNAME "%s" did not resolve to a valid DNS name for an EFS mount target. '
                     'Please refer to the EFS documentation for mounting with DNS names for examples: %s'
                     % (remote, 'https://docs.aws.amazon.com/efs/latest/ug/mounting-fs-mount-cmd-dns-name.html'))
@@ -1627,6 +1638,334 @@ def check_options_validity(options):
         fatal_error('The "awscredsuri" and "awsprofile" options are mutually exclusive')
 
 
+def bootstrap_cloudwatch_logging(config, fs_id=None):
+    if not check_if_cloudwatch_log_enabled(config):
+        return None
+
+    cloudwatchlog_client = get_botocore_client(config, 'logs')
+
+    if not cloudwatchlog_client:
+        return None
+
+    cloudwatchlog_config = get_cloudwatchlog_config(config, fs_id)
+    log_group_name = cloudwatchlog_config.get('log_group_name')
+    log_stream_name = cloudwatchlog_config.get('log_stream_name')
+    retention_days = cloudwatchlog_config.get('retention_days')
+
+    group_creation_completed = create_cloudwatch_log_group(cloudwatchlog_client, log_group_name)
+
+    if not group_creation_completed:
+        return None
+
+    put_retention_policy_completed = put_cloudwatch_log_retention_policy(cloudwatchlog_client, log_group_name, retention_days)
+
+    if not put_retention_policy_completed:
+        return None
+
+    stream_creation_completed = create_cloudwatch_log_stream(cloudwatchlog_client, log_group_name, log_stream_name)
+
+    if not stream_creation_completed:
+        return None
+
+    return {
+        'client': cloudwatchlog_client,
+        'log_group_name': log_group_name,
+        'log_stream_name': log_stream_name
+    }
+
+
+def create_default_cloudwatchlog_agent_if_not_exist(config):
+    if not check_if_cloudwatch_log_enabled(config):
+        return None
+    global CLOUDWATCHLOG_AGENT
+    if not CLOUDWATCHLOG_AGENT:
+        CLOUDWATCHLOG_AGENT = bootstrap_cloudwatch_logging(config)
+
+
+def get_botocore_client(config, service):
+    if not BOTOCORE_PRESENT:
+        logging.error('Failed to import botocore, please install botocore first.')
+        return None
+
+    session = botocore.session.get_session()
+    region = get_target_region(config)
+
+    iam_role_name = get_iam_role_name()
+    if iam_role_name:
+        credentials, _ = get_aws_security_credentials_from_instance_metadata(iam_role_name)
+        if credentials:
+            return session.create_client(service, aws_access_key_id=credentials['AccessKeyId'],
+                                         aws_secret_access_key=credentials['SecretAccessKey'],
+                                         aws_session_token=credentials['Token'], region_name=region)
+    return session.create_client(service, region_name=region)
+
+
+def get_cloudwatchlog_config(config, fs_id=None):
+    log_group_name = DEFAULT_CLOUDWATCH_LOG_GROUP
+    if config.has_option(CLOUDWATCH_LOG_SECTION, 'log_group_name'):
+        log_group_name = config.get(CLOUDWATCH_LOG_SECTION, 'log_group_name')
+
+    retention_days = DEFAULT_RETENTION_DAYS
+    if config.has_option(CLOUDWATCH_LOG_SECTION, 'retention_in_days'):
+        retention_days = config.get(CLOUDWATCH_LOG_SECTION, 'retention_in_days')
+
+    log_stream_name = get_cloudwatch_log_stream_name(fs_id)
+
+    return {
+        'log_group_name': log_group_name,
+        'retention_days': int(retention_days),
+        'log_stream_name': log_stream_name
+    }
+
+
+def get_cloudwatch_log_stream_name(fs_id=None):
+    instance_id = get_instance_id_from_instance_metadata()
+    if instance_id and fs_id:
+        log_stream_name = '%s - %s - mount.log' % (fs_id, instance_id)
+    elif instance_id:
+        log_stream_name = '%s - mount.log' % (instance_id)
+    elif fs_id:
+        log_stream_name = '%s - mount.log' % (fs_id)
+    else:
+        log_stream_name = 'default - mount.log'
+
+    return log_stream_name
+
+
+def check_if_cloudwatch_log_enabled(config):
+    if config.has_option(CLOUDWATCH_LOG_SECTION, 'enabled'):
+        return config.getboolean(CLOUDWATCH_LOG_SECTION, 'enabled')
+    return False
+
+
+def cloudwatch_create_log_group_helper(cloudwatchlog_client, log_group_name):
+    cloudwatchlog_client.create_log_group(
+        logGroupName=log_group_name
+    )
+    logging.info('Created cloudwatch log group %s' % log_group_name)
+
+
+def create_cloudwatch_log_group(cloudwatchlog_client, log_group_name):
+    try:
+        cloudwatch_create_log_group_helper(cloudwatchlog_client, log_group_name)
+    except ClientError as e:
+        exception = e.response['Error']['Code']
+
+        if exception == 'ResourceAlreadyExistsException':
+            logging.debug('Log group %s already exist, %s' % (log_group_name, e.response))
+            return True
+        elif exception == 'LimitExceededException':
+            logging.error('Reached the maximum number of log groups that can be created, %s' % e.response)
+            return False
+        elif exception == 'OperationAbortedException':
+            logging.debug('Multiple requests to update the same log group %s were in conflict, %s' % (log_group_name, e.response))
+            return False
+        elif exception == 'InvalidParameterException':
+            logging.error('Log group name %s is specified incorrectly, %s' % (log_group_name, e.response))
+            return False
+        else:
+            handle_general_botocore_exceptions(e)
+            return False
+    except NoCredentialsError as e:
+        logging.warning('Credentials are not properly configured, %s' % e)
+        return False
+    except EndpointConnectionError as e:
+        logging.warning('Could not connect to the endpoint, %s' % e)
+        return False
+    except Exception as e:
+        logging.warning('Unknown error, %s.' % e)
+        return False
+    return True
+
+
+def cloudwatch_put_retention_policy_helper(cloudwatchlog_client, log_group_name, retention_days):
+    cloudwatchlog_client.put_retention_policy(
+        logGroupName=log_group_name,
+        retentionInDays=retention_days
+    )
+    logging.debug('Set cloudwatch log group retention days to %s' % retention_days)
+
+
+def put_cloudwatch_log_retention_policy(cloudwatchlog_client, log_group_name, retention_days):
+    try:
+        cloudwatch_put_retention_policy_helper(cloudwatchlog_client, log_group_name, retention_days)
+    except ClientError as e:
+        exception = e.response['Error']['Code']
+
+        if exception == 'ResourceNotFoundException':
+            logging.error('Log group %s does not exist, %s' % (log_group_name, e.response))
+            return False
+        elif exception == 'OperationAbortedException':
+            logging.debug('Multiple requests to update the same log group %s were in conflict, %s' % (log_group_name, e.response))
+            return False
+        elif exception == 'InvalidParameterException':
+            logging.error('Either parameter log group name %s or retention in days %s is specified incorrectly, %s'
+                          % (log_group_name, retention_days, e.response))
+            return False
+        else:
+            handle_general_botocore_exceptions(e)
+            return False
+    except NoCredentialsError as e:
+        logging.warning('Credentials are not properly configured, %s' % e)
+        return False
+    except EndpointConnectionError as e:
+        logging.warning('Could not connect to the endpoint, %s' % e)
+        return False
+    except Exception as e:
+        logging.warning('Unknown error, %s.' % e)
+        return False
+    return True
+
+
+def cloudwatch_create_log_stream_helper(cloudwatchlog_client, log_group_name, log_stream_name):
+    cloudwatchlog_client.create_log_stream(
+        logGroupName=log_group_name,
+        logStreamName=log_stream_name
+    )
+    logging.info('Created cloudwatch log stream %s in log group %s' % (log_stream_name, log_group_name))
+
+
+def create_cloudwatch_log_stream(cloudwatchlog_client, log_group_name, log_stream_name):
+    try:
+        cloudwatch_create_log_stream_helper(cloudwatchlog_client, log_group_name, log_stream_name)
+    except ClientError as e:
+        exception = e.response['Error']['Code']
+
+        if exception == 'ResourceAlreadyExistsException':
+            logging.debug('Log stream %s already exist in log group %s, %s' % (log_stream_name, log_group_name, e.response))
+            return True
+        elif exception == 'InvalidParameterException':
+            logging.error('Either parameter log group name %s or log stream name %s is specified incorrectly, %s'
+                          % (log_group_name, log_stream_name, e.response))
+            return False
+        elif exception == 'ResourceNotFoundException':
+            logging.error('Log group %s does not exist, %s' % (log_group_name, e.response))
+            return False
+        else:
+            handle_general_botocore_exceptions(e)
+            return False
+    except NoCredentialsError as e:
+        logging.warning('Credentials are not properly configured, %s' % e)
+        return False
+    except EndpointConnectionError as e:
+        logging.warning('Could not connect to the endpoint, %s' % e)
+        return False
+    except Exception as e:
+        logging.warning('Unknown error, %s.' % e)
+        return False
+    return True
+
+
+def cloudwatch_put_log_events_helper(cloudwatchlog_agent, message, token=None):
+    kwargs = {
+        'logGroupName': cloudwatchlog_agent.get('log_group_name'),
+        'logStreamName': cloudwatchlog_agent.get('log_stream_name'),
+        'logEvents': [
+            {
+                'timestamp': int(round(time.time() * 1000)),
+                'message': message
+            }
+        ]
+    }
+    if token:
+        kwargs['sequenceToken'] = token
+    cloudwatchlog_agent.get('client').put_log_events(**kwargs)
+
+
+def publish_cloudwatch_log(cloudwatchlog_agent, message):
+    if not cloudwatchlog_agent or not cloudwatchlog_agent.get('client'):
+        return False
+
+    token = get_log_stream_next_token(cloudwatchlog_agent)
+
+    try:
+        cloudwatch_put_log_events_helper(cloudwatchlog_agent, message, token)
+    except ClientError as e:
+        exception = e.response['Error']['Code']
+
+        if exception == 'InvalidSequenceTokenException':
+            logging.debug('The sequence token is not valid, %s' % e.response)
+            return False
+        elif exception == 'InvalidParameterException':
+            logging.debug('One of the parameter to put log events is not valid, %s' % e.response)
+            return False
+        elif exception == 'DataAlreadyAcceptedException':
+            logging.debug('The event %s was already logged, %s' % (message, e.response))
+            return False
+        elif exception == 'UnrecognizedClientException':
+            logging.debug('The most likely cause is an invalid AWS access key ID or secret Key, %s' % e.response)
+            return False
+        elif exception == 'ResourceNotFoundException':
+            logging.error('Either log group %s or log stream %s does not exist, %s'
+                          % (cloudwatchlog_agent.get('log_group_name'), cloudwatchlog_agent.get('log_stream_name'), e.response))
+            return False
+        else:
+            logging.debug('Unexpected error: %s' % e)
+            return False
+    except NoCredentialsError as e:
+        logging.warning('Credentials are not properly configured, %s' % e)
+        return False
+    except EndpointConnectionError as e:
+        logging.warning('Could not connect to the endpoint, %s' % e)
+        return False
+    except Exception as e:
+        logging.warning('Unknown error, %s.' % e)
+        return False
+    return True
+
+
+def cloudwatch_describe_log_streams_helper(cloudwatchlog_agent):
+    return cloudwatchlog_agent.get('client').describe_log_streams(
+        logGroupName=cloudwatchlog_agent.get('log_group_name'),
+        logStreamNamePrefix=cloudwatchlog_agent.get('log_stream_name')
+    )
+
+
+def get_log_stream_next_token(cloudwatchlog_agent):
+    try:
+        response = cloudwatch_describe_log_streams_helper(cloudwatchlog_agent)
+    except ClientError as e:
+        exception = e.response['Error']['Code']
+
+        if exception == 'InvalidParameterException':
+            logging.debug('Either parameter log group name %s or log stream name %s is specified incorrectly, %s'
+                          % (cloudwatchlog_agent.get('log_group_name'), cloudwatchlog_agent.get('log_stream_name'), e.response))
+        elif exception == 'ResourceNotFoundException':
+            logging.debug('Either log group %s or log stream %s does not exist, %s'
+                          % (cloudwatchlog_agent.get('log_group_name'), cloudwatchlog_agent.get('log_stream_name'), e.response))
+        else:
+            handle_general_botocore_exceptions(e)
+        return None
+    except NoCredentialsError as e:
+        logging.warning('Credentials are not properly configured, %s' % e)
+        return None
+    except EndpointConnectionError as e:
+        logging.warning('Could not connect to the endpoint, %s' % e)
+        return None
+    except Exception as e:
+        logging.warning('Unknown error, %s' % e)
+        return None
+
+    try:
+        log_stream = response['logStreams'][0]
+        return log_stream.get('uploadSequenceToken')
+    except (IndexError, TypeError, KeyError):
+        pass
+
+    return None
+
+
+def handle_general_botocore_exceptions(error):
+    exception = error.response['Error']['Code']
+
+    if exception == 'ServiceUnavailableException':
+        logging.debug('The service cannot complete the request, %s' % error.response)
+    elif exception == 'AccessDeniedException':
+        logging.debug('User is not authorized to perform the action, %s' % error.response)
+    else:
+        logging.debug('Unexpected error: %s' % error)
+
+
 def main():
     parse_arguments_early_exit()
 
@@ -1638,6 +1977,10 @@ def main():
     fs_id, path, mountpoint, options = parse_arguments(config)
 
     logging.info('version=%s options=%s', VERSION, options)
+
+    global CLOUDWATCHLOG_AGENT
+    CLOUDWATCHLOG_AGENT = bootstrap_cloudwatch_logging(config, fs_id)
+
     check_unsupported_options(options)
     check_options_validity(options)
 

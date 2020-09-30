@@ -32,7 +32,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.27.1
+Version   : 1.28.1
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -132,6 +132,10 @@ fi
 %clean
 
 %changelog
+* Fri Sep 18 2020 Yuan Gao <ygaochn@amazon.com> - 1.28.1
+- Introduce botocore to publish mount success/failure notification to cloudwatch log
+- Revert stop emitting unrecognized init system supervisord if the watchdog daemon has already been launched by supervisor check
+
 * Tue Aug 4 2020 Karthik Basavaraj <kbbasav@amazon.com> - 1.27.1
 - Merge PR #60 on GitHub. Adds support for AssumeRoleWithWebIdentity
 

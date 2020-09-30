@@ -41,6 +41,9 @@ tarball: clean
 shebang-support:
 	./mangle-shebangs.sh
 
+.PHONY: sources
+sources: tarball
+
 .PHONY: rpm-only
 rpm-only:
 	mkdir -p $(BUILD_DIR)/{SPECS,COORD_SOURCES,DATA_SOURCES,BUILD,RPMS,SOURCES,SRPMS}
@@ -50,7 +53,7 @@ rpm-only:
 	cp $(BUILD_DIR)/RPMS/*/*rpm build
 
 .PHONY: rpm
-rpm: shebang-support tarball rpm-only
+rpm: shebang-support sources rpm-only
 
 .PHONY: deb
 deb:

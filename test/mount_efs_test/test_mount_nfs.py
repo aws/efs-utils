@@ -10,7 +10,7 @@ import mount_efs
 
 import pytest
 
-from mock import MagicMock
+from mock import MagicMock, patch
 from .. import utils
 
 CONFIG = MagicMock()
@@ -37,9 +37,9 @@ NETNS_NFS_OFFSET = 2
 NETNS = '/proc/1/net/ns'
 
 
-def _mock_popen(mocker, returncode=0):
+def _mock_popen(mocker, returncode=0, stdout='stdout', stderr='stderr'):
     popen_mock = MagicMock()
-    popen_mock.communicate.return_value = ('stdout', 'stderr', )
+    popen_mock.communicate.return_value = (stdout, stderr, )
     popen_mock.returncode = returncode
 
     return mocker.patch('subprocess.Popen', return_value=popen_mock)
@@ -108,7 +108,7 @@ def test_mount_tls_mountpoint_mounted_with_nfs(mocker, capsys):
 
     bootstrap_tls_mock = mocker.patch('mount_efs.bootstrap_tls')
     mocker.patch('os.path.ismount', return_value=True)
-    mocker.patch('mount_efs.is_nfs_mount', return_value=True)
+    _mock_popen(mocker, stdout='nfs')
     mount_efs.mount_tls(CONFIG, INIT_SYSTEM, DNS_NAME, PATH, FS_ID, MOUNT_POINT, options)
     out, err = capsys.readouterr()
     assert 'is already mounted' in out

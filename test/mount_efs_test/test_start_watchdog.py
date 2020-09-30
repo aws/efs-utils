@@ -41,19 +41,6 @@ def test_systemd_system(mocker):
     assert 'start' in popen_mock.call_args[0][0]
 
 
-def test_supervisor_system_watchdog_status(mocker):
-    process_mock = MagicMock()
-    process_mock.communicate.return_value = ('RUNNING', '', )
-    process_mock.returncode = 0
-    popen_mock = mocker.patch('subprocess.Popen', return_value=process_mock)
-
-    mount_efs.start_watchdog('supervisord')
-
-    utils.assert_called_once(popen_mock)
-    assert 'supervisorctl' in popen_mock.call_args[0][0]
-    assert 'status' in popen_mock.call_args[0][0]
-
-
 def test_unknown_system(mocker):
     popen_mock = mocker.patch('subprocess.Popen')
 

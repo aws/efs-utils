@@ -47,7 +47,7 @@ except ImportError:
     from urllib.request import urlopen, Request
     from urllib.parse import urlencode
 
-VERSION = '1.27.1'
+VERSION = '1.28.1'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
