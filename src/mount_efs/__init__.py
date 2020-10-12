@@ -77,7 +77,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = '1.28.1'
+VERSION = '1.28.2'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -262,46 +262,28 @@ def get_target_region(config):
 
 
 def get_region_from_instance_metadata():
-    instance_identity, err_msg = get_instance_identity_info_from_instance_metadata('region')
+    instance_identity = get_instance_identity_info_from_instance_metadata('region')
 
-    if err_msg:
-        raise Exception(err_msg)
+    if not instance_identity:
+        raise Exception("Cannot retrieve region from instance_metadata")
 
     return instance_identity
 
 
-def get_instance_id_from_instance_metadata():
-    instance_id, err_msg = get_instance_identity_info_from_instance_metadata('instanceId')
-
-    if err_msg:
-        logging.warning('Cannot get instance id from instance metadata, %s' % err_msg)
-
-    return instance_id
-
-
 def get_instance_identity_info_from_instance_metadata(property):
-    err_msg = None
-    try:
-        headers = {}
-        instance_identity = get_aws_ec2_metadata(headers)
-        return instance_identity[property], err_msg
-    except HTTPError as e:
-        # 401:Unauthorized, the GET request uses an invalid token, so generate a new one
-        if e.code == 401:
-            token = get_aws_ec2_metadata_token()
-            headers = {'X-aws-ec2-metadata-token': token}
-            instance_identity = get_aws_ec2_metadata(headers)
-            return instance_identity[property], err_msg
-        err_msg = 'Unable to reach instance metadata service at %s: status=%d, reason is %s' \
-                  % (INSTANCE_METADATA_SERVICE_URL, e.code, e.reason)
-    except URLError as e:
-        err_msg = 'Unable to reach instance metadata service at %s, reason is %s' % (INSTANCE_METADATA_SERVICE_URL, e.reason)
-    except ValueError as e:
-        err_msg = 'Error parsing json: %s' % (e,)
-    except KeyError as e:
-        err_msg = '%s not present in %s: %s' % (property, instance_identity, e)
+    ec2_metadata_unsuccessful_resp = 'Unsuccessful retrieval of EC2 metadata at %s.' % INSTANCE_METADATA_SERVICE_URL
+    ec2_metadata_url_error_msg = 'Unable to reach %s to retrieve EC2 instance metadata.' % INSTANCE_METADATA_SERVICE_URL
+    instance_identity = url_request_helper(INSTANCE_METADATA_SERVICE_URL, ec2_metadata_unsuccessful_resp,
+                                           ec2_metadata_url_error_msg, retry_with_new_header_token=True)
+    if instance_identity:
+        try:
+            return instance_identity[property]
+        except KeyError as e:
+            logging.warning('%s not present in %s: %s' % (property, instance_identity, e))
+        except TypeError as e:
+            logging.warning('response %s is not a json object: %s' % (instance_identity, e))
 
-    return None, err_msg
+    return None
 
 
 def get_region_from_legacy_dns_format(config):
@@ -332,17 +314,6 @@ def get_aws_ec2_metadata_token():
         req = Request(INSTANCE_METADATA_TOKEN_URL, headers=headers, method='PUT')
         res = urlopen(req)
         return res.read()
-
-
-def get_aws_ec2_metadata(headers):
-    request = Request(INSTANCE_METADATA_SERVICE_URL, headers=headers)
-    response = urlopen(request, timeout=1)
-    data = response.read()
-    if type(data) is str:
-        instance_identity = json.loads(data)
-    else:
-        instance_identity = json.loads(data.decode(response.headers.get_content_charset() or 'us-ascii'))
-    return instance_identity
 
 
 def get_aws_security_credentials(use_iam, awsprofile=None, aws_creds_uri=None):
@@ -475,7 +446,8 @@ def get_aws_security_credentials_from_instance_metadata(iam_role_name):
     unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % security_creds_lookup_url
     url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.' % \
                     (security_creds_lookup_url, SECURITY_CREDS_IAM_ROLE_HELP_URL)
-    iam_security_dict = url_request_helper(security_creds_lookup_url, unsuccessful_resp, url_error_msg)
+    iam_security_dict = url_request_helper(security_creds_lookup_url, unsuccessful_resp,
+                                           url_error_msg, retry_with_new_header_token=True)
 
     if iam_security_dict and all(k in iam_security_dict for k in CREDENTIALS_KEYS):
         return iam_security_dict, 'metadata:'
@@ -487,7 +459,8 @@ def get_iam_role_name():
     iam_role_unsuccessful_resp = 'Unsuccessful retrieval of IAM role name at %s.' % INSTANCE_IAM_URL
     iam_role_url_error_msg = 'Unable to reach %s to retrieve IAM role name. See %s for more info.' % \
                              (INSTANCE_IAM_URL, SECURITY_CREDS_IAM_ROLE_HELP_URL)
-    iam_role_name = url_request_helper(INSTANCE_IAM_URL, iam_role_unsuccessful_resp, iam_role_url_error_msg)
+    iam_role_name = url_request_helper(INSTANCE_IAM_URL, iam_role_unsuccessful_resp,
+                                       iam_role_url_error_msg, retry_with_new_header_token=True)
     return iam_role_name
 
 
@@ -533,32 +506,48 @@ def get_aws_profile(options, use_iam):
     return awsprofile
 
 
-def url_request_helper(url, unsuccessful_resp, url_error_msg, headers={}):
+def url_request_helper(url, unsuccessful_resp, url_error_msg, headers={}, retry_with_new_header_token=False):
     try:
         req = Request(url)
         for k, v in headers.items():
             req.add_header(k, v)
         request_resp = urlopen(req, timeout=1)
 
-        if request_resp.getcode() != 200:
-            logging.debug(unsuccessful_resp + ' %s: ResponseCode=%d', url, request_resp.getcode())
-            return None
-
-        resp_body = request_resp.read()
-        resp_body_type = type(resp_body)
-        try:
-            if resp_body_type is str:
-                resp_dict = json.loads(resp_body)
-            else:
-                resp_dict = json.loads(resp_body.decode(request_resp.headers.get_content_charset() or 'us-ascii'))
-
-            return resp_dict
-        except ValueError as e:
-            logging.info('ValueError parsing "%s" into json: %s. Returning response body.' % (str(resp_body), e))
-            return resp_body if resp_body_type is str else resp_body.decode('utf-8')
+        return get_resp_obj(request_resp, url, unsuccessful_resp)
+    except HTTPError as e:
+        # For instance enable with IMDSv2, Unauthorized 401 error will be thrown,
+        # to retrieve metadata, the header should embeded with metadata token
+        if e.code == 401 and retry_with_new_header_token:
+            token = get_aws_ec2_metadata_token()
+            req.add_header('X-aws-ec2-metadata-token', token)
+            request_resp = urlopen(req, timeout=1)
+            return get_resp_obj(request_resp, url, unsuccessful_resp)
+        err_msg = 'Unable to reach the url at %s: status=%d, reason is %s' % (url, e.code, e.reason)
     except URLError as e:
-        logging.debug('%s %s', url_error_msg, e)
+        err_msg = 'Unable to reach the url at %s, reason is %s' % (url, e.reason)
+
+    if err_msg:
+        logging.debug('%s %s', url_error_msg, err_msg)
+    return None
+
+
+def get_resp_obj(request_resp, url, unsuccessful_resp):
+    if request_resp.getcode() != 200:
+        logging.debug(unsuccessful_resp + ' %s: ResponseCode=%d', url, request_resp.getcode())
         return None
+
+    resp_body = request_resp.read()
+    resp_body_type = type(resp_body)
+    try:
+        if resp_body_type is str:
+            resp_dict = json.loads(resp_body)
+        else:
+            resp_dict = json.loads(resp_body.decode(request_resp.headers.get_content_charset() or 'us-ascii'))
+
+        return resp_dict
+    except ValueError as e:
+        logging.info('ValueError parsing "%s" into json: %s. Returning response body.' % (str(resp_body), e))
+        return resp_body if resp_body_type is str else resp_body.decode('utf-8')
 
 
 def parse_options(options):
@@ -1719,7 +1708,7 @@ def get_cloudwatchlog_config(config, fs_id=None):
 
 
 def get_cloudwatch_log_stream_name(fs_id=None):
-    instance_id = get_instance_id_from_instance_metadata()
+    instance_id = get_instance_identity_info_from_instance_metadata('instanceId')
     if instance_id and fs_id:
         log_stream_name = '%s - %s - mount.log' % (fs_id, instance_id)
     elif instance_id:

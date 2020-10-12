@@ -59,7 +59,7 @@ def test_get_cloudwatchlog_config_without_fsid_with_instance_id(mocker):
     enabled = mount_efs.check_if_cloudwatch_log_enabled(config)
     assert enabled == True
 
-    mocker.patch('mount_efs.get_instance_id_from_instance_metadata', return_value=INSTANCE)
+    mocker.patch('mount_efs.get_instance_identity_info_from_instance_metadata', return_value=INSTANCE)
     cloudwatchlog_agent = mount_efs.get_cloudwatchlog_config(config)
     assert cloudwatchlog_agent.get('log_group_name') == DEFAULT_CLOUDWATCH_LOG_GROUP
     assert cloudwatchlog_agent.get('retention_days') == DEFAULT_RETENTION_DAYS
@@ -71,7 +71,7 @@ def test_get_cloudwatchlog_config_with_fsid_with_instance_id(mocker):
     enabled = mount_efs.check_if_cloudwatch_log_enabled(config)
     assert enabled == True
 
-    mocker.patch('mount_efs.get_instance_id_from_instance_metadata', return_value=INSTANCE)
+    mocker.patch('mount_efs.get_instance_identity_info_from_instance_metadata', return_value=INSTANCE)
     cloudwatchlog_agent = mount_efs.get_cloudwatchlog_config(config, FS_ID)
     assert cloudwatchlog_agent.get('log_group_name') == DEFAULT_CLOUDWATCH_LOG_GROUP
     assert cloudwatchlog_agent.get('retention_days') == DEFAULT_RETENTION_DAYS
@@ -83,7 +83,7 @@ def test_get_cloudwatchlog_config_with_fsid_without_instance_id(mocker):
     enabled = mount_efs.check_if_cloudwatch_log_enabled(config)
     assert enabled == True
 
-    mocker.patch('mount_efs.get_instance_id_from_instance_metadata', return_value=None)
+    mocker.patch('mount_efs.get_instance_identity_info_from_instance_metadata', return_value=None)
     cloudwatchlog_agent = mount_efs.get_cloudwatchlog_config(config, FS_ID)
     assert cloudwatchlog_agent.get('log_group_name') == DEFAULT_CLOUDWATCH_LOG_GROUP
     assert cloudwatchlog_agent.get('retention_days') == DEFAULT_RETENTION_DAYS
@@ -95,7 +95,7 @@ def test_get_cloudwatchlog_config_without_fsid_without_instance_id(mocker):
     enabled = mount_efs.check_if_cloudwatch_log_enabled(config)
     assert enabled == True
 
-    mocker.patch('mount_efs.get_instance_id_from_instance_metadata', return_value=None)
+    mocker.patch('mount_efs.get_instance_identity_info_from_instance_metadata', return_value=None)
     cloudwatchlog_agent = mount_efs.get_cloudwatchlog_config(config)
     assert cloudwatchlog_agent.get('log_group_name') == DEFAULT_CLOUDWATCH_LOG_GROUP
     assert cloudwatchlog_agent.get('retention_days') == DEFAULT_RETENTION_DAYS
@@ -130,7 +130,7 @@ bootstrap cloud watch log unit tests
 """
 def test_bootstrap_cloudwatch_log(mocker):
     config = _get_mock_config(DEFAULT_CLOUDWATCH_ENABLED, DEFAULT_CLOUDWATCH_LOG_GROUP, DEFAULT_RETENTION_DAYS)
-    mocker.patch('mount_efs.get_instance_id_from_instance_metadata', return_value=INSTANCE)
+    mocker.patch('mount_efs.get_instance_identity_info_from_instance_metadata', return_value=INSTANCE)
     get_botocore_client_mock = mocker.patch('mount_efs.get_botocore_client', return_value='fake-agent')
     create_log_group_mock = mocker.patch('mount_efs.create_cloudwatch_log_group', return_value=True)
     put_retention_policy_mock = mocker.patch('mount_efs.put_cloudwatch_log_retention_policy', return_value=True)
@@ -147,7 +147,7 @@ def test_bootstrap_cloudwatch_log(mocker):
 
 def test_bootstrap_cloudwatch_log_create_log_group_failed(mocker):
     config = _get_mock_config(DEFAULT_CLOUDWATCH_ENABLED, DEFAULT_CLOUDWATCH_LOG_GROUP, DEFAULT_RETENTION_DAYS)
-    mocker.patch('mount_efs.get_instance_id_from_instance_metadata', return_value=INSTANCE)
+    mocker.patch('mount_efs.get_instance_identity_info_from_instance_metadata', return_value=INSTANCE)
     get_botocore_client_mock = mocker.patch('mount_efs.get_botocore_client', return_value='fake-agent')
     create_log_group_mock = mocker.patch('mount_efs.create_cloudwatch_log_group', return_value=False)
     put_retention_policy_mock = mocker.patch('mount_efs.put_cloudwatch_log_retention_policy')
@@ -164,7 +164,7 @@ def test_bootstrap_cloudwatch_log_create_log_group_failed(mocker):
 
 def test_bootstrap_cloudwatch_log_put_retention_days_failed(mocker):
     config = _get_mock_config(DEFAULT_CLOUDWATCH_ENABLED, DEFAULT_CLOUDWATCH_LOG_GROUP, DEFAULT_RETENTION_DAYS)
-    mocker.patch('mount_efs.get_instance_id_from_instance_metadata', return_value=INSTANCE)
+    mocker.patch('mount_efs.get_instance_identity_info_from_instance_metadata', return_value=INSTANCE)
     get_botocore_client_mock = mocker.patch('mount_efs.get_botocore_client', return_value='fake-agent')
     create_log_group_mock = mocker.patch('mount_efs.create_cloudwatch_log_group', return_value=True)
     put_retention_policy_mock = mocker.patch('mount_efs.put_cloudwatch_log_retention_policy', return_value=False)
@@ -181,7 +181,7 @@ def test_bootstrap_cloudwatch_log_put_retention_days_failed(mocker):
 
 def test_bootstrap_cloudwatch_log_create_log_stream_failed(mocker):
     config = _get_mock_config(DEFAULT_CLOUDWATCH_ENABLED, DEFAULT_CLOUDWATCH_LOG_GROUP, DEFAULT_RETENTION_DAYS)
-    mocker.patch('mount_efs.get_instance_id_from_instance_metadata', return_value=INSTANCE)
+    mocker.patch('mount_efs.get_instance_identity_info_from_instance_metadata', return_value=INSTANCE)
     get_botocore_client_mock = mocker.patch('mount_efs.get_botocore_client', return_value='fake-agent')
     create_log_group_mock = mocker.patch('mount_efs.create_cloudwatch_log_group', return_value=True)
     put_retention_policy_mock = mocker.patch('mount_efs.put_cloudwatch_log_retention_policy', return_value=True)

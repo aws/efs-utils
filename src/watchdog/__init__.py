@@ -40,14 +40,15 @@ except ImportError:
     from urllib import quote_plus
 
 try:
-    from urllib2 import urlopen, URLError, Request
+    from urllib2 import build_opener, urlopen, URLError, HTTPError, HTTPHandler, Request
     from urllib import urlencode
 except ImportError:
-    from urllib.error import URLError
+    from urllib.error import HTTPError, URLError
     from urllib.request import urlopen, Request
     from urllib.parse import urlencode
 
-VERSION = '1.28.1'
+
+VERSION = '1.28.2'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -125,6 +126,7 @@ AP_ID_RE = re.compile('^fsap-[0-9a-f]{17}$')
 ECS_TASK_METADATA_API = 'http://169.254.170.2'
 STS_ENDPOINT_URL = 'https://sts.amazonaws.com/'
 INSTANCE_IAM_URL = 'http://169.254.169.254/latest/meta-data/iam/security-credentials/'
+INSTANCE_METADATA_TOKEN_URL = 'http://169.254.169.254/latest/api/token'
 SECURITY_CREDS_ECS_URI_HELP_URL = 'https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html'
 SECURITY_CREDS_WEBIDENTITY_HELP_URL = 'https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html'
 SECURITY_CREDS_IAM_ROLE_HELP_URL = 'https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html'
@@ -162,6 +164,21 @@ def get_aws_security_credentials(credentials_source):
     else:
         logging.error('Improper credentials source string "%s" found from mount state file', credentials_source)
         return None
+
+
+def get_aws_ec2_metadata_token():
+    try:
+        opener = build_opener(HTTPHandler)
+        request = Request(INSTANCE_METADATA_TOKEN_URL)
+        request.add_header('X-aws-ec2-metadata-token-ttl-seconds', 21600)
+        request.get_method = lambda: 'PUT'
+        res = opener.open(request)
+        return res.read()
+    except NameError:
+        headers = {'X-aws-ec2-metadata-token-ttl-seconds': 21600}
+        req = Request(INSTANCE_METADATA_TOKEN_URL, headers=headers, method='PUT')
+        res = urlopen(req)
+        return res.read()
 
 
 def get_aws_security_credentials_from_file(file_name, awsprofile):
@@ -233,13 +250,15 @@ def get_aws_security_credentials_from_instance_metadata():
     iam_role_unsuccessful_resp = 'Unsuccessful retrieval of IAM role name at %s.' % INSTANCE_IAM_URL
     iam_role_url_error_msg = 'Unable to reach %s to retrieve IAM role name. See %s for more info.' % \
                              (INSTANCE_IAM_URL, SECURITY_CREDS_IAM_ROLE_HELP_URL)
-    iam_role_name = url_request_helper(INSTANCE_IAM_URL, iam_role_unsuccessful_resp, iam_role_url_error_msg)
+    iam_role_name = url_request_helper(INSTANCE_IAM_URL, iam_role_unsuccessful_resp,
+                                       iam_role_url_error_msg, retry_with_new_header_token=True)
     if iam_role_name:
         security_creds_lookup_url = INSTANCE_IAM_URL + iam_role_name
         unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % security_creds_lookup_url
         url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.' % \
                         (security_creds_lookup_url, SECURITY_CREDS_IAM_ROLE_HELP_URL)
-        iam_security_dict = url_request_helper(security_creds_lookup_url, unsuccessful_resp, url_error_msg)
+        iam_security_dict = url_request_helper(security_creds_lookup_url, unsuccessful_resp,
+                                               url_error_msg, retry_with_new_header_token=True)
 
         if iam_security_dict and all(k in iam_security_dict for k in dict_keys):
             return iam_security_dict
@@ -273,32 +292,48 @@ def credentials_file_helper(file_path, awsprofile):
     return credentials
 
 
-def url_request_helper(url, unsuccessful_resp, url_error_msg, headers={}):
+def url_request_helper(url, unsuccessful_resp, url_error_msg, headers={}, retry_with_new_header_token=False):
     try:
         req = Request(url)
         for k, v in headers.items():
             req.add_header(k, v)
         request_resp = urlopen(req, timeout=1)
 
-        if request_resp.getcode() != 200:
-            logging.debug(unsuccessful_resp + ' %s: ResponseCode=%d', url, request_resp.getcode())
-            return None
-
-        resp_body = request_resp.read()
-        resp_body_type = type(resp_body)
-        try:
-            if resp_body_type is str:
-                resp_dict = json.loads(resp_body)
-            else:
-                resp_dict = json.loads(resp_body.decode(request_resp.headers.get_content_charset() or 'us-ascii'))
-
-            return resp_dict
-        except ValueError as e:
-            logging.info('ValueError parsing "%s" into json: %s. Returning response body.' % (str(resp_body), e))
-            return resp_body if resp_body_type is str else resp_body.decode('utf-8')
+        return get_resp_obj(request_resp, url, unsuccessful_resp)
+    except HTTPError as e:
+        # For instance enable with IMDSv2, Unauthorized 401 error will be thrown,
+        # to retrieve metadata, the header should embeded with metadata token
+        if e.code == 401 and retry_with_new_header_token:
+            token = get_aws_ec2_metadata_token()
+            req.add_header('X-aws-ec2-metadata-token', token)
+            request_resp = urlopen(req, timeout=1)
+            return get_resp_obj(request_resp, url, unsuccessful_resp)
+        err_msg = 'Unable to reach the url at %s: status=%d, reason is %s' % (url, e.code, e.reason)
     except URLError as e:
-        logging.debug('%s %s', url_error_msg, e)
+        err_msg = 'Unable to reach the url at %s, reason is %s' % (url, e.reason)
+
+    if err_msg:
+        logging.debug('%s %s', url_error_msg, err_msg)
+    return None
+
+
+def get_resp_obj(request_resp, url, unsuccessful_resp):
+    if request_resp.getcode() != 200:
+        logging.debug(unsuccessful_resp + ' %s: ResponseCode=%d', url, request_resp.getcode())
         return None
+
+    resp_body = request_resp.read()
+    resp_body_type = type(resp_body)
+    try:
+        if resp_body_type is str:
+            resp_dict = json.loads(resp_body)
+        else:
+            resp_dict = json.loads(resp_body.decode(request_resp.headers.get_content_charset() or 'us-ascii'))
+
+        return resp_dict
+    except ValueError as e:
+        logging.info('ValueError parsing "%s" into json: %s. Returning response body.' % (str(resp_body), e))
+        return resp_body if resp_body_type is str else resp_body.decode('utf-8')
 
 
 def bootstrap_logging(config, log_dir=LOG_DIR):
