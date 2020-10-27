@@ -204,7 +204,7 @@ sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/}' /etc
 You can also configure CloudWatch log group name and log retention days in the config file. 
 
 ### Step 3. Attach the CloudWatch logs policy to the IAM role attached to instance.
-Attach AWS managed policy `AmazonElastciFileSystemsUtils` to the iam role you attached to the instance, or the aws credentials
+Attach AWS managed policy `AmazonElasticFileSystemsUtils` to the iam role you attached to the instance, or the aws credentials
 configured on your instance.
 
 After completing the three prerequisite steps, you will be able to see mount status notifications in CloudWatch Logs.
