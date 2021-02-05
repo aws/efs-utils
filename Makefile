@@ -37,10 +37,6 @@ tarball: clean
 
 	tar -czf $(SOURCE_TARBALL) $(PACKAGE_NAME)/*
 
-.PHONY: shebang-support
-shebang-support:
-	./mangle-shebangs.sh
-
 .PHONY: sources
 sources: tarball
 
@@ -53,7 +49,7 @@ rpm-only:
 	cp $(BUILD_DIR)/RPMS/*/*rpm build
 
 .PHONY: rpm
-rpm: shebang-support sources rpm-only
+rpm: sources rpm-only
 
 .PHONY: deb
 deb:

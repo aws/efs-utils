@@ -6,30 +6,34 @@ Utilities for Amazon Elastic File System (EFS)
 
 The `efs-utils` package has been verified against the following Linux distributions:
 
-| Distribution | Package Type | `init` System | Python Env|
-| ------------ | ------------ | ------------- | --------- |
-| Amazon Linux 2017.09 | `rpm` | `upstart` | Python2 |
-| Amazon Linux 2 | `rpm` | `systemd` | Python2 |
-| CentOS 7 | `rpm` | `systemd` | Python2 |
-| CentOS 8 | `rpm` | `systemd` | Python3 |
-| RHEL 7 | `rpm`| `systemd` | Python2 |
-| RHEL 8 | `rpm`| `systemd` | Python3 |
-| Fedora 28 | `rpm` | `systemd` | Python3 |
-| Fedora 29 | `rpm` | `systemd` | Python3 |
-| Fedora 30 | `rpm` | `systemd` | Python3 |
-| Fedora 31 | `rpm` | `systemd` | Python3 |
-| Fedora 32 | `rpm` | `systemd` | Python3 |
-| Debian 9 | `deb` | `systemd` | Python2 |
-| Debian 10 | `deb` | `systemd` | Python2 |
-| Ubuntu 16.04 | `deb` | `systemd` | Python2 |
-| Ubuntu 18.04 | `deb` | `systemd` | Python3 |
-| Ubuntu 20.04 | `deb` | `systemd` | Python3 |
+| Distribution | Package Type | `init` System |
+| ------------ | ------------ | ------------- |
+| Amazon Linux 2017.09 | `rpm` | `upstart` |
+| Amazon Linux 2 | `rpm` | `systemd` |
+| CentOS 7 | `rpm` | `systemd` |
+| CentOS 8 | `rpm` | `systemd` |
+| RHEL 7 | `rpm`| `systemd` |
+| RHEL 8 | `rpm`| `systemd` |
+| Fedora 28 | `rpm` | `systemd` |
+| Fedora 29 | `rpm` | `systemd` |
+| Fedora 30 | `rpm` | `systemd` |
+| Fedora 31 | `rpm` | `systemd` |
+| Fedora 32 | `rpm` | `systemd` |
+| Debian 9 | `deb` | `systemd` |
+| Debian 10 | `deb` | `systemd` |
+| Ubuntu 16.04 | `deb` | `systemd` |
+| Ubuntu 18.04 | `deb` | `systemd` |
+| Ubuntu 20.04 | `deb` | `systemd` |
+| OpenSUSE Leap | `rpm` | `systemd` |
+| OpenSUSE Tumbleweed | `rpm` | `systemd` |
+| SLES 12 | `rpm` | `systemd` |
+| SLES 15 | `rpm` | `systemd` |
 
 ## Prerequisites
 
 * `nfs-utils` (RHEL/CentOS/Amazon Linux/Fedora) or `nfs-common` (Debian/Ubuntu)
 * OpenSSL 1.0.2+
-* Python 2.7+
+* Python 3.4+
 * `stunnel` 4.56+
 
 ## Installation
@@ -61,12 +65,34 @@ Other distributions require building the package from source and installing it.
 
 - To build and install an RPM:
 
+If the distribution is not OpenSUSE or SLES
+
 ```
 $ sudo yum -y install git rpm-build make
 $ git clone https://github.com/aws/efs-utils
 $ cd efs-utils
 $ make rpm
 $ sudo yum -y install build/amazon-efs-utils*rpm
+```
+
+Otherwise
+
+```
+$ sudo zypper refresh
+$ sudo zypper install -y git rpm-build make
+$ git clone https://github.com/aws/efs-utils
+$ cd efs-utils
+$ make rpm
+$ sudo zypper --no-gpg-checks install -y build/amazon-efs-utils*rpm
+```
+
+On OpenSUSE, if you see error like `File './suse/noarch/bash-completion-2.11-2.1.noarch.rpm' not found on medium 'http://download.opensuse.org/tumbleweed/repo/oss/'`
+during installation of `git`, run the following commands to re-add repo OSS and NON-OSS, then run the install script above again.
+
+```
+sudo zypper ar -f -n OSS http://download.opensuse.org/tumbleweed/repo/oss/ OSS
+sudo zypper ar -f -n NON-OSS http://download.opensuse.org/tumbleweed/repo/non-oss/ NON-OSS
+sudo zypper refresh
 ```
 
 - To build and install a Debian package:
@@ -157,42 +183,66 @@ By default, when using the EFS mount helper with TLS, it enforces certificate ho
 
 Once you’ve installed the `amazon-efs-utils` package, to upgrade your system’s version of `stunnel`, see [Upgrading Stunnel](https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html#upgrading-stunnel).
 
+## Upgrading stunnel for SLES12
+
+Run the following commands and follow the output hint of zypper package manager to upgrade the stunnel on your SLES12 instance
+
+```bash
+sudo zypper addrepo https://download.opensuse.org/repositories/security:Stunnel/SLE_12_SP5/security:Stunnel.repo
+sudo zypper refresh
+sudo zypper install -y stunnel
+```
+
 ## Enable mount success/failure notification via CloudWatch log
 `efs-utils` now support publishing mount success/failure logs to CloudWatch log. By default, this feature is disabled. There are three
 steps you must follow to enable and use this feature:
 
 ### Step 1. Install botocore
-`efs-utils` uses botocore to interact with CloudWatch log service . Please note the package type and 
-python env from the above table. 
-- To install botocore on RPM
+`efs-utils` uses botocore to interact with CloudWatch log service . Please note the package type from the above table. 
+- Download the `get-pip.py` script
+#### RPM
 ```bash
-# Python2
-sudo python /tmp/get-pip.py
-sudo pip install botocore || sudo /usr/local/bin/pip install botocore
-
-# Python3
-sudo python3 /tmp/get-pip.py
-sudo pip3 install botocore || sudo /usr/local/bin/pip3 install botocore
+sudo yum -y install wget
 ```
-- To install botocore on DEB
+```bash
+if [[ "$(python3 -V 2>&1)" =~ ^(Python 3.5.*) ]]; then
+    sudo wget https://bootstrap.pypa.io/3.5/get-pip.py -O /tmp/get-pip.py
+elif [[ "$(python3 -V 2>&1)" =~ ^(Python 3.4.*) ]]; then
+    sudo wget https://bootstrap.pypa.io/3.4/get-pip.py -O /tmp/get-pip.py
+else
+    sudo wget https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py
+fi
+```
+#### DEB
 ```bash
 sudo apt-get update
 sudo apt-get -y install wget
-wget https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py
+```
+```bash
+if echo $(python3 -V 2>&1) | grep -e "Python 3.5"; then
+    sudo wget https://bootstrap.pypa.io/3.5/get-pip.py -O /tmp/get-pip.py
+elif echo $(python3 -V 2>&1) | grep -e "Python 3.4"; then
+    sudo wget https://bootstrap.pypa.io/3.4/get-pip.py -O /tmp/get-pip.py
+else
+    sudo apt-get -y install python3-distutils
+    sudo wget https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py
+fi
+```
 
-# Python2
-sudo python /tmp/get-pip.py
-sudo pip install botocore || sudo /usr/local/bin/pip install botocore
-
-# On Debian10, the botocore needs to be installed in specific target folder
-sudo python /tmp/get-pip.py
-sudo pip install --target /usr/lib/python2.7/dist-packages botocore || sudo /usr/local/bin/pip install --target /usr/lib/python2.7/dist-packages botocore
-
-# Python3
+- To install botocore on RPM
+```bash
 sudo python3 /tmp/get-pip.py
 sudo pip3 install botocore || sudo /usr/local/bin/pip3 install botocore
+```
 
-# On Ubuntu20, the botocore needs to be installed in specific target folder
+- To install botocore on DEB
+```bash
+sudo python3 /tmp/get-pip.py
+sudo pip3 install botocore || sudo /usr/local/bin/pip3 install botocore
+```
+
+#### On Debian10 and Ubuntu20, the botocore needs to be installed in specific target folder
+```bash
 sudo python3 /tmp/get-pip.py
 sudo pip3 install --target /usr/lib/python3/dist-packages botocore || sudo /usr/local/bin/pip3 install --target /usr/lib/python3/dist-packages botocore
 ```

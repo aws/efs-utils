@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright 2017-2018 Amazon.com, Inc. and its affiliates. All Rights Reserved.
 #
@@ -29,10 +29,10 @@ from logging.handlers import RotatingFileHandler
 from signal import SIGTERM, SIGHUP
 
 try:
+    from configparser import ConfigParser, NoOptionError, NoSectionError
+except ImportError:
     import ConfigParser
     from ConfigParser import NoOptionError, NoSectionError
-except ImportError:
-    from configparser import ConfigParser, NoOptionError, NoSectionError
 
 try:
     from urllib.parse import quote_plus
@@ -40,21 +40,22 @@ except ImportError:
     from urllib import quote_plus
 
 try:
-    from urllib2 import build_opener, urlopen, URLError, HTTPError, HTTPHandler, Request
-    from urllib import urlencode
-except ImportError:
-    from urllib.error import HTTPError, URLError
     from urllib.request import urlopen, Request
+    from urllib.error import URLError, HTTPError
     from urllib.parse import urlencode
+except ImportError:
+    from urllib2 import URLError, HTTPError, build_opener, urlopen, Request, HTTPHandler
+    from urllib import urlencode
 
 
-VERSION = '1.28.2'
+VERSION = '1.29.1'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount-watchdog'
 CLIENT_INFO_SECTION = 'client-info'
 CLIENT_SOURCE_STR_LEN_LIMIT = 100
+DEFAULT_UNKNOWN_VALUE = 'unknown'
 
 LOG_DIR = '/var/log/amazon/efs'
 LOG_FILE = 'mount-watchdog.log'
@@ -667,6 +668,10 @@ def get_client_info(config):
         client_source = config.get(CLIENT_INFO_SECTION, 'source')
         if 0 < len(client_source) <= CLIENT_SOURCE_STR_LEN_LIMIT:
             client_info['source'] = client_source
+    if not client_info.get('source'):
+        client_info['source'] = DEFAULT_UNKNOWN_VALUE
+
+    client_info['efs_utils_version'] = VERSION
 
     return client_info
 

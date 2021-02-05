@@ -38,7 +38,7 @@ ACCESS_KEY_ID_VAL = 'FAKE_AWS_ACCESS_KEY_ID'
 SECRET_ACCESS_KEY_VAL = 'FAKE_AWS_SECRET_ACCESS_KEY'
 SESSION_TOKEN_VAL = 'FAKE_SESSION_TOKEN'
 FIXED_DT = datetime(2000, 1, 1, 12, 0, 0)
-CLIENT_INFO = {'source': 'test'}
+CLIENT_INFO = {'source': 'test', 'efs_utils_version': watchdog.VERSION}
 CREDENTIALS = {
     'AccessKeyId': ACCESS_KEY_ID_VAL,
     'SecretAccessKey': SECRET_ACCESS_KEY_VAL,
@@ -62,7 +62,7 @@ def setup(mocker):
     mocker.patch('watchdog.get_aws_security_credentials', return_value=CREDENTIALS)
 
 
-def _get_config(certificate_renewal_interval=60, client_info=CLIENT_INFO):
+def _get_config(certificate_renewal_interval=60, client_info=None):
     try:
         config = ConfigParser.SafeConfigParser()
     except AttributeError:
@@ -72,7 +72,7 @@ def _get_config(certificate_renewal_interval=60, client_info=CLIENT_INFO):
     config.set(mount_efs.CONFIG_SECTION, 'dns_name_format', '{fs_id}.efs.{region}.amazonaws.com')
     config.add_section(watchdog.CONFIG_SECTION)
     config.set(watchdog.CONFIG_SECTION, 'tls_cert_renewal_interval_min', str(certificate_renewal_interval))
-    if CLIENT_INFO:
+    if client_info:
         config.add_section(watchdog.CLIENT_INFO_SECTION)
         for key, value in client_info.items():
             config.set(watchdog.CLIENT_INFO_SECTION, key, value)
@@ -418,7 +418,7 @@ def test_recreate_certificate_primary_assets_created(mocker, tmpdir):
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
 
 
-def _test_recreate_certificate_with_invalid_client_source_config(mocker, tmpdir, client_source):
+def _test_recreate_certificate_with_valid_client_source_config(mocker, tmpdir, client_source):
     config = _get_config(client_info={'source': client_source})
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
@@ -426,18 +426,46 @@ def _test_recreate_certificate_with_invalid_client_source_config(mocker, tmpdir,
     current_time = mount_efs.get_utc_now()
     watchdog.recreate_certificate(config, MOUNT_NAME, COMMON_NAME, FS_ID, CREDENTIALS, AP_ID, REGION, base_path=str(tmpdir))
 
+    expected_client_info = {'source': client_source, 'efs_utils_version': watchdog.VERSION}
+
     with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
         conf_body = f.read()
         assert conf_body == watchdog.create_ca_conf(tmp_config_path, COMMON_NAME, tls_dict['mount_dir'],
                                                     pk_path, current_time, REGION, FS_ID, CREDENTIALS,
-                                                    AP_ID, None)
+                                                    AP_ID, expected_client_info)
     assert os.path.exists(pk_path)
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
 
 
-def test_certificate_with_iam_with_ap_with_empty_client_source_config(mocker, tmpdir):
+def test_recreate_certificate_with_valid_client_source(mocker, tmpdir):
+    _test_recreate_certificate_with_valid_client_source_config(mocker, tmpdir, 'TEST')
+
+
+def _test_recreate_certificate_with_invalid_client_source_config(mocker, tmpdir, client_source):
+    config = _get_config(client_info={'source': client_source}) if client_source else _get_config()
+    pk_path = _get_mock_private_key_path(mocker, tmpdir)
+    tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
+    tmp_config_path = os.path.join(str(tmpdir), MOUNT_NAME, 'tmpConfig')
+    current_time = mount_efs.get_utc_now()
+    watchdog.recreate_certificate(config, MOUNT_NAME, COMMON_NAME, FS_ID, CREDENTIALS, AP_ID, REGION, base_path=str(tmpdir))
+
+    # Any invalid or not given client source should be marked as unknown
+    expected_client_info = {'source': 'unknown', 'efs_utils_version': watchdog.VERSION}
+
+    with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
+        conf_body = f.read()
+        assert conf_body == watchdog.create_ca_conf(tmp_config_path, COMMON_NAME, tls_dict['mount_dir'],
+                                                    pk_path, current_time, REGION, FS_ID, CREDENTIALS,
+                                                    AP_ID, expected_client_info)
+    assert os.path.exists(pk_path)
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
+
+
+def test_certificate_with_iam_with_ap_with_none_client_source_config(mocker, tmpdir):
     _test_recreate_certificate_with_invalid_client_source_config(mocker, tmpdir, None)
 
 

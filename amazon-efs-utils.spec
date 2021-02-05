@@ -7,16 +7,9 @@
 #
 
 %if 0%{?amzn1}
-%global python_requires system-python
-
+%global python_requires python36
 %else
-
-%if 0%{?fedora} || 0%{?el8} || 0%{?is_opensuse}
 %global python_requires python3
-%else
-%global python_requires python2
-%endif
-
 %endif
 
 %if 0%{?amzn1} || 0%{?rhel} == 6
@@ -28,11 +21,17 @@
 %if 0%{?is_opensuse}
 %global platform .opensuse
 %else
+
+%if 0%{?sle_version}
+%global platform .suse
+%else
 %global platform %{dist}
 %endif
 
+%endif
+
 Name      : amazon-efs-utils
-Version   : 1.28.2
+Version   : 1.29.1
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -132,6 +131,10 @@ fi
 %clean
 
 %changelog
+* Mon Jan 25 2021 Yuan Gao <ygaochn@amazon.com> - 1.29.1
+- Update the python dependency to python3
+- Support SLES and OpenSUSE
+
 * Thu Oct 8 2020 Yuan Gao <ygaochn@amazon.com> - 1.28.2
 - Fix an issue where fs cannot be mounted with iam using instance profile when IMDSv2 is enabled
 

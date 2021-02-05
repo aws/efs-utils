@@ -11,12 +11,9 @@ set -ex
 
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
-VERSION=1.28.2
+VERSION=1.29.1
 RELEASE=1
 DEB_SYSTEM_RELEASE_PATH=/etc/os-release
-UBUNTU18_REGEX="Ubuntu 18"
-UBUNTU20_REGEX="Ubuntu 20"
-DEBIAN11_REGEX="Debian GNU/Linux bullseye"
 
 echo 'Cleaning deb build workspace'
 rm -rf ${BUILD_ROOT}
@@ -30,15 +27,6 @@ mkdir -p ${BUILD_ROOT}/sbin
 mkdir -p ${BUILD_ROOT}/usr/bin
 mkdir -p ${BUILD_ROOT}/var/log/amazon/efs
 mkdir -p ${BUILD_ROOT}/usr/share/man/man8
-
-if [ -f $DEB_SYSTEM_RELEASE_PATH ] && echo "$(grep PRETTY_NAME $DEB_SYSTEM_RELEASE_PATH)" \
-          | grep -e "$UBUNTU18_REGEX" -e "$DEBIAN11_REGEX" -e "$UBUNTU20_REGEX"; then
-    echo 'Correcting python executable'
-    sed -i -e 's/python|python2/python3/' dist/amazon-efs-utils.control
-    # Replace the first line in .py to "#!/usr/bin/env python3" no matter what it was before
-    sed -i -e '1 s/^.*$/\#!\/usr\/bin\/env python3/' src/watchdog/__init__.py
-    sed -i -e '1 s/^.*$/\#!\/usr\/bin\/env python3/' src/mount_efs/__init__.py
-fi
 
 echo 'Copying application files'
 install -p -m 644 dist/amazon-efs-mount-watchdog.conf ${BUILD_ROOT}/etc/init

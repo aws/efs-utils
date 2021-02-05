@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright 2017-2018 Amazon.com, Inc. and its affiliates. All Rights Reserved.
 #
@@ -51,10 +51,10 @@ from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
 try:
+    from configparser import ConfigParser, NoOptionError, NoSectionError
+except ImportError:
     import ConfigParser
     from ConfigParser import NoOptionError, NoSectionError
-except ImportError:
-    from configparser import ConfigParser, NoOptionError, NoSectionError
 
 try:
     from urllib.parse import quote_plus
@@ -62,12 +62,12 @@ except ImportError:
     from urllib import quote_plus
 
 try:
-    from urllib2 import URLError, HTTPError, build_opener, urlopen, Request, HTTPHandler
-    from urllib import urlencode
-except ImportError:
     from urllib.request import urlopen, Request
     from urllib.error import URLError, HTTPError
     from urllib.parse import urlencode
+except ImportError:
+    from urllib2 import URLError, HTTPError, build_opener, urlopen, Request, HTTPHandler
+    from urllib import urlencode
 
 try:
     import botocore.session
@@ -77,19 +77,20 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = '1.28.2'
+VERSION = '1.29.1'
 SERVICE = 'elasticfilesystem'
 
+CLONE_NEWNET = 0x40000000
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount'
 CLIENT_INFO_SECTION = 'client-info'
 CLIENT_SOURCE_STR_LEN_LIMIT = 100
-
+# Cloudwatchlog agent dict includes cloudwatchlog botocore client, cloudwatchlog group name, cloudwatchlog stream name
+CLOUDWATCHLOG_AGENT = None
 CLOUDWATCH_LOG_SECTION = 'cloudwatch-log'
 DEFAULT_CLOUDWATCH_LOG_GROUP = '/aws/efs/utils'
 DEFAULT_RETENTION_DAYS = 14
-# Cloudwatchlog agent dict includes cloudwatchlog botocore client, cloudwatchlog group name, cloudwatchlog stream name
-CLOUDWATCHLOG_AGENT = None
+DEFAULT_UNKNOWN_VALUE = 'unknown'
 
 LOG_DIR = '/var/log/amazon/efs'
 LOG_FILE = 'mount.log'
@@ -219,8 +220,43 @@ OS_RELEASE_PATH = '/etc/os-release'
 RHEL8_RELEASE_NAME = 'Red Hat Enterprise Linux release 8'
 CENTOS8_RELEASE_NAME = 'CentOS Linux release 8'
 FEDORA_RELEASE_NAME = 'Fedora release'
-SUSE_RELEASE_NAME = 'openSUSE Leap'
-SKIP_NO_LIBWRAP_RELEASES = [RHEL8_RELEASE_NAME, CENTOS8_RELEASE_NAME, FEDORA_RELEASE_NAME, SUSE_RELEASE_NAME]
+OPEN_SUSE_LEAP_RELEASE_NAME = 'openSUSE Leap'
+SUSE_RELEASE_NAME = 'SUSE Linux Enterprise Server'
+
+SKIP_NO_LIBWRAP_RELEASES = [RHEL8_RELEASE_NAME, CENTOS8_RELEASE_NAME, FEDORA_RELEASE_NAME, OPEN_SUSE_LEAP_RELEASE_NAME,
+                            SUSE_RELEASE_NAME]
+
+
+def errcheck(ret, func, args):
+    from ctypes import get_errno
+    if ret == -1:
+        e = get_errno()
+        raise OSError(e, os.strerror(e))
+
+
+def setns(fd, nstype):
+    from ctypes import CDLL
+    libc = CDLL('libc.so.6', use_errno=True)
+    libc.setns.errcheck = errcheck
+    if hasattr(fd, 'fileno'):
+        fd = fd.fileno()
+    return libc.setns(fd, nstype)
+
+
+class NetNS(object):
+    # Open sockets from given network namespace: stackoverflow.com/questions/28846059
+    def __init__(self, nspath):
+        self.original_nspath = '/proc/%d/ns/net' % os.getpid()
+        self.target_nspath = nspath
+
+    def __enter__(self):
+        self.original_namespace = open(self.original_nspath)
+        with open(self.target_nspath) as fd:
+            setns(fd, CLONE_NEWNET)
+
+    def __exit__(self, *args):
+        setns(self.original_namespace, CLONE_NEWNET)
+        self.original_namespace.close()
 
 
 def fatal_error(user_message, log_message=None, exit_code=1):
@@ -587,22 +623,35 @@ def choose_tls_port(config, options):
         ports_to_try = tls_ports[mid:] + tls_ports[:mid]
         assert len(tls_ports) == len(ports_to_try)
 
-    sock = socket.socket()
-    for tls_port in ports_to_try:
-        try:
-            sock.bind(('localhost', tls_port))
-            sock.close()
-            return tls_port
-        except socket.error:
-            continue
+    if 'netns' not in options:
+        tls_port = find_tls_port_in_range(ports_to_try)
+    else:
+        with NetNS(nspath=options['netns']):
+            tls_port = find_tls_port_in_range(ports_to_try)
 
-    sock.close()
+    if tls_port:
+        return tls_port
 
     if 'tlsport' in options:
         fatal_error('Specified port [%s] is unavailable. Try selecting a different port.' % options['tlsport'])
     else:
         fatal_error('Failed to locate an available port in the range [%d, %d], try specifying a different port range in %s'
                     % (lower_bound, upper_bound, CONFIG_FILE))
+
+
+def find_tls_port_in_range(ports_to_try):
+    sock = socket.socket()
+    for tls_port in ports_to_try:
+        try:
+            logging.info("binding %s", tls_port)
+            sock.bind(('localhost', tls_port))
+            sock.close()
+            return tls_port
+        except socket.error as e:
+            logging.info(e)
+            continue
+    sock.close()
+    return None
 
 
 def is_ocsp_enabled(config, options):
@@ -709,7 +758,7 @@ def get_system_release_version():
     except IOError:
         logging.debug('Unable to read %s', OS_RELEASE_PATH)
 
-    return 'unknown'
+    return DEFAULT_UNKNOWN_VALUE
 
 
 def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level, ocsp_enabled,
@@ -820,7 +869,7 @@ def poll_tunnel_process(tunnel_proc, fs_id, mount_completed):
 
 
 def get_init_system(comm_file='/proc/1/comm'):
-    init_system = 'unknown'
+    init_system = DEFAULT_UNKNOWN_VALUE
     try:
         with open(comm_file) as f:
             init_system = f.read().strip()
@@ -853,10 +902,10 @@ def start_watchdog(init_system):
         proc = subprocess.Popen(
                 ['/sbin/status', WATCHDOG_SERVICE], stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
         status, _ = proc.communicate()
-        if 'stop' in status:
+        if 'stop' in str(status):
             with open(os.devnull, 'w') as devnull:
                 subprocess.Popen(['/sbin/start', WATCHDOG_SERVICE], stdout=devnull, stderr=devnull, close_fds=True)
-        elif 'start' in status:
+        elif 'start' in str(status):
             logging.debug('%s is already running', WATCHDOG_SERVICE)
 
     elif init_system == 'systemd':
@@ -955,10 +1004,24 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
     temp_tls_state_file = write_tls_tunnel_state_file(fs_id, mountpoint, tls_port, tunnel_proc.pid, tunnel_args,
                                                       [stunnel_config_file], state_file_dir, cert_details=cert_details)
 
+    if 'netns' not in options:
+        test_tlsport(options['tlsport'])
+    else:
+        with NetNS(nspath=options['netns']):
+            test_tlsport(options['tlsport'])
+
     try:
         yield tunnel_proc
     finally:
         os.rename(os.path.join(state_file_dir, temp_tls_state_file), os.path.join(state_file_dir, temp_tls_state_file[1:]))
+
+
+def test_tlsport(tlsport):
+    retry_times = 5
+    while not verify_tlsport_can_be_connected(tlsport) and retry_times > 0:
+        logging.debug('The tlsport %s cannot be connected yet, sleep 0.05s, %s retry time(s) left', tlsport, retry_times)
+        time.sleep(0.05)
+        retry_times -= 1
 
 
 def get_nfs_mount_options(options):
@@ -1068,6 +1131,10 @@ def get_client_info(config):
         client_source = config.get(CLIENT_INFO_SECTION, 'source')
         if 0 < len(client_source) <= CLIENT_SOURCE_STR_LEN_LIMIT:
             client_info['source'] = client_source
+    if not client_info.get('source'):
+        client_info['source'] = DEFAULT_UNKNOWN_VALUE
+
+    client_info['efs_utils_version'] = VERSION
 
     return client_info
 
@@ -1582,6 +1649,22 @@ def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
         mount_nfs(dns_name, path, mountpoint, options)
         mount_completed.set()
         t.join()
+
+
+def verify_tlsport_can_be_connected(tlsport):
+    try:
+        test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+    except Exception as e:
+        logging.warning('Error opening a socket, %s', e)
+        return False
+    try:
+        logging.debug('Trying to connect to 127.0.0.1: %s', tlsport)
+        test_socket.connect(('127.0.0.1', tlsport))
+        return True
+    except ConnectionRefusedError:
+        return False
+    finally:
+        test_socket.close()
 
 
 def check_unsupported_options(options):

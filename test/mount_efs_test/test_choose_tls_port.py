@@ -12,6 +12,7 @@ import socket
 import pytest
 
 from mock import MagicMock
+from .. import utils
 
 try:
     import ConfigParser
@@ -98,3 +99,24 @@ def test_choose_tls_port_option_specified_unavailable(mocker, capsys):
     assert 'Specified port [1000] is unavailable' in err
 
     assert 1 == bad_sock.bind.call_count
+
+
+def test_choose_tls_port_under_netns(mocker, capsys):
+    mocker.patch('builtins.open')
+    setns_mock = mocker.patch('mount_efs.setns', return_value=(None, None))
+    mocker.patch('socket.socket', return_value=MagicMock())
+    options = {'netns': '/proc/1000/ns/net'}
+
+    mount_efs.choose_tls_port(_get_config(), options)
+    utils.assert_called(setns_mock)
+
+
+def test_verify_tls_port(mocker):
+    sock = MagicMock()
+    sock.connect.side_effect = [ConnectionRefusedError, None]
+    mocker.patch('socket.socket', return_value=sock)
+    result = mount_efs.verify_tlsport_can_be_connected(1000)
+    assert result is False
+    result = mount_efs.verify_tlsport_can_be_connected(1000)
+    assert result is True
+    assert 2 == sock.connect.call_count

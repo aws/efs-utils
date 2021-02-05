@@ -21,7 +21,7 @@ except ImportError:
 
 FS_ID = 'fs-deadbeef'
 AP_ID = 'fsap-fedcba9876543210'
-CLIENT_INFO = {'source': 'test'}
+CLIENT_INFO = {'source': 'test', 'efs_utils_version': mount_efs.VERSION}
 REGION = 'us-east-1'
 COMMON_NAME = 'fs-deadbeef.efs.us-east-1.amazonaws.com'
 MOUNT_NAME = 'fs-deadbeef.mount.dir.12345'
@@ -139,24 +139,54 @@ def test_certificate_with_iam_with_ap_id(mocker, tmpdir):
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
 
 
-def _test_certificate_with_iam_with_ap_with_invalid_client_source_config(mocker, tmpdir, client_source):
+def _test_recreate_certificate_with_valid_client_source_config(mocker, tmpdir, client_source):
     config = _get_mock_config(client_info={'source': client_source}) if client_source else _get_config()
+    client_info = mount_efs.get_client_info(config)
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     tls_dict = mount_efs.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     tmp_config_path = os.path.join(str(tmpdir), MOUNT_NAME, 'tmpConfig')
-    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, CREDENTIALS, AP_ID, None,
+    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, CREDENTIALS, AP_ID, client_info,
                                  base_path=str(tmpdir))
+
+    expected_client_info = {'source': client_source, 'efs_utils_version': mount_efs.VERSION}
+
     with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
         conf_body = f.read()
         assert conf_body == mount_efs.create_ca_conf(tmp_config_path, COMMON_NAME, tls_dict['mount_dir'], pk_path,
-                                                     FIXED_DT, REGION, FS_ID, CREDENTIALS, AP_ID, None)
+                                                     FIXED_DT, REGION, FS_ID, CREDENTIALS, AP_ID, expected_client_info)
     assert os.path.exists(pk_path)
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
 
 
-def test_certificate_with_iam_with_ap_with_empty_client_source_config(mocker, tmpdir):
+def test_recreate_certificate_with_valid_client_source(mocker, tmpdir):
+    _test_recreate_certificate_with_valid_client_source_config(mocker, tmpdir, 'TEST')
+
+
+def _test_certificate_with_iam_with_ap_with_invalid_client_source_config(mocker, tmpdir, client_source):
+    config = _get_mock_config(client_info={'source': client_source}) if client_source else _get_config()
+    client_info = mount_efs.get_client_info(config)
+    pk_path = _get_mock_private_key_path(mocker, tmpdir)
+    tls_dict = mount_efs.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
+    tmp_config_path = os.path.join(str(tmpdir), MOUNT_NAME, 'tmpConfig')
+    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, CREDENTIALS, AP_ID, client_info,
+                                 base_path=str(tmpdir))
+
+    # Any invalid or not given client source should be marked as unknown
+    expected_client_info = {'source': 'unknown', 'efs_utils_version': mount_efs.VERSION}
+
+    with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
+        conf_body = f.read()
+        assert conf_body == mount_efs.create_ca_conf(tmp_config_path, COMMON_NAME, tls_dict['mount_dir'], pk_path,
+                                                     FIXED_DT, REGION, FS_ID, CREDENTIALS, AP_ID, expected_client_info)
+    assert os.path.exists(pk_path)
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'publicKey.pem'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
+    assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'certificate.pem'))
+
+
+def test_certificate_with_iam_with_ap_with_none_client_source_config(mocker, tmpdir):
     _test_certificate_with_iam_with_ap_with_invalid_client_source_config(mocker, tmpdir, None)
 
 

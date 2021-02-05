@@ -22,6 +22,7 @@ BAD_AP_ID_INCORRECT_START = 'bad-fsap-0123456789abc'
 BAD_AP_ID_TOO_SHORT = 'fsap-0123456789abcdef'
 BAD_AP_ID_BAD_CHAR = 'fsap-0123456789abcdefg'
 PORT = 3000
+TLS_PORT = 10000
 AWSPROFILE = 'test_profile'
 AWSCREDSURI = '/v2/credentials/{uuid}'
 TLSPORT_INCORRECT = 'incorrect'
@@ -63,6 +64,8 @@ def _test_main(mocker, tls=False, root=True, ap_id=None, iam=False, awsprofile=N
     get_dns_mock = mocker.patch('mount_efs.get_dns_name')
     parse_arguments_mock = mocker.patch('mount_efs.parse_arguments', return_value=('fs-deadbeef', '/', '/mnt', options))
     bootstrap_tls_mock = mocker.patch('mount_efs.bootstrap_tls', side_effect=dummy_contextmanager)
+    if tls:
+        mocker.patch('mount_efs.verify_tlsport_can_be_connected', return_value=True)
     mount_mock = mocker.patch('mount_efs.mount_nfs')
 
     mount_efs.main()
@@ -90,7 +93,7 @@ def _test_main_assert_error(mocker, capsys, expected_err, **kwargs):
 
 @patch('mount_efs.check_network_target')
 def test_main_tls(check_network, mocker):
-    _test_main(mocker, tls=True)
+    _test_main(mocker, tls=True, tlsport=TLS_PORT)
 
 
 @patch('mount_efs.check_network_target')
@@ -104,22 +107,22 @@ def test_main_non_root(mocker, capsys):
 
 
 def test_main_good_ap_with_tls(mocker):
-    _test_main(mocker, tls=True, ap_id=AP_ID)
+    _test_main(mocker, tls=True, ap_id=AP_ID, tlsport=TLS_PORT)
 
 
 def test_main_bad_ap_incorrect_start_with_tls(mocker, capsys):
     expected_err = 'Access Point ID %s is malformed' % BAD_AP_ID_INCORRECT_START
-    _test_main_assert_error(mocker, capsys, expected_err, tls=True, ap_id=BAD_AP_ID_INCORRECT_START)
+    _test_main_assert_error(mocker, capsys, expected_err, tls=True, ap_id=BAD_AP_ID_INCORRECT_START, tlsport=TLS_PORT)
 
 
 def test_main_bad_ap_too_short_with_tls(mocker, capsys):
     expected_err = 'Access Point ID %s is malformed' % BAD_AP_ID_TOO_SHORT
-    _test_main_assert_error(mocker, capsys, expected_err, tls=True, ap_id=BAD_AP_ID_TOO_SHORT)
+    _test_main_assert_error(mocker, capsys, expected_err, tls=True, ap_id=BAD_AP_ID_TOO_SHORT, tlsport=TLS_PORT)
 
 
 def test_main_bad_ap_bad_char_with_tls(mocker, capsys):
     expected_err = 'Access Point ID %s is malformed' % BAD_AP_ID_BAD_CHAR
-    _test_main_assert_error(mocker, capsys, expected_err, tls=True, ap_id=BAD_AP_ID_BAD_CHAR)
+    _test_main_assert_error(mocker, capsys, expected_err, tls=True, ap_id=BAD_AP_ID_BAD_CHAR, tlsport=TLS_PORT)
 
 
 def test_main_ap_without_tls(mocker, capsys):
@@ -128,7 +131,7 @@ def test_main_ap_without_tls(mocker, capsys):
 
 
 def test_main_iam_with_tls(mocker):
-    _test_main(mocker, tls=True, iam=True)
+    _test_main(mocker, tls=True, iam=True, tlsport=TLS_PORT)
 
 
 def test_main_iam_without_tls(mocker, capsys):
@@ -137,30 +140,30 @@ def test_main_iam_without_tls(mocker, capsys):
 
 
 def test_main_awsprofile_with_iam(mocker):
-    _test_main(mocker, tls=True, iam=True, awsprofile=AWSPROFILE)
+    _test_main(mocker, tls=True, iam=True, awsprofile=AWSPROFILE, tlsport=TLS_PORT)
 
 
 def test_main_awsprofile_without_iam(mocker, capsys):
     expected_err = 'The "iam" option is required when mounting with named profile option, "awsprofile"'
-    _test_main_assert_error(mocker, capsys, expected_err, tls=True, awsprofile=AWSPROFILE)
+    _test_main_assert_error(mocker, capsys, expected_err, tls=True, awsprofile=AWSPROFILE, tlsport=TLS_PORT)
 
 
 def test_main_awscredsuri_without_iam(mocker, capsys):
     expected_err = 'The "iam" option is required when mounting with "awscredsuri"'
-    _test_main_assert_error(mocker, capsys, expected_err, tls=True, awscredsuri=AWSCREDSURI)
+    _test_main_assert_error(mocker, capsys, expected_err, tls=True, awscredsuri=AWSCREDSURI, tlsport=TLS_PORT)
 
 
 def test_main_tls_ocsp_option(mocker):
-    _test_main(mocker, tls=True, ocsp=True)
+    _test_main(mocker, tls=True, ocsp=True, tlsport=TLS_PORT)
 
 
 def test_main_tls_noocsp_option(mocker):
-    _test_main(mocker, tls=True, noocsp=True)
+    _test_main(mocker, tls=True, noocsp=True, tlsport=TLS_PORT)
 
 
 def test_main_tls_ocsp_and_noocsp_option(mocker, capsys):
     expected_err = 'The "ocsp" and "noocsp" options are mutually exclusive'
-    _test_main_assert_error(mocker, capsys, expected_err, tls=True, ocsp=True, noocsp=True)
+    _test_main_assert_error(mocker, capsys, expected_err, tls=True, ocsp=True, noocsp=True, tlsport=TLS_PORT)
 
 
 def test_main_port_without_tls(mocker):
@@ -169,17 +172,17 @@ def test_main_port_without_tls(mocker):
 
 def test_main_port_with_tls(mocker, capsys):
     expected_err = 'The "port" and "tls" options are mutually exclusive'
-    _test_main_assert_error(mocker, capsys, expected_err, tls=True, port=PORT)
+    _test_main_assert_error(mocker, capsys, expected_err, tls=True, port=PORT, tlsport=TLS_PORT)
 
 
 def test_main_aws_creds_uri_with_aws_profile(mocker, capsys):
     expected_err = 'The "awscredsuri" and "awsprofile" options are mutually exclusive'
     _test_main_assert_error(mocker, capsys, expected_err, tls=True, iam=True,
-                            awscredsuri=AWSCREDSURI, awsprofile=AWSPROFILE)
+                            awscredsuri=AWSCREDSURI, awsprofile=AWSPROFILE, tlsport=TLS_PORT)
 
 
 def test_main_tlsport_is_integer(mocker):
-    _test_main(mocker, tls=True, tlsport=PORT)
+    _test_main(mocker, tls=True, tlsport=TLS_PORT)
 
 
 def test_main_tlsport_is_not_integer(mocker, capsys):
@@ -190,4 +193,4 @@ def test_main_tlsport_is_not_integer(mocker, capsys):
 def test_main_tls_mount_point_mounted_with_non_nfs(mocker):
     mocker.patch('os.path.ismount', return_value=True)
     mocker.patch('mount_efs.is_nfs_mount', return_value=False)
-    _test_main(mocker, tls=True)
+    _test_main(mocker, tls=True, tlsport=TLS_PORT)

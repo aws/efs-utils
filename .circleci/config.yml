@@ -96,7 +96,7 @@ commands:
       - run:
           name: Install package
           command: |
-            zypper install -y --allow-unsigned-rpm build/amazon-efs-utils*rpm
+            zypper --no-gpg-checks install -y build/amazon-efs-utils*rpm
       - run:
           name: Check installed successfully
           command: |
@@ -160,9 +160,6 @@ workflows:
       - test:
           name: python34
           image: circleci/python:3.4.9
-      - test:
-          name: python27
-          image: circleci/python:2.7.13
       - build-deb-package:
           name: ubuntu16
           image: ubuntu:16.04
@@ -211,3 +208,12 @@ workflows:
       - build-suse-rpm-package:
           name: opensuse-leap15.1
           image: opensuse/leap:15.1
+      - build-suse-rpm-package:
+          name: opensuse-leap15.2
+          image: opensuse/leap:15.2
+      - build-suse-rpm-package:
+          name: opensuse-leap-latest
+          image: opensuse/leap:latest
+      - build-suse-rpm-package:
+          name: opensuse-tumbleweed-latest
+          image: opensuse/tumbleweed:latest
