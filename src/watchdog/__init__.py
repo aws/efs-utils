@@ -397,10 +397,19 @@ def get_current_local_nfs_mounts(mount_file='/proc/mounts'):
     appears in EFS watchdog state files.
     """
     mounts = []
-
-    with open(mount_file) as f:
-        for mount in f:
-            mounts.append(Mount._make(mount.strip().split()))
+    if sys.platform != 'darwin':
+        with open(mount_file) as f:
+            for mount in f:
+                mounts.append(Mount._make(mount.strip().split()))
+    else:
+        process = subprocess.run(['mount', '-t', 'nfs'], check=True, stdout=subprocess.PIPE, universal_newlines=True)
+        stdout = process.stdout
+        if stdout:
+            output = stdout.split('\n')
+            for mount in output:
+                _mount = mount.split()
+                if len(_mount) >= 4:
+                    mounts.append(Mount._make([_mount[0], _mount[2], _mount[3], '', 0, 0]))
 
     mounts = [m for m in mounts if m.server.startswith('127.0.0.1') and 'nfs' in m.type]
 

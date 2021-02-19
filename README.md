@@ -29,6 +29,12 @@ The `efs-utils` package has been verified against the following Linux distributi
 | SLES 12 | `rpm` | `systemd` |
 | SLES 15 | `rpm` | `systemd` |
 
+The `efs-utils` package has been verified against the following MacOS distributions:
+
+| Distribution | `init` System |
+| ------------ | ------------- |
+| MacOS Big Sur | `launchd` |
+
 ## Prerequisites
 
 * `nfs-utils` (RHEL/CentOS/Amazon Linux/Fedora) or `nfs-common` (Debian/Ubuntu)
@@ -106,6 +112,31 @@ $ ./build-deb.sh
 $ sudo apt-get -y install ./build/amazon-efs-utils*deb
 ```
 
+### On MacOS Big Sur distribution
+
+For EC2 Mac instances running macOS Big Sur, you can install amazon-efs-utils from the [homebrew-aws](https://github.com/aws/homebrew-aws) respository.
+```
+brew install amazon-efs-utils
+```
+
+This will install amazon-efs-utils on your EC2 Mac Instance running macOS Big Sur in the directory `/usr/local/Cellar/amazon-efs-utils`. At the end of the installation, it will print a set of commands that must be executed in order to start using efs-utils. The instructions that are printed after amazon-efs-utils and must be executed are:
+
+```
+Perform below actions to start using efs:
+    sudo mkdir -p /Library/Filesystems/efs.fs/Contents/Resources
+    sudo ln -s /usr/local/bin/mount.efs /Library/Filesystems/efs.fs/Contents/Resources/mount_efs
+
+Perform below actions to stop using efs:
+    sudo rm /Library/Filesystems/efs.fs/Contents/Resources/mount_efs
+
+To enable watchdog for using TLS mounts:
+    sudo cp /usr/local/Cellar/amazon-efs-utils/<version>/libexec/amazon-efs-mount-watchdog.plist /Library/LaunchAgents
+    sudo launchctl load /Library/LaunchAgents/amazon-efs-mount-watchdog.plist
+
+To disable watchdog for using TLS mounts:
+    sudo launchctl unload /Library/LaunchAgents/amazon-efs-mount-watchdog.plist
+```
+
 #### Run tests
 
 - [Set up a virtualenv](http://libzx.so/main/learning/2016/03/13/best-practice-for-virtualenv-and-git-repos.html) for efs-utils
@@ -175,7 +206,7 @@ or refer to the [documentation](https://docs.aws.amazon.com/efs/latest/ug/using-
 
 ### amazon-efs-mount-watchdog
 
-`efs-utils` contains a watchdog process to monitor the health of TLS mounts. This process is managed by either `upstart` or `systemd` depending on your Linux distribution, and is started automatically the first time an EFS file system is mounted over TLS.
+`efs-utils` contains a watchdog process to monitor the health of TLS mounts. This process is managed by either `upstart` or `systemd` depending on your Linux distribution and `launchd` on Mac distribution, and is started automatically the first time an EFS file system is mounted over TLS.
 
 ## Upgrading stunnel for RHEL/CentOS
 
@@ -192,6 +223,14 @@ sudo zypper addrepo https://download.opensuse.org/repositories/security:Stunnel/
 sudo zypper refresh
 sudo zypper install -y stunnel
 ```
+
+## Upgrading stunnel for MacOS
+
+The installation installs latest stunnel available in brew repository. You can also upgrade the version of stunnel on your instance using the command below:
+```
+brew upgrade stunnel
+```
+
 
 ## Enable mount success/failure notification via CloudWatch log
 `efs-utils` now support publishing mount success/failure logs to CloudWatch log. By default, this feature is disabled. There are three
@@ -247,9 +286,19 @@ sudo python3 /tmp/get-pip.py
 sudo pip3 install --target /usr/lib/python3/dist-packages botocore || sudo /usr/local/bin/pip3 install --target /usr/lib/python3/dist-packages botocore
 ```
 
+#### To install botocore on MacOS
+```bash
+sudo pip3 install botocore
+```
+
 ### Step 2. Enable CloudWatch log feature in efs-utils config file `/etc/amazon/efs/efs-utils.conf`
 ```bash
 sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/}' /etc/amazon/efs/efs-utils.conf
+```
+
+- For MacOS:
+```bash
+sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/;}' /usr/local/Cellar/amazon-efs-utils/<version>/etc/amazon/efs/efs-utils.conf
 ```
 You can also configure CloudWatch log group name and log retention days in the config file. 
 

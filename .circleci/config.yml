@@ -146,6 +146,9 @@ workflows:
   workflow:
     jobs:
       - test:
+          name: python39
+          image: circleci/python:3.9.1
+      - test:
           name: python38
           image: circleci/python:3.8.1
       - test:
@@ -214,6 +217,3 @@ workflows:
       - build-suse-rpm-package:
           name: opensuse-leap-latest
           image: opensuse/leap:latest
-      - build-suse-rpm-package:
-          name: opensuse-tumbleweed-latest
-          image: opensuse/tumbleweed:latest

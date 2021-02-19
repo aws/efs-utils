@@ -98,6 +98,9 @@ can be used to mount EFS\&.
 Use the named profile used to lookup IAM credentials in the AWS CLI credentials file \
 (~/.aws/credentials) or AWS CLI config file (~/.aws/config). If "awsprofile" is not \
 specified, the "default" profile is used\&.
+.TP
+mountport
+Use the port 2049 to bypass portmapper daemon on EC2 Mac instances running macOS Big Sur\&.
 .if n \{\
 .RE
 .\}
@@ -181,6 +184,8 @@ The man page for the Amazon EFS mount helper\&.
 For more information on using the \fBamazon\-efs\-utils\fR package, see \
 \fIhttps://docs\&.aws\&.amazon\&.com/efs/latest/ug/using\-amazon\-efs\-utils\&.html\fR \
 in the Amazon EFS User Guide\&.
+.sp
+The paths on EC2 MacOS instances are relocated under /usr/local/Cellar/amazon-efs-utils/<version>/libexec directory.
 .SH "SEE ALSO"
 .sp
 \fBnfs(8)\fR, \fBstunnel(8)\fR, \fBfstab(5)\fR

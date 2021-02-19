@@ -95,3 +95,15 @@ def test_parse_arguments():
     assert '/home' == path
     assert '/dir' == mountpoint
     assert {'foo': None, 'bar': 'baz', 'quux': None} == options
+
+
+def test_parse_arguments_macos(mocker):
+    mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
+    fsid, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', '-o', 'foo', '-o', 'bar=baz', '-o', 'quux',
+                                                                       'fs-deadbeef:/home', '/dir'])
+
+    assert 'fs-deadbeef' == fsid
+    assert '/home' == path
+    assert '/dir' == mountpoint
+    assert {'foo': None, 'bar': 'baz', 'quux': None} == options
+

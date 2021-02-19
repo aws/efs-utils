@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+#
+# Copyright 2017-2018 Amazon.com, Inc. and its affiliates. All Rights Reserved.
+#
+# Licensed under the MIT License. See the LICENSE accompanying this file
+# for the specific language governing permissions and limitations under
+# the License.
+#
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+    <dict>
+        <key>Unit</key>
+        <dict>
+            <key>Description</key>
+            <string>amazon-efs-mount-watchdog</string>
+            <key>Before</key>
+            <string>remote-fs-pre.target</string>
+        </dict>
+        <key>Label</key>
+        <string>amazon-efs-mount-watchdog</string>
+        <key>ProgramArguments</key>
+        <array>
+            <string>/usr/local/bin/amazon-efs-mount-watchdog</string>
+        </array>
+        <key>RunAtLoad</key>
+        <true/>
+        <key>KeepAlive</key>
+        <dict>
+            <key>PathState</key>
+            <dict>
+                <key>/usr/local/bin/amazon-efs-mount-watchdog</key>
+                <true/>
+            </dict>
+            <key>Crashed</key>
+            <true/>
+        </dict>
+        <key>StandardErrorPath</key>
+        <string>/var/log/amazon/efs/mount-watchdog.log</string>
+        <key>StandardOutPath</key>
+        <string>/var/log/amazon/efs/mount-watchdog.log</string>
+        <key>StartOnMount</key>
+        <true/>
+    </dict>
+</plist>

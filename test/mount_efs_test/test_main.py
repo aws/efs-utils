@@ -12,7 +12,7 @@ import pytest
 
 from contextlib import contextmanager
 
-from mock import patch
+from mock import MagicMock, patch
 
 from .. import utils
 
@@ -193,4 +193,24 @@ def test_main_tlsport_is_not_integer(mocker, capsys):
 def test_main_tls_mount_point_mounted_with_non_nfs(mocker):
     mocker.patch('os.path.ismount', return_value=True)
     mocker.patch('mount_efs.is_nfs_mount', return_value=False)
+    _test_main(mocker, tls=True, tlsport=TLS_PORT)
+
+def _mock_popen(mocker, returncode=0, stdout='stdout', stderr='stderr'):
+    popen_mock = MagicMock()
+    popen_mock.communicate.return_value = (stdout, stderr, )
+    popen_mock.returncode = returncode
+
+    return mocker.patch('subprocess.Popen', return_value=popen_mock)
+
+def test_main_unsupported_macos(mocker, capsys):
+    mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
+    # Test for Catalina Client
+    mocker.patch('mount_efs.check_if_mac_version_is_supported', return_value=False)
+
+    expected_err = 'We do not support EFS on MacOS'
+    _test_main_assert_error(mocker, capsys, expected_err, root=True)
+
+def test_main_supported_macos(mocker):
+    mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
+    mocker.patch('mount_efs.check_if_mac_version_is_supported', return_value=True)
     _test_main(mocker, tls=True, tlsport=TLS_PORT)

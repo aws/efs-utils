@@ -37,6 +37,7 @@ import hmac
 import json
 import logging
 import os
+import platform
 import pwd
 import random
 import re
@@ -215,6 +216,8 @@ STUNNEL_EFS_CONFIG = {
 }
 
 WATCHDOG_SERVICE = 'amazon-efs-mount-watchdog'
+# MacOS instances use plist files. This files needs to be loaded on launchctl (init system of MacOS)
+WATCHDOG_SERVICE_PLIST_PATH = '/Library/LaunchAgents/amazon-efs-mount-watchdog.plist'
 SYSTEM_RELEASE_PATH = '/etc/system-release'
 OS_RELEASE_PATH = '/etc/os-release'
 RHEL8_RELEASE_NAME = 'Red Hat Enterprise Linux release 8'
@@ -222,9 +225,17 @@ CENTOS8_RELEASE_NAME = 'CentOS Linux release 8'
 FEDORA_RELEASE_NAME = 'Fedora release'
 OPEN_SUSE_LEAP_RELEASE_NAME = 'openSUSE Leap'
 SUSE_RELEASE_NAME = 'SUSE Linux Enterprise Server'
+MACOS_BIG_SUR_RELEASE = 'macOS-11'
 
 SKIP_NO_LIBWRAP_RELEASES = [RHEL8_RELEASE_NAME, CENTOS8_RELEASE_NAME, FEDORA_RELEASE_NAME, OPEN_SUSE_LEAP_RELEASE_NAME,
-                            SUSE_RELEASE_NAME]
+                            SUSE_RELEASE_NAME, MACOS_BIG_SUR_RELEASE]
+
+# MacOS does not support the property of Socket SO_BINDTODEVICE in stunnel configuration
+SKIP_NO_SO_BINDTODEVICE_RELEASES = [MACOS_BIG_SUR_RELEASE]
+
+MAC_OS_PLATFORM_LIST = ['darwin']
+# MacOS Versions : Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
+MAC_OS_SUPPORTED_VERSION_LIST = ['20']
 
 
 def errcheck(ret, func, args):
@@ -744,6 +755,10 @@ def find_command_path(command, install_method):
 
 
 def get_system_release_version():
+    # MacOS does not maintain paths /etc/os-release and /etc/sys-release
+    if check_if_platform_is_mac():
+        return platform.platform()
+
     try:
         with open(SYSTEM_RELEASE_PATH) as f:
             return f.read().strip()
@@ -770,7 +785,11 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
 
     mount_filename = get_mount_specific_filename(fs_id, mountpoint, tls_port)
 
+    system_release_version = get_system_release_version()
     global_config = dict(STUNNEL_GLOBAL_CONFIG)
+    if any(release in system_release_version for release in SKIP_NO_SO_BINDTODEVICE_RELEASES):
+        global_config['socket'].remove('a:SO_BINDTODEVICE=lo')
+
     if config.getboolean(CONFIG_SECTION, 'stunnel_debug_enabled'):
         global_config['debug'] = 'debug'
 
@@ -809,7 +828,6 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
         else:
             fatal_error(tls_controls_message % 'stunnel_check_cert_validity')
 
-    system_release_version = get_system_release_version()
     if not any(release in system_release_version for release in SKIP_NO_LIBWRAP_RELEASES):
         efs_config['libwrap'] = 'no'
 
@@ -870,11 +888,14 @@ def poll_tunnel_process(tunnel_proc, fs_id, mount_completed):
 
 def get_init_system(comm_file='/proc/1/comm'):
     init_system = DEFAULT_UNKNOWN_VALUE
-    try:
-        with open(comm_file) as f:
-            init_system = f.read().strip()
-    except IOError:
-        logging.warning('Unable to read %s', comm_file)
+    if not check_if_platform_is_mac():
+        try:
+            with open(comm_file) as f:
+                init_system = f.read().strip()
+        except IOError:
+            logging.warning('Unable to read %s', comm_file)
+    else:
+        init_system = 'launchd'
 
     logging.debug('Identified init system: %s', init_system)
     return init_system
@@ -882,7 +903,10 @@ def get_init_system(comm_file='/proc/1/comm'):
 
 def check_network_target(fs_id):
     with open(os.devnull, 'w') as devnull:
-        rc = subprocess.call(['systemctl', 'status', 'network.target'], stdout=devnull, stderr=devnull, close_fds=True)
+        if not check_if_platform_is_mac():
+            rc = subprocess.call(['systemctl', 'status', 'network.target'], stdout=devnull, stderr=devnull, close_fds=True)
+        else:
+            rc = subprocess.call(['sudo', 'ifconfig', 'en0'], stdout=devnull, stderr=devnull, close_fds=True)
 
     if rc != 0:
         fatal_error('Failed to mount %s because the network was not yet available, add "_netdev" to your mount options' % fs_id,
@@ -913,6 +937,18 @@ def start_watchdog(init_system):
         if rc != 0:
             with open(os.devnull, 'w') as devnull:
                 subprocess.Popen(['systemctl', 'start', WATCHDOG_SERVICE], stdout=devnull, stderr=devnull, close_fds=True)
+        else:
+            logging.debug('%s is already running', WATCHDOG_SERVICE)
+
+    elif init_system == 'launchd':
+        rc = subprocess.Popen(['sudo', 'launchctl', 'list', WATCHDOG_SERVICE], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, close_fds=True)
+        if rc != 0:
+            if not os.path.exists(WATCHDOG_SERVICE_PLIST_PATH):
+                fatal_error('Watchdog plist file missing. Copy the watchdog plist file in directory /Library/LaunchAgents')
+            with open(os.devnull, 'w') as devnull:
+                subprocess.Popen(['sudo', 'launchctl', 'load', WATCHDOG_SERVICE_PLIST_PATH], stdout=devnull,
+                                 stderr=devnull, close_fds=True)
         else:
             logging.debug('%s is already running', WATCHDOG_SERVICE)
 
@@ -1024,10 +1060,22 @@ def test_tlsport(tlsport):
         retry_times -= 1
 
 
+def check_if_nfsvers_is_compatible_with_macos(options):
+    # MacOS does not support NFSv4.1
+    if ('nfsvers' in options and options['nfsvers'] == '4.1') \
+            or ('vers' in options and options['vers'] == '4.1')\
+            or ('minorversion' in options and options['minorversion'] == 1):
+        fatal_error('NFSv4.1 is not supported on MacOS, please switch to NFSv4.0')
+
+
 def get_nfs_mount_options(options):
     # If you change these options, update the man page as well at man/mount.efs.8
     if 'nfsvers' not in options and 'vers' not in options:
-        options['nfsvers'] = '4.1'
+        options['nfsvers'] = '4.1' if not check_if_platform_is_mac() else '4.0'
+
+    if check_if_platform_is_mac():
+        check_if_nfsvers_is_compatible_with_macos(options)
+
     if 'rsize' not in options:
         options['rsize'] = '1048576'
     if 'wsize' not in options:
@@ -1040,6 +1088,10 @@ def get_nfs_mount_options(options):
         options['retrans'] = '2'
     if 'noresvport' not in options:
         options['noresvport'] = None
+
+    # Set mountport to 2049 for MacOS
+    if check_if_platform_is_mac():
+        options['mountport'] = '2049'
 
     if 'tls' in options:
         options['port'] = options['tlsport']
@@ -1061,7 +1113,10 @@ def mount_nfs(dns_name, path, mountpoint, options):
     else:
         mount_path = '%s:%s' % (dns_name, path)
 
-    command = ['/sbin/mount.nfs4', mount_path, mountpoint, '-o', get_nfs_mount_options(options)]
+    if not check_if_platform_is_mac():
+        command = ['/sbin/mount.nfs4', mount_path, mountpoint, '-o', get_nfs_mount_options(options)]
+    else:
+        command = ['/sbin/mount_nfs', '-o', get_nfs_mount_options(options), mount_path, mountpoint]
 
     if 'netns' in options:
         command = ['nsenter', '--net=' + options['netns']] + command
@@ -1107,13 +1162,23 @@ def parse_arguments(config, args=None):
     mountpoint = None
     options = {}
 
-    if len(args) > 1:
-        fsname = args[1]
-    if len(args) > 2:
-        mountpoint = args[2]
-    if len(args) > 4 and '-o' in args[:-1]:
-        options_index = args.index('-o') + 1
-        options = parse_options(args[options_index])
+    if not check_if_platform_is_mac():
+        if len(args) > 1:
+            fsname = args[1]
+        if len(args) > 2:
+            mountpoint = args[2]
+        if len(args) > 4 and '-o' in args[:-1]:
+            options_index = args.index('-o') + 1
+            options = parse_options(args[options_index])
+    else:
+        if len(args) > 1:
+            fsname = args[-2]
+        if len(args) > 2:
+            mountpoint = args[-1]
+        if len(args) > 4 and '-o' in args[:-2]:
+            for arg in args[1:-2]:
+                if arg != '-o':
+                    options.update(parse_options(arg))
 
     if not fsname or not mountpoint:
         usage(out=sys.stderr)
@@ -1804,6 +1869,14 @@ def get_cloudwatch_log_stream_name(fs_id=None):
     return log_stream_name
 
 
+def check_if_platform_is_mac():
+    return sys.platform in MAC_OS_PLATFORM_LIST
+
+
+def check_if_mac_version_is_supported():
+    return any(release in platform.release() for release in MAC_OS_SUPPORTED_VERSION_LIST)
+
+
 def check_if_cloudwatch_log_enabled(config):
     if config.has_option(CLOUDWATCH_LOG_SECTION, 'enabled'):
         return config.getboolean(CLOUDWATCH_LOG_SECTION, 'enabled')
@@ -2045,6 +2118,9 @@ def main():
 
     config = read_config()
     bootstrap_logging(config)
+
+    if check_if_platform_is_mac() and not check_if_mac_version_is_supported():
+        fatal_error("We do not support EFS on MacOS " + platform.release())
 
     fs_id, path, mountpoint, options = parse_arguments(config)
 

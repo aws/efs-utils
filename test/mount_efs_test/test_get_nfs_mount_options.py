@@ -8,6 +8,18 @@
 
 import mount_efs
 
+import pytest
+
+from mock import MagicMock, patch
+
+
+def _mock_popen(mocker, returncode=0, stdout='stdout', stderr='stderr'):
+    popen_mock = MagicMock()
+    popen_mock.communicate.return_value = (stdout, stderr, )
+    popen_mock.returncode = returncode
+
+    return mocker.patch('subprocess.Popen', return_value=popen_mock)
+
 
 def test_get_default_nfs_mount_options():
     nfs_opts = mount_efs.get_nfs_mount_options({})
@@ -76,3 +88,38 @@ def test_tlsport():
 
     assert 'port=3030' in nfs_opts
     assert 'tls' not in nfs_opts
+
+
+def test_get_default_nfs_mount_options_macos(mocker):
+    mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
+    nfs_opts = mount_efs.get_nfs_mount_options({})
+
+    assert 'nfsvers=4.0' in nfs_opts
+    assert 'rsize=1048576' in nfs_opts
+    assert 'wsize=1048576' in nfs_opts
+    assert 'hard' in nfs_opts
+    assert 'timeo=600' in nfs_opts
+    assert 'retrans=2' in nfs_opts
+    assert 'mountport=2049' in nfs_opts
+
+
+def _test_unsupported_mount_options_macos(mocker, capsys, options={}):
+    mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
+    _mock_popen(mocker, stdout='nfs')
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.get_nfs_mount_options(options)
+
+    assert 0 != ex.value.code
+
+    out, err = capsys.readouterr()
+    assert 'NFSv4.1 is not supported on MacOS' in err
+
+
+def test_unsupported_nfsvers_mount_options_macos(mocker, capsys):
+    _test_unsupported_mount_options_macos(mocker, capsys, {'nfsvers': '4.1'})
+
+def test_unsupported_vers_mount_options_macos(mocker, capsys):
+    _test_unsupported_mount_options_macos(mocker, capsys, {'vers': '4.1'})
+
+def test_unsupported_minorversion_mount_options_macos(mocker, capsys):
+    _test_unsupported_mount_options_macos(mocker, capsys, {'minorversion': 1})

@@ -34,6 +34,10 @@ NETNS_NSENTER_ARG_IDX = 0
 NETNS_PATH_ARG_IDX = 1
 NETNS_NFS_OFFSET = 2
 
+# indices of different arguments to the NFS call for MACOS
+NFS_MOUNT_PATH_IDX_MACOS = -2
+NFS_MOUNT_POINT_IDX_MACOS = -1
+
 NETNS = '/proc/1/net/ns'
 
 
@@ -113,3 +117,33 @@ def test_mount_tls_mountpoint_mounted_with_nfs(mocker, capsys):
     out, err = capsys.readouterr()
     assert 'is already mounted' in out
     utils.assert_not_called(bootstrap_tls_mock)
+
+
+def test_mount_nfs_macos(mocker):
+    mock = _mock_popen(mocker)
+    mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
+    DEFAULT_OPTIONS['nfsvers'] = 4.0
+    mount_efs.mount_nfs(DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
+
+    args, _ = mock.call_args
+    args = args[0]
+
+    assert '/sbin/mount_nfs' == args[NFS_BIN_ARG_IDX]
+    assert DNS_NAME in args[-2]
+    assert '/mnt' == args[-1]
+
+
+def test_mount_nfs_tls_macos(mocker):
+    mock = _mock_popen(mocker)
+    mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
+    DEFAULT_OPTIONS['nfsvers'] = 4.0
+    options = dict(DEFAULT_OPTIONS)
+    options['tls'] = None
+
+    mount_efs.mount_nfs(DNS_NAME, '/', '/mnt', options)
+
+    args, _ = mock.call_args
+    args = args[0]
+
+    assert DNS_NAME not in args[NFS_MOUNT_PATH_IDX_MACOS]
+    assert '127.0.0.1' in args[NFS_MOUNT_PATH_IDX_MACOS]
