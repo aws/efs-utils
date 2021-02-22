@@ -1694,10 +1694,22 @@ def match_device(config, device):
 
 
 def is_nfs_mount(mountpoint):
-    cmd = ['stat', '-f', '-L', '-c', '%T', mountpoint]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
-    output, _ = p.communicate()
-    return output and 'nfs' in str(output)
+    if not check_if_platform_is_mac():
+        cmd = ['stat', '-f', '-L', '-c', '%T', mountpoint]
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
+        output, _ = p.communicate()
+        return output and 'nfs' in str(output)
+    else:
+        process = subprocess.run(['mount', '-t', 'nfs'], check=True, stdout=subprocess.PIPE, universal_newlines=True)
+        stdout = process.stdout
+        if not stdout:
+            return False
+        mounts = stdout.split('\n')
+        for mount in mounts:
+            _mount = mount.split()
+            if len(_mount) >= 4 and _mount[2] == mountpoint and 'nfs' in _mount[3]:
+                return True
+        return False
 
 
 def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):

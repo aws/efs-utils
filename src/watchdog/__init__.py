@@ -134,6 +134,8 @@ SECURITY_CREDS_IAM_ROLE_HELP_URL = 'https://docs.aws.amazon.com/AWSEC2/latest/Us
 
 Mount = namedtuple('Mount', ['server', 'mountpoint', 'type', 'options', 'freq', 'passno'])
 
+NFSSTAT_TIMEOUT = 5
+
 
 def fatal_error(user_message, log_message=None):
     if log_message is None:
@@ -386,8 +388,9 @@ def get_file_safe_mountpoint(mount):
 
     opts = parse_options(mount.options)
     if 'port' not in opts:
-        # some other localhost nfs mount not running over stunnel
-        return None
+        # some other localhost nfs mount not running over stunnel.
+        # For MacOS, we ignore the port if the port is missing in mount options.
+        return None if not check_if_running_on_macos() else mountpoint
     return mountpoint + '.' + opts['port']
 
 
@@ -397,11 +400,14 @@ def get_current_local_nfs_mounts(mount_file='/proc/mounts'):
     appears in EFS watchdog state files.
     """
     mounts = []
-    if sys.platform != 'darwin':
+
+    if not check_if_running_on_macos():
         with open(mount_file) as f:
             for mount in f:
                 mounts.append(Mount._make(mount.strip().split()))
     else:
+        # stat command on MacOS does not have '--file-system' option to verify the filesystem type of a mount point,
+        # traverse all the mounts, and find if current mount point is already mounted
         process = subprocess.run(['mount', '-t', 'nfs'], check=True, stdout=subprocess.PIPE, universal_newlines=True)
         stdout = process.stdout
         if stdout:
@@ -409,7 +415,11 @@ def get_current_local_nfs_mounts(mount_file='/proc/mounts'):
             for mount in output:
                 _mount = mount.split()
                 if len(_mount) >= 4:
-                    mounts.append(Mount._make([_mount[0], _mount[2], _mount[3], '', 0, 0]))
+                    mount_ops = get_nfs_mount_options_on_macos(_mount[2], _mount[0])
+                    # Sample output: 127.0.0.1:/ on /Users/ec2-user/efs (nfs)
+                    mounts.append(Mount._make([_mount[0], _mount[2], _mount[3], mount_ops if mount_ops else '', 0, 0]))
+        else:
+            logging.warning('No nfs mounts found')
 
     mounts = [m for m in mounts if m.server.startswith('127.0.0.1') and 'nfs' in m.type]
 
@@ -420,6 +430,34 @@ def get_current_local_nfs_mounts(mount_file='/proc/mounts'):
             mount_dict[safe_mnt] = m
 
     return mount_dict
+
+
+def get_nfs_mount_options_on_macos(mount_point, mount_server='127.0.0.1:/'):
+
+    if not mount_point:
+        logging.warning('Unable to get local mount options with empty mount point')
+        return None
+
+    try:
+        process = subprocess.run(['nfsstat', '-f', 'JSON', '-m', mount_point], check=True, stdout=subprocess.PIPE,
+                                 universal_newlines=True, timeout=NFSSTAT_TIMEOUT)
+        stdout = process.stdout
+        if not stdout:
+            logging.warning('Unable to get local mount options with mount point: %s', mount_point)
+            return None
+        try:
+            state_json = json.loads(stdout)
+        except ValueError:
+            logging.exception('Unable to parse json of %s', stdout)
+            return None
+        try:
+            return ','.join(state_json.get(mount_server).get('Original mount options').get('NFS parameters'))
+        except AttributeError:
+            logging.exception('Unable to get object in %s', state_json)
+            return None
+    except subprocess.TimeoutExpired:
+        logging.warning('Fetching nfs mount parameters timed out for mount point %s. Ignoring port option.', mount_point)
+        return None
 
 
 def get_state_files(state_file_dir):
@@ -561,8 +599,8 @@ def check_efs_mounts(config, child_procs, unmount_grace_period_sec, state_file_d
             if state['unmount_time'] + unmount_grace_period_sec < current_time:
                 logging.info('Unmount grace period expired for %s', state_file)
                 clean_up_mount_state(state_file_dir, state_file, state.get('pid'), is_running, state.get('mountStateDir'))
-
-        elif mount not in nfs_mounts:
+        # For MacOS, if we don't have port from previous system call (nfsstat -F JSON -m mount_point), we ignore the port
+        elif mount not in nfs_mounts and (not check_if_running_on_macos() or mount[:mount.rindex('.')] not in nfs_mounts):
             logging.info('No mount found for "%s"', state_file)
             state = mark_as_unmounted(state, state_file_dir, state_file, current_time)
 
@@ -1074,10 +1112,17 @@ def get_utc_now():
 
 
 def check_process_name(pid):
-    cmd = ['cat', '/proc/{pid}/cmdline'.format(pid=pid)]
+    if not check_if_running_on_macos():
+        cmd = ['cat', '/proc/{pid}/cmdline'.format(pid=pid)]
+    else:
+        cmd = ['ps', '-p', str(pid), '-o', 'command=']
 
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
     return p.communicate()[0]
+
+
+def check_if_running_on_macos():
+    return sys.platform == 'darwin'
 
 
 def clean_up_previous_stunnel_pids(state_file_dir=STATE_FILE_DIR):
