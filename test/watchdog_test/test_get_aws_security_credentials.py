@@ -89,7 +89,7 @@ def test_get_aws_security_credentials_credentials_file_found_credentials_found_w
     mocker.patch('os.path.exists', return_value=True)
     mocker.patch('watchdog.credentials_file_helper', return_value=file_helper_resp)
 
-    credentials = watchdog.get_aws_security_credentials('credentials:default')
+    credentials = watchdog.get_aws_security_credentials('credentials:default', 'us-east-1')
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
@@ -107,7 +107,7 @@ def test_get_aws_security_credentials_config_file_found_credentials_found_withou
     mocker.patch('os.path.exists', return_value=True)
     mocker.patch('watchdog.credentials_file_helper', return_value=file_helper_resp)
 
-    credentials = watchdog.get_aws_security_credentials('config:default')
+    credentials = watchdog.get_aws_security_credentials('config:default', 'us-east-1')
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
@@ -125,7 +125,7 @@ def test_get_aws_security_credentials_credentials_file_found_credentials_found(m
     mocker.patch('os.path.exists', return_value=True)
     mocker.patch('watchdog.credentials_file_helper', return_value=file_helper_resp)
 
-    credentials = watchdog.get_aws_security_credentials('credentials:default')
+    credentials = watchdog.get_aws_security_credentials('credentials:default', 'us-east-1')
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
@@ -143,7 +143,7 @@ def test_get_aws_security_credentials_config_file_found_credentials_found(mocker
     mocker.patch('os.path.exists', return_value=True)
     mocker.patch('watchdog.credentials_file_helper', return_value=file_helper_resp)
 
-    credentials = watchdog.get_aws_security_credentials('config:default')
+    credentials = watchdog.get_aws_security_credentials('config:default', 'us-east-1')
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
@@ -163,7 +163,7 @@ def test_get_aws_security_credentials_ecs(mocker):
     mocker.patch.dict(os.environ, {'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI': 'fake_uri'})
     mocker.patch('watchdog.urlopen', return_value=MockUrlLibResponse(data=response))
 
-    credentials = watchdog.get_aws_security_credentials('ecs:fake_uri')
+    credentials = watchdog.get_aws_security_credentials('ecs:fake_uri', 'us-east-1')
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
@@ -211,7 +211,7 @@ def _test_get_aws_security_credentials_instance_metadata_role_name(mocker, is_na
     side_effects = side_effects + [MockUrlLibResponse(data=role_name_data), MockUrlLibResponse(data=response)]
     mocker.patch('watchdog.urlopen', side_effect=side_effects)
 
-    credentials = watchdog.get_aws_security_credentials('metadata:')
+    credentials = watchdog.get_aws_security_credentials('metadata:', 'us-east-1')
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
@@ -219,13 +219,13 @@ def _test_get_aws_security_credentials_instance_metadata_role_name(mocker, is_na
 
 
 def test_get_aws_security_credentials_not_found_bad_credentials_source():
-    credentials = watchdog.get_aws_security_credentials('dummy:source')
+    credentials = watchdog.get_aws_security_credentials('dummy:source', 'us-east-1')
     assert not credentials
 
 
 def test_get_aws_security_credentials_not_found_file_not_found(mocker):
     mocker.patch('os.path.exists', return_value=False)
-    credentials = watchdog.get_aws_security_credentials('credentials:default')
+    credentials = watchdog.get_aws_security_credentials('credentials:default', 'us-east-1')
     assert not credentials
 
 
@@ -233,19 +233,19 @@ def test_get_aws_security_credentials_not_found_file_found_no_creds(mocker):
     file_helper_resp = {'AccessKeyId': None, 'SecretAccessKey': None, 'Token': None}
     mocker.patch('os.path.exists', return_value=True)
     mocker.patch('watchdog.credentials_file_helper', return_value=file_helper_resp)
-    credentials = watchdog.get_aws_security_credentials('credentials:default')
+    credentials = watchdog.get_aws_security_credentials('credentials:default', 'us-east-1')
     assert not credentials
 
 
 def test_get_aws_security_credentials_ecs_no_response(mocker):
     mocker.patch('watchdog.url_request_helper', return_value=None)
-    credentials = watchdog.get_aws_security_credentials('ecs:fake_uri')
+    credentials = watchdog.get_aws_security_credentials('ecs:fake_uri', 'us-east-1')
     assert not credentials
 
 
 def test_get_aws_security_credentials_instance_metadata_no_response(mocker):
     mocker.patch('watchdog.url_request_helper', return_value=None)
-    credentials = watchdog.get_aws_security_credentials('metadata:')
+    credentials = watchdog.get_aws_security_credentials('metadata:', 'us-east-1')
     assert not credentials
 
 
