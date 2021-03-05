@@ -125,7 +125,7 @@ REQUEST_PAYLOAD = ''
 AP_ID_RE = re.compile('^fsap-[0-9a-f]{17}$')
 
 ECS_TASK_METADATA_API = 'http://169.254.170.2'
-STS_ENDPOINT_URL = 'https://sts.amazonaws.com/'
+STS_ENDPOINT_URL_FORMAT = 'https://sts.{}.amazonaws.com/'
 INSTANCE_IAM_URL = 'http://169.254.169.254/latest/meta-data/iam/security-credentials/'
 INSTANCE_METADATA_TOKEN_URL = 'http://169.254.169.254/latest/api/token'
 SECURITY_CREDS_ECS_URI_HELP_URL = 'https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html'
@@ -146,7 +146,7 @@ def fatal_error(user_message, log_message=None):
     sys.exit(1)
 
 
-def get_aws_security_credentials(credentials_source):
+def get_aws_security_credentials(credentials_source, region):
     """
     Lookup AWS security credentials (access key ID and secret access key). Adapted credentials provider chain from:
     https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html and
@@ -161,7 +161,7 @@ def get_aws_security_credentials(credentials_source):
     elif method == 'ecs':
         return get_aws_security_credentials_from_ecs(value)
     elif method == 'webidentity':
-        return get_aws_security_credentials_from_webidentity(*(value.split(',')))
+        return get_aws_security_credentials_from_webidentity(*(value.split(',')), region=region)
     elif method == 'metadata':
         return get_aws_security_credentials_from_instance_metadata()
     else:
@@ -211,7 +211,7 @@ def get_aws_security_credentials_from_ecs(uri):
     return None
 
 
-def get_aws_security_credentials_from_webidentity(role_arn, token_file):
+def get_aws_security_credentials_from_webidentity(role_arn, token_file, region):
     try:
         with open(token_file, 'r') as f:
             token = f.read()
@@ -219,6 +219,7 @@ def get_aws_security_credentials_from_webidentity(role_arn, token_file):
         logging.error('Error reading token file %s: %s', token_file, e)
         return None
 
+    STS_ENDPOINT_URL = STS_ENDPOINT_URL_FORMAT.format(region)
     webidentity_url = STS_ENDPOINT_URL + '?' + urlencode({
         'Version': '2011-06-15',
         'Action': 'AssumeRoleWithWebIdentity',
@@ -819,7 +820,7 @@ def create_ca_conf(config_path, common_name, directory, private_key, date, regio
                    ap_id=None, client_info=None):
     """Populate ca/req configuration file with fresh configurations at every mount since SigV4 signature can change"""
     public_key_path = os.path.join(directory, 'publicKey.pem')
-    security_credentials = get_aws_security_credentials(credentials_source) if credentials_source else ''
+    security_credentials = get_aws_security_credentials(credentials_source, region) if credentials_source else ''
 
     if credentials_source and security_credentials is None:
         logging.error('Failed to retrieve AWS security credentials using lookup method: %s', credentials_source)

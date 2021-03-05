@@ -162,7 +162,7 @@ ECS_URI_ENV = 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'
 ECS_TASK_METADATA_API = 'http://169.254.170.2'
 WEB_IDENTITY_ROLE_ARN_ENV = 'AWS_ROLE_ARN'
 WEB_IDENTITY_TOKEN_FILE_ENV = 'AWS_WEB_IDENTITY_TOKEN_FILE'
-STS_ENDPOINT_URL = 'https://sts.amazonaws.com/'
+STS_ENDPOINT_URL_FORMAT = 'https://sts.{}.amazonaws.com/'
 INSTANCE_METADATA_TOKEN_URL = 'http://169.254.169.254/latest/api/token'
 INSTANCE_METADATA_SERVICE_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document/'
 INSTANCE_IAM_URL = 'http://169.254.169.254/latest/meta-data/iam/security-credentials/'
@@ -363,7 +363,7 @@ def get_aws_ec2_metadata_token():
         return res.read()
 
 
-def get_aws_security_credentials(use_iam, awsprofile=None, aws_creds_uri=None):
+def get_aws_security_credentials(use_iam, region, awsprofile=None, aws_creds_uri=None):
     """
     Lookup AWS security credentials (access key ID and secret access key). Adapted credentials provider chain from:
     https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html and
@@ -393,6 +393,7 @@ def get_aws_security_credentials(use_iam, awsprofile=None, aws_creds_uri=None):
         credentials, credentials_source = get_aws_security_credentials_from_webidentity(
             os.environ[WEB_IDENTITY_ROLE_ARN_ENV],
             os.environ[WEB_IDENTITY_TOKEN_FILE_ENV],
+            region,
             False
         )
         if credentials and credentials_source:
@@ -445,7 +446,7 @@ def get_aws_security_credentials_from_ecs(aws_creds_uri, is_fatal=False):
         return None, None
 
 
-def get_aws_security_credentials_from_webidentity(role_arn, token_file, is_fatal=False):
+def get_aws_security_credentials_from_webidentity(role_arn, token_file, region, is_fatal=False):
     try:
         with open(token_file, 'r') as f:
             token = f.read()
@@ -456,6 +457,7 @@ def get_aws_security_credentials_from_webidentity(role_arn, token_file, is_fatal
         else:
             return None, None
 
+    STS_ENDPOINT_URL = STS_ENDPOINT_URL_FORMAT.format(region)
     webidentity_url = STS_ENDPOINT_URL + '?' + urlencode({
         'Version': '2011-06-15',
         'Action': 'AssumeRoleWithWebIdentity',
@@ -988,6 +990,7 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
     cert_details = {}
     security_credentials = None
     client_info = get_client_info(config)
+    region = get_target_region(config)
 
     if use_iam:
         aws_creds_uri = options.get('awscredsuri')
@@ -996,7 +999,7 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
         else:
             kwargs = {'awsprofile': get_aws_profile(options, use_iam)}
 
-        security_credentials, credentials_source = get_aws_security_credentials(use_iam, **kwargs)
+        security_credentials, credentials_source = get_aws_security_credentials(use_iam, region, **kwargs)
 
         if credentials_source:
             cert_details['awsCredentialsMethod'] = credentials_source
@@ -1008,7 +1011,7 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
     cert_details['mountStateDir'] = get_mount_specific_filename(fs_id, mountpoint, tls_port) + '+'
     # common name for certificate signing request is max 64 characters
     cert_details['commonName'] = socket.gethostname()[0:64]
-    cert_details['region'] = get_target_region(config)
+    cert_details['region'] = region
     cert_details['certificateCreationTime'] = create_certificate(config, cert_details['mountStateDir'],
                                                                  cert_details['commonName'], cert_details['region'], fs_id,
                                                                  security_credentials, ap_id, client_info,

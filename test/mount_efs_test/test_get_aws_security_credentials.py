@@ -90,7 +90,7 @@ def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_wit
     mocker.patch('os.path.exists', return_value=True)
     mocker.patch('mount_efs.credentials_file_helper', return_value=file_helper_resp)
 
-    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, 'test_profile')
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, 'us-east-1', 'test_profile')
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
@@ -109,7 +109,7 @@ def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_wit
     mocker.patch('os.path.exists', return_value=True)
     mocker.patch('mount_efs.credentials_file_helper', return_value=file_helper_resp)
 
-    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, 'test_profile')
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, 'us-east-1', 'test_profile')
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
@@ -118,7 +118,7 @@ def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_wit
 
 
 def test_get_aws_security_credentials_do_not_use_iam():
-    credentials, credentials_source = mount_efs.get_aws_security_credentials(False, 'test_profile')
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(False, 'us-east-1', 'test_profile')
 
     assert not credentials
     assert not credentials_source
@@ -138,7 +138,7 @@ def _test_get_aws_security_credentials_get_ecs_from_env_url(mocker):
 
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse(data=response))
 
-    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, None)
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, 'us-east-1', None)
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
@@ -155,7 +155,7 @@ def test_get_aws_security_credentials_get_ecs_from_option_url(mocker):
         'Token': SESSION_TOKEN_VAL
     })
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse(data=response))
-    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, None, AWSCREDSURI)
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, 'us-east-1', None, AWSCREDSURI)
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
@@ -203,7 +203,7 @@ def _test_get_aws_security_credentials_get_instance_metadata_role_name(mocker, i
     side_effects = side_effects + [MockUrlLibResponse(data=role_name_data), MockUrlLibResponse(data=response)]
     mocker.patch('mount_efs.urlopen', side_effect=side_effects)
 
-    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, None)
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(True, 'us-east-1', None)
 
     assert credentials['AccessKeyId'] == ACCESS_KEY_ID_VAL
     assert credentials['SecretAccessKey'] == SECRET_ACCESS_KEY_VAL
@@ -217,7 +217,7 @@ def test_get_aws_security_credentials_no_credentials_found(mocker, capsys):
     mocker.patch('mount_efs.urlopen')
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.get_aws_security_credentials(True, None)
+        mount_efs.get_aws_security_credentials(True, 'us-east-1', None)
 
     assert 0 != ex.value.code
 
@@ -232,7 +232,7 @@ def test_get_aws_security_credentials_credentials_not_found_in_files(mocker, cap
     mocker.patch('mount_efs.urlopen')
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.get_aws_security_credentials(True, 'default')
+        mount_efs.get_aws_security_credentials(True, 'us-east-1', 'default')
 
     assert 0 != ex.value.code
 
@@ -245,7 +245,7 @@ def test_get_aws_security_credentials_credentials_not_found_in_aws_creds_uri(moc
     mocker.patch('mount_efs.urlopen')
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.get_aws_security_credentials(True, 'default', AWSCREDSURI)
+        mount_efs.get_aws_security_credentials(True, 'us-east-1', 'default', AWSCREDSURI)
 
     assert 0 != ex.value.code
 
