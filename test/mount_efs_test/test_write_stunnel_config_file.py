@@ -98,13 +98,12 @@ def _validate_config(stunnel_config_file, expected_global_config, expected_efs_c
     assert expected_efs_config == actual_efs_config
 
 
-def _get_expected_efs_config(port=PORT, dns_name=DNS_NAME, verify=mount_efs.DEFAULT_STUNNEL_VERIFY_LEVEL,
-                             ocsp_override=True, check_cert_hostname=True, check_cert_validity=False,
-                             disable_libwrap=True):
-
+def _get_expected_efs_config(port=PORT, dns_name=DNS_NAME, mount_target_ip=None, verify=mount_efs.DEFAULT_STUNNEL_VERIFY_LEVEL,
+                             ocsp_override=True, check_cert_hostname=True, check_cert_validity=False, disable_libwrap=True):
     expected_efs_config = dict(mount_efs.STUNNEL_EFS_CONFIG)
     expected_efs_config['accept'] = expected_efs_config['accept'] % port
-    expected_efs_config['connect'] = expected_efs_config['connect'] % dns_name
+    expected_efs_config['connect'] = expected_efs_config['connect'] % \
+                                     (mount_target_ip if mount_target_ip is not None else dns_name)
     expected_efs_config['verify'] = str(verify)
 
     if check_cert_hostname:
@@ -216,6 +215,20 @@ def test_write_stunnel_config_with_debug_and_logs_file(mocker, tmpdir):
     expected_global_config['output'] = STUNNEL_LOGS_FILE
 
     _validate_config(config_file, expected_global_config, _get_expected_efs_config())
+
+
+def test_write_stunnel_config_file_with_mount_target_ip(mocker, tmpdir):
+    ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
+    state_file_dir = str(tmpdir)
+
+    options = _get_mount_options()
+    options['mounttargetip'] = '10.0.0.1'
+
+    config_file = mount_efs.write_stunnel_config_file(_get_config(mocker), state_file_dir, FS_ID, MOUNT_POINT, PORT, DNS_NAME,
+                                                      VERIFY_LEVEL, OCSP_ENABLED, options, DEFAULT_REGION)
+    utils.assert_called_once(ca_mocker)
+
+    _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG, _get_expected_efs_config(mount_target_ip='10.0.0.1'))
 
 
 def test_write_stunnel_config_check_cert_hostname_supported_flag_not_set(mocker, tmpdir):

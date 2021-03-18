@@ -17,6 +17,7 @@ from mock import MagicMock, patch
 from .. import utils
 
 
+DEFAULT_REGION = 'us-east-1'
 AP_ID = 'fsap-0123456789abcdef0'
 BAD_AP_ID_INCORRECT_START = 'bad-fsap-0123456789abc'
 BAD_AP_ID_TOO_SHORT = 'fsap-0123456789abcdef'
@@ -34,7 +35,7 @@ def dummy_contextmanager(*args, **kwargs):
 
 
 def _test_main(mocker, tls=False, root=True, ap_id=None, iam=False, awsprofile=None, ocsp=False, noocsp=False, port=None,
-               tlsport=None, awscredsuri=None):
+               tlsport=None, awscredsuri=None, dnshostnamesdisabled=False):
     options = {}
     if tls:
         options['tls'] = None
@@ -54,6 +55,8 @@ def _test_main(mocker, tls=False, root=True, ap_id=None, iam=False, awsprofile=N
         options['tlsport'] = tlsport
     if awscredsuri is not None:
         options['awscredsuri'] = AWSCREDSURI
+    if dnshostnamesdisabled:
+        options['dnshostnamesdisabled'] = None
 
     if root:
         mocker.patch('os.geteuid', return_value=0)
@@ -61,8 +64,11 @@ def _test_main(mocker, tls=False, root=True, ap_id=None, iam=False, awsprofile=N
         mocker.patch('os.geteuid', return_value=100)
 
     bootstrap_logging_mock = mocker.patch('mount_efs.bootstrap_logging')
+    mocker.patch('mount_efs.get_subnet_ids')
+    mocker.patch('mount_efs.get_target_region', return_value=DEFAULT_REGION)
+    mocker.patch('mount_efs.get_mount_target_ip', return_value='10.0.0.1')
     get_dns_mock = mocker.patch('mount_efs.get_dns_name', return_value='fs-deadbeef.efs.us-east-1.amazonaws.com')
-    get_host_by_name_mock = mocker.patch('socket.gethostbyname')
+    mocker.patch('socket.gethostbyname')
     parse_arguments_mock = mocker.patch('mount_efs.parse_arguments', return_value=('fs-deadbeef', '/', '/mnt', options))
     bootstrap_tls_mock = mocker.patch('mount_efs.bootstrap_tls', side_effect=dummy_contextmanager)
     if tls:
@@ -142,6 +148,10 @@ def test_main_iam_without_tls(mocker, capsys):
 
 def test_main_awsprofile_with_iam(mocker):
     _test_main(mocker, tls=True, iam=True, awsprofile=AWSPROFILE, tlsport=TLS_PORT)
+
+
+def test_main_dns_hostnames_disabled(mocker):
+    _test_main(mocker, tls=True, dnshostnamesdisabled=True)
 
 
 def test_main_awsprofile_without_iam(mocker, capsys):

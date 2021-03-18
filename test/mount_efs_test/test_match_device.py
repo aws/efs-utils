@@ -87,6 +87,20 @@ def test_match_device_correct_descriptors_fs_id(mocker):
         assert (fs_id, path, az) == mount_efs.match_device(config, device, DEFAULT_NFS_OPTIONS)
 
 
+def test_match_device_dns_hostnames_disabled_no_fs_id(capsys):
+    config = _get_mock_config()
+    dns_name = '%s.efs.us-east-1.amazonaws.com' % FS_ID
+    options = {'dnshostnamesdisabled': None}
+
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.match_device(config, dns_name, options)
+
+    assert 0 != ex.value.code
+
+    out, err = capsys.readouterr()
+    assert 'IP lookup for option dnshostnamesdisabled only works with a filesystem ID' in err
+
+
 def test_match_device_correct_descriptors_cname_dns_suffix_override_region(mocker):
     get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value='fs-deadbeef.efs.cn-north-1.amazonaws.com.cn')
     gethostbyname_ex_mock = mocker.patch('socket.gethostbyname_ex',

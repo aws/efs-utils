@@ -166,10 +166,12 @@ WEB_IDENTITY_TOKEN_FILE_ENV = 'AWS_WEB_IDENTITY_TOKEN_FILE'
 STS_ENDPOINT_URL_FORMAT = 'https://sts.{}.amazonaws.com/'
 INSTANCE_METADATA_TOKEN_URL = 'http://169.254.169.254/latest/api/token'
 INSTANCE_METADATA_SERVICE_URL = 'http://169.254.169.254/latest/dynamic/instance-identity/document/'
+INSTANCE_METADATA_MACS_URL = 'http://169.254.169.254/latest/meta-data/network/interfaces/macs/'
 INSTANCE_IAM_URL = 'http://169.254.169.254/latest/meta-data/iam/security-credentials/'
 SECURITY_CREDS_ECS_URI_HELP_URL = 'https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html'
 SECURITY_CREDS_WEBIDENTITY_HELP_URL = 'https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html'
 SECURITY_CREDS_IAM_ROLE_HELP_URL = 'https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html'
+INSTANCE_METADATA_SERVICE_HELP_URL = 'https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html'
 
 DEFAULT_STUNNEL_VERIFY_LEVEL = 2
 DEFAULT_STUNNEL_CAFILE = '/etc/amazon/efs/efs-utils.crt'
@@ -183,7 +185,9 @@ EFS_ONLY_OPTIONS = [
     'awsprofile',
     'az',
     'cafile',
+    'dnshostnamesdisabled',
     'iam',
+    'mounttargetip',
     'netns',
     'noocsp',
     'ocsp',
@@ -515,6 +519,30 @@ def get_iam_role_name():
     return iam_role_name
 
 
+def get_subnet_ids():
+    return [get_subnet_id(mac) for mac in get_mac_addresses()]
+
+
+def get_subnet_id(mac_address):
+    subnet_id_url = INSTANCE_METADATA_MACS_URL + mac_address + 'subnet-id'
+    subnet_id_unsuccessful_resp = 'Unsuccessful retrieval of subnet ID at %s.' % subnet_id_url
+    subnet_id_url_error_msg = 'Unable to reach %s to retrieve subnet ID. See %s for more info.' % \
+                              (subnet_id_url, INSTANCE_METADATA_SERVICE_HELP_URL)
+    subnet_id = url_request_helper(subnet_id_url, subnet_id_unsuccessful_resp,
+                                   subnet_id_url_error_msg, retry_with_new_header_token=True)
+    return subnet_id
+
+
+def get_mac_addresses():
+    macs_unsuccessful_resp = 'Unsuccessful retrieval of MAC addresses at %s.' % INSTANCE_METADATA_MACS_URL
+    macs_url_error_msg = 'Unable to reach %s to retrieve MAC addresses. See %s for more info.' % \
+                         (INSTANCE_METADATA_MACS_URL, INSTANCE_METADATA_SERVICE_HELP_URL)
+    combined_mac_addresses = url_request_helper(INSTANCE_METADATA_MACS_URL, macs_unsuccessful_resp,
+                                                macs_url_error_msg, retry_with_new_header_token=True)
+    mac_addresses = combined_mac_addresses.split("\n")
+    return mac_addresses
+
+
 def credentials_file_helper(file_path, awsprofile):
     aws_credentials_configs = read_config(file_path)
     credentials = {'AccessKeyId': None, 'SecretAccessKey': None, 'Token': None}
@@ -814,8 +842,14 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
             global_config['output'] = os.path.join(log_dir, '%s.stunnel.log' % mount_filename)
 
     efs_config = dict(STUNNEL_EFS_CONFIG)
+
+    # If DNS hostnames are disabled in the VPC, use the mount target IP.
+    if 'mounttargetip' in options:
+        efs_config['connect'] = efs_config['connect'] % options['mounttargetip']
+    else:
+        efs_config['connect'] = efs_config['connect'] % dns_name
+
     efs_config['accept'] = efs_config['accept'] % tls_port
-    efs_config['connect'] = efs_config['connect'] % dns_name
     efs_config['verify'] = verify_level
     if verify_level > 0:
         add_stunnel_ca_options(efs_config, config, options, region)
@@ -1130,6 +1164,8 @@ def mount_nfs(dns_name, path, mountpoint, options):
 
     if 'tls' in options:
         mount_path = '127.0.0.1:%s' % path
+    elif 'mounttargetip' in options:
+        mount_path = '%s:%s' % (options['mounttargetip'], path)
     else:
         mount_path = '%s:%s' % (dns_name, path)
 
@@ -1689,6 +1725,12 @@ def match_device(config, device, options):
     if FS_ID_RE.match(remote):
         return remote, path, None
 
+    # Fail when a user supplies something other than a filesystem ID but
+    # provides dnshostnamesdisabled, which avoids the need to extract the
+    # filesystem ID from the DNS name.
+    if 'dnshostnamesdisabled' in options:
+        fatal_error('IP lookup for option dnshostnamesdisabled only works with a filesystem ID')
+
     try:
         primary, secondaries, _ = socket.gethostbyname_ex(remote)
         hostnames = list(filter(lambda e: e is not None, [primary] + secondaries))
@@ -1829,6 +1871,23 @@ def check_options_validity(options):
 
     if 'awscredsuri' in options and 'awsprofile' in options:
         fatal_error('The "awscredsuri" and "awsprofile" options are mutually exclusive')
+
+
+def set_derived_options(config, fs_id, options):
+    if 'dnshostnamesdisabled' in options:
+        set_mount_target_ip(config, fs_id, options)
+
+
+def set_mount_target_ip(config, fs_id, options):
+    subnet_ids = get_subnet_ids()
+    if not subnet_ids:
+        fatal_error('Failed to find subnet IDs for network interfaces attached to instance')
+
+    efs_client = get_botocore_client(config, 'efs')
+    if efs_client is None:
+        fatal_error('Failed to import botocore, please install botocore first')
+
+    options['mounttargetip'] = get_mount_target_ip(efs_client, fs_id, subnet_ids)
 
 
 def bootstrap_cloudwatch_logging(config, fs_id=None):
@@ -2167,6 +2226,56 @@ def handle_general_botocore_exceptions(error):
         logging.debug('Unexpected error: %s' % error)
 
 
+def get_mount_target_ip(efs_client, fs_id, subnet_ids):
+    mount_targets = efs_describe_mount_targets(efs_client, fs_id)
+    unique_subnet_ids = set(subnet_ids)
+
+    mount_target_ips = [mt['IpAddress'] for mt in mount_targets
+                        if mt['LifeCycleState'] == 'available' and mt['SubnetId'] in unique_subnet_ids]
+    if not mount_target_ips:
+        fatal_error('Failed to locate any mount targets, please check that your instance '
+                    'has an attached network interface in one of the subnets of the mount '
+                    'targets of %s' % fs_id)
+
+    return mount_target_ips[0]
+
+
+def efs_describe_mount_targets_helper(efs_client, fs_id):
+    response = efs_client.describe_mount_targets(FileSystemId=fs_id)
+    mount_targets = response['MountTargets']
+
+    while 'NextMarker' in response:
+        response = efs_client.describe_mount_targets(FileSystemId=fs_id, Marker=response['NextMarker'])
+        mount_targets += response['MountTargets']
+
+    return mount_targets
+
+
+def efs_describe_mount_targets(efs_client, fs_id):
+    try:
+        return efs_describe_mount_targets_helper(efs_client, fs_id)
+    except ClientError as e:
+        exception = e.response['Error']['Code']
+
+        if exception == 'FileSystemNotFound':
+            logging.error('Could not locate file system, %s' % e)
+        else:
+            handle_general_botocore_exceptions(e)
+
+        fatal_error(e.response['Error']['Message'])
+    except NoCredentialsError as e:
+        logging.error('Credentials are not properly configured, %s' % e)
+        fatal_error(e.response['Error']['Message'])
+    except EndpointConnectionError as e:
+        logging.error('Could not connect to the endpoint, %s' % e)
+        fatal_error(e.response['Error']['Message'])
+    # Fail in all cases because if we cannot list mount targets then we cannot
+    # mount by IP.
+    except Exception as e:
+        logging.error('Unknown error, %s.' % e)
+        fatal_error(str(e))
+
+
 def main():
     parse_arguments_early_exit()
 
@@ -2187,12 +2296,14 @@ def main():
 
     check_unsupported_options(options)
     check_options_validity(options)
+    set_derived_options(config, fs_id, options)
 
     init_system = get_init_system()
     check_network_status(fs_id, init_system)
 
     dns_name = get_dns_name(config, fs_id, options)
-    validate_dns_resolves(dns_name)
+    if 'dnshostnamesdisabled' not in options:
+        validate_dns_resolves(dns_name)
 
     if 'tls' in options:
         mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options)
