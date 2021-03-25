@@ -26,7 +26,7 @@ from collections import namedtuple
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
-from signal import SIGTERM, SIGHUP
+from signal import SIGTERM, SIGHUP, SIGKILL
 
 try:
     from configparser import ConfigParser, NoOptionError, NoSectionError
@@ -513,7 +513,8 @@ def clean_up_mount_state(state_file_dir, state_file, pid, is_running, mount_stat
         os.killpg(process_group, SIGTERM)
 
     if is_pid_running(pid):
-        logging.info('TLS tunnel: %d is still running, will retry termination', pid)
+        logging.info('TLS tunnel: %d is still running, will retry termination using SIGKILL', pid)
+        os.killpg(process_group, SIGKILL)
     else:
         if not pid:
             logging.info('TLS tunnel has been killed, cleaning up state')
