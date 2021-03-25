@@ -99,7 +99,19 @@ Use the named profile used to lookup IAM credentials in the AWS CLI credentials 
 (~/.aws/credentials) or AWS CLI config file (~/.aws/config). If "awsprofile" is not \
 specified, the "default" profile is used\&.
 .TP
-mountport
+\fBawscredsuri\fR
+Use the relative uri to lookup IAM credentials from ecs task metadata endpoint\&.
+.TP
+\fBcafile\fR
+Use the cafile as the stunnel certificate authority file.\&.
+.TP
+\fBnetns\fR
+Mount the EFS file system to the specified network namespace\&.
+.TP
+\fBaz\fR
+Mount the EFS file system to the specified availability zone mount target\&.
+.TP
+\fBmountport\fR
 Use the port 2049 to bypass portmapper daemon on EC2 Mac instances running macOS Big Sur\&.
 .if n \{\
 .RE
@@ -114,6 +126,10 @@ sudo mount -t efs -o netns=/proc/1/net/ns fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 "/mnt/efs" without encryption of data in transit in given network namespace \
 '/proc/1/net/ns'
+.TP
+sudo mount -t efs -o az=us-east-1a fs-abcd1234 /mnt/efs
+Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
+"/mnt/efs" to the mount target in availability zone us-east-1a
 .TP
 sudo mount -t efs fs-abcd1234:/child /mnt/efs
 Mount a non-root directory of an EFS file system with file system ID \

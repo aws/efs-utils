@@ -78,7 +78,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = '1.29.1'
+VERSION = '1.30.1'
 SERVICE = 'elasticfilesystem'
 
 CLONE_NEWNET = 0x40000000
@@ -180,6 +180,7 @@ EFS_ONLY_OPTIONS = [
     'accesspoint',
     'awscredsuri',
     'awsprofile',
+    'az',
     'cafile',
     'iam',
     'netns',
@@ -819,7 +820,10 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
 
     if config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname'):
         if check_host_supported:
-            efs_config['checkHost'] = dns_name
+            # Stunnel checkHost option checks if the specified DNS host name or wildcard matches any of the provider in peer
+            # certificate's CN fields, after introducing the AZ field in dns name, the host name in the stunnel config file
+            # is not valid, remove the az info there
+            efs_config['checkHost'] = dns_name[dns_name.index(fs_id):]
         else:
             fatal_error(tls_controls_message % 'stunnel_check_cert_hostname')
 
@@ -1453,7 +1457,7 @@ def bootstrap_logging(config, log_dir=LOG_DIR):
         logging.error('Malformed logging level "%s", setting logging level to %s', raw_level, level)
 
 
-def get_dns_name(config, fs_id):
+def get_dns_name(config, fs_id, options):
     def _validate_replacement_field_count(format_str, expected_ct):
         if format_str.count('{') != expected_ct or format_str.count('}') != expected_ct:
             raise ValueError('DNS name format has an incorrect number of replacement fields')
@@ -1466,6 +1470,14 @@ def get_dns_name(config, fs_id):
     format_args = {'fs_id': fs_id}
 
     expected_replacement_field_ct = 1
+
+    if '{az}' in dns_name_format:
+        az = options.get('az')
+        if az:
+            expected_replacement_field_ct += 1
+            format_args['az'] = az
+        else:
+            dns_name_format = dns_name_format.replace('{az}.', '')
 
     if '{region}' in dns_name_format:
         expected_replacement_field_ct += 1
@@ -2150,7 +2162,7 @@ def main():
     init_system = get_init_system()
     check_network_status(fs_id, init_system)
 
-    dns_name = get_dns_name(config, fs_id)
+    dns_name = get_dns_name(config, fs_id, options)
 
     if 'tls' in options:
         mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options)

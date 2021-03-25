@@ -20,6 +20,7 @@ except ImportError:
 
 FS_ID = 'fs-deadbeef'
 DNS_NAME = 'fs-deadbeef.com'
+DNS_NAME_WITH_AZ = 'us-east-1a.fs-deadbeef.com'
 MOUNT_POINT = '/mnt'
 PORT = 12345
 VERIFY_LEVEL = 2
@@ -106,7 +107,7 @@ def _get_expected_efs_config(port=PORT, dns_name=DNS_NAME, verify=mount_efs.DEFA
     expected_efs_config['verify'] = str(verify)
 
     if check_cert_hostname:
-        expected_efs_config['checkHost'] = dns_name
+        expected_efs_config['checkHost'] = dns_name[dns_name.index(FS_ID):]
 
     if check_cert_validity and ocsp_override:
         expected_efs_config['OCSPaia'] = 'yes'
@@ -155,6 +156,17 @@ def _test_write_stunnel_config_file(mocker, tmpdir):
     utils.assert_called_once(ca_mocker)
 
     _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG, _get_expected_efs_config())
+
+
+def _test_write_stunnel_config_file_with_az_as_dns_name(mocker, tmpdir):
+    ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
+    state_file_dir = str(tmpdir)
+
+    config_file = mount_efs.write_stunnel_config_file(_get_config(mocker), state_file_dir, FS_ID, MOUNT_POINT, PORT,
+                                                      DNS_NAME_WITH_AZ, VERIFY_LEVEL, OCSP_ENABLED, _get_mount_options())
+    utils.assert_called_once(ca_mocker)
+
+    _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG, _get_expected_efs_config(dns_name=DNS_NAME_WITH_AZ))
 
 
 def _test_disable_libwrap(mocker, tmpdir, system_release='unknown', disable_libwrap=True):
