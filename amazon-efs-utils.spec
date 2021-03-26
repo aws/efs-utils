@@ -31,7 +31,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.30.1
+Version   : 1.29.1
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -131,10 +131,6 @@ fi
 %clean
 
 %changelog
-* Mon Mar 22 2021 Yuan Gao <ygaochn@amazon.com> - 1.30.1
-- Support new option: az, enable mount file system to specific availability zone mount target
-- Merge PR #84 on Github. Fix to use regional AWS STS endpoints instead of the global endpoint to reduce latency
-
 * Mon Jan 25 2021 Yuan Gao <ygaochn@amazon.com> - 1.29.1
 - Update the python dependency to python3
 - Support SLES and OpenSUSE
