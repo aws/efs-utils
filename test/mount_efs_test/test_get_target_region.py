@@ -79,7 +79,7 @@ def get_config(dns_name_format, region=None):
 
 
 def get_target_region_helper():
-    config = get_config('{fs_id}.efs.{region}.{dns_name_suffix}')
+    config = get_config('{az}.{fs_id}.efs.{region}.{dns_name_suffix}')
     return mount_efs.get_target_region(config)
 
 
@@ -184,7 +184,7 @@ def test_get_target_region_missing_region(mocker, capsys):
 Get target region from configuration file
 """
 def test_get_target_region_from_config_variable(mocker):
-    config = get_config('{fs_id}.efs.us-east-2.{dns_name_suffix}', TARGET_REGION)
+    config = get_config('{az}.{fs_id}.efs.us-east-2.{dns_name_suffix}', TARGET_REGION)
     assert TARGET_REGION == mount_efs.get_target_region(config)
 
 
@@ -195,11 +195,11 @@ def _test_get_target_region_from_dns_format(mocker, config):
 
 
 def test_get_target_region_from_legacy_dns_name_format(mocker):
-    config = get_config('{fs_id}.efs.us-east-1.amazonaws.com')
+    config = get_config('{az}.{fs_id}.efs.us-east-1.amazonaws.com')
     _test_get_target_region_from_dns_format(mocker, config)
 
 
 def test_get_target_region_from_suffixed_dns_name_format(mocker):
-    config = get_config('{fs_id}.efs.us-east-1.{dns_name_suffix}')
+    config = get_config('{az}.{fs_id}.efs.us-east-1.{dns_name_suffix}')
     config.set(mount_efs.CONFIG_SECTION, 'dns_name_suffix', DNS_NAME_SUFFIX)
     _test_get_target_region_from_dns_format(mocker, config)

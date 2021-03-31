@@ -78,7 +78,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = '1.29.1'
+VERSION = '1.30.1'
 SERVICE = 'elasticfilesystem'
 
 CLONE_NEWNET = 0x40000000
@@ -154,7 +154,8 @@ SIGNED_HEADERS = ';'.join(CANONICAL_HEADERS_DICT.keys())
 REQUEST_PAYLOAD = ''
 
 FS_ID_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)$')
-EFS_FQDN_RE = re.compile(r'^(?P<fs_id>fs-[0-9a-f]+)\.efs\.(?P<region>[a-z0-9-]+)\.(?P<dns_name_suffix>[a-z0-9.]+)$')
+EFS_FQDN_RE = re.compile(r'^((?P<az>[a-z0-9-]+)\.)?(?P<fs_id>fs-[0-9a-f]+)\.efs\.'
+                         r'(?P<region>[a-z0-9-]+)\.(?P<dns_name_suffix>[a-z0-9.]+)$')
 AP_ID_RE = re.compile('^fsap-[0-9a-f]{17}$')
 
 CREDENTIALS_KEYS = ['AccessKeyId', 'SecretAccessKey', 'Token']
@@ -180,6 +181,7 @@ EFS_ONLY_OPTIONS = [
     'accesspoint',
     'awscredsuri',
     'awsprofile',
+    'az',
     'cafile',
     'iam',
     'netns',
@@ -696,12 +698,14 @@ def serialize_stunnel_config(config, header=None):
     return lines
 
 
-def add_stunnel_ca_options(efs_config, config, options):
+def add_stunnel_ca_options(efs_config, config, options, region):
     if 'cafile' in options:
         stunnel_cafile = options['cafile']
     else:
         try:
-            stunnel_cafile = config.get(CONFIG_SECTION, 'stunnel_cafile')
+            config_section = get_config_section(config, region)
+            stunnel_cafile = config.get(config_section, 'stunnel_cafile')
+            logging.debug("Using stunnel_cafile %s in config section [%s]", stunnel_cafile, config_section)
         except NoOptionError:
             logging.debug('No CA file configured, using default CA file %s', DEFAULT_STUNNEL_CAFILE)
             stunnel_cafile = DEFAULT_STUNNEL_CAFILE
@@ -711,6 +715,15 @@ def add_stunnel_ca_options(efs_config, config, options):
                     'Failed to find CAfile "%s"' % stunnel_cafile)
 
     efs_config['CAfile'] = stunnel_cafile
+
+
+def get_config_section(config, region):
+    region_specific_config_section = '%s.%s' % (CONFIG_SECTION, region)
+    if config.has_section(region_specific_config_section):
+        config_section = region_specific_config_section
+    else:
+        config_section = CONFIG_SECTION
+    return config_section
 
 
 def is_stunnel_option_supported(stunnel_output, stunnel_option_name):
@@ -779,7 +792,7 @@ def get_system_release_version():
 
 
 def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level, ocsp_enabled,
-                              options, log_dir=LOG_DIR, cert_details=None):
+                              options, region, log_dir=LOG_DIR, cert_details=None):
     """
     Serializes stunnel configuration to a file. Unfortunately this does not conform to Python's config file format, so we have to
     hand-serialize it.
@@ -805,7 +818,7 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
     efs_config['connect'] = efs_config['connect'] % dns_name
     efs_config['verify'] = verify_level
     if verify_level > 0:
-        add_stunnel_ca_options(efs_config, config, options)
+        add_stunnel_ca_options(efs_config, config, options, region)
 
     if cert_details:
         efs_config['cert'] = cert_details['certificate']
@@ -819,7 +832,10 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
 
     if config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname'):
         if check_host_supported:
-            efs_config['checkHost'] = dns_name
+            # Stunnel checkHost option checks if the specified DNS host name or wildcard matches any of the provider in peer
+            # certificate's CN fields, after introducing the AZ field in dns name, the host name in the stunnel config file
+            # is not valid, remove the az info there
+            efs_config['checkHost'] = dns_name[dns_name.index(fs_id):]
         else:
             fatal_error(tls_controls_message % 'stunnel_check_cert_hostname')
 
@@ -1011,6 +1027,7 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
     cert_details['mountStateDir'] = get_mount_specific_filename(fs_id, mountpoint, tls_port) + '+'
     # common name for certificate signing request is max 64 characters
     cert_details['commonName'] = socket.gethostname()[0:64]
+    region = get_target_region(config)
     cert_details['region'] = region
     cert_details['certificateCreationTime'] = create_certificate(config, cert_details['mountStateDir'],
                                                                  cert_details['commonName'], cert_details['region'], fs_id,
@@ -1029,7 +1046,7 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
     ocsp_enabled = is_ocsp_enabled(config, options)
 
     stunnel_config_file = write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level,
-                                                    ocsp_enabled, options, cert_details=cert_details)
+                                                    ocsp_enabled, options, region, cert_details=cert_details)
     tunnel_args = [_stunnel_bin(), stunnel_config_file]
     if 'netns' in options:
         tunnel_args = ['nsenter', '--net=' + options['netns']] + tunnel_args
@@ -1186,9 +1203,11 @@ def parse_arguments(config, args=None):
     if not fsname or not mountpoint:
         usage(out=sys.stderr)
 
-    fs_id, path = match_device(config, fsname)
+    # We treat az as an option when customer is using dns name of az mount target to mount,
+    # even if they don't provide az with option, we update the options with that info
+    fs_id, path, az = match_device(config, fsname, options)
 
-    return fs_id, path, mountpoint, options
+    return fs_id, path, mountpoint, add_field_in_options(options, 'az', az)
 
 
 def get_client_info(config):
@@ -1453,7 +1472,7 @@ def bootstrap_logging(config, log_dir=LOG_DIR):
         logging.error('Malformed logging level "%s", setting logging level to %s', raw_level, level)
 
 
-def get_dns_name(config, fs_id):
+def get_dns_name(config, fs_id, options):
     def _validate_replacement_field_count(format_str, expected_ct):
         if format_str.count('{') != expected_ct or format_str.count('}') != expected_ct:
             raise ValueError('DNS name format has an incorrect number of replacement fields')
@@ -1467,6 +1486,14 @@ def get_dns_name(config, fs_id):
 
     expected_replacement_field_ct = 1
 
+    if '{az}' in dns_name_format:
+        az = options.get('az')
+        if az:
+            expected_replacement_field_ct += 1
+            format_args['az'] = az
+        else:
+            dns_name_format = dns_name_format.replace('{az}.', '')
+
     if '{region}' in dns_name_format:
         expected_replacement_field_ct += 1
         format_args['region'] = get_target_region(config)
@@ -1477,9 +1504,7 @@ def get_dns_name(config, fs_id):
         region = format_args.get('region')
 
         if region:
-            region_specific_config_section = '%s.%s' % (CONFIG_SECTION, region)
-            if config.has_section(region_specific_config_section):
-                config_section = region_specific_config_section
+            config_section = get_config_section(config, region)
 
         format_args['dns_name_suffix'] = config.get(config_section, 'dns_name_suffix')
 
@@ -1650,8 +1675,8 @@ def get_credential_scope(date, region):
     return '/'.join([date.strftime(DATE_ONLY_FORMAT), region, SERVICE, AWS4_REQUEST])
 
 
-def match_device(config, device):
-    """Return the EFS id and the remote path to mount"""
+def match_device(config, device, options):
+    """Return the EFS id, the remote path, and the az to mount"""
 
     try:
         remote, path = device.split(':', 1)
@@ -1660,7 +1685,7 @@ def match_device(config, device):
         path = '/'
 
     if FS_ID_RE.match(remote):
-        return remote, path
+        return remote, path, None
 
     try:
         primary, secondaries, _ = socket.gethostbyname_ex(remote)
@@ -1683,17 +1708,30 @@ def match_device(config, device):
         efs_fqdn_match = EFS_FQDN_RE.match(hostname)
 
         if efs_fqdn_match:
+            az = efs_fqdn_match.group('az')
             fs_id = efs_fqdn_match.group('fs_id')
-            expected_dns_name = get_dns_name(config, fs_id)
+
+            if az and 'az' in options and az != options['az']:
+                fatal_error(
+                    'The hostname "%s" resolved by the specified domain name "%s" does not match the az provided in the '
+                    'mount options, expected = %s, given = %s' % (hostname, remote, options['az'], az))
+
+            expected_dns_name = get_dns_name(config, fs_id, add_field_in_options(options, 'az', az))
 
             # check that the DNS name of the mount target matches exactly the DNS name the CNAME resolves to
             if hostname == expected_dns_name:
-                return fs_id, path
+                return fs_id, path, az
     else:
         create_default_cloudwatchlog_agent_if_not_exist(config)
         fatal_error('The specified CNAME "%s" did not resolve to a valid DNS name for an EFS mount target. '
                     'Please refer to the EFS documentation for mounting with DNS names for examples: %s'
                     % (remote, 'https://docs.aws.amazon.com/efs/latest/ug/mounting-fs-mount-cmd-dns-name.html'))
+
+
+def add_field_in_options(options, field_key, field_value):
+    if field_value and field_key not in options:
+        options[field_key] = field_value
+    return options
 
 
 def is_nfs_mount(mountpoint):
@@ -2150,7 +2188,7 @@ def main():
     init_system = get_init_system()
     check_network_status(fs_id, init_system)
 
-    dns_name = get_dns_name(config, fs_id)
+    dns_name = get_dns_name(config, fs_id, options)
 
     if 'tls' in options:
         mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options)

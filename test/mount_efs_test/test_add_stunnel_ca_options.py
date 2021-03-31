@@ -18,6 +18,9 @@ except ImportError:
 
 CAPATH = '/capath'
 CAFILE = '/cafile.crt'
+DEFAULT_REGION = 'us-east-1'
+ISOLATED_REGION = 'us-iso-east-1'
+ISOLATED_REGION_STUNNEL_CAFILE = '/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem'
 
 
 def _get_config():
@@ -39,7 +42,7 @@ def test_use_existing_cafile(tmpdir):
     options = {'cafile': str(_create_temp_file(tmpdir))}
     efs_config = {}
 
-    mount_efs.add_stunnel_ca_options(efs_config, _get_config(), options)
+    mount_efs.add_stunnel_ca_options(efs_config, _get_config(), options, DEFAULT_REGION)
 
     assert options['cafile'] == efs_config.get('CAfile')
     assert 'CApath' not in efs_config
@@ -50,7 +53,7 @@ def test_use_missing_cafile(capsys):
     efs_config = {}
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.add_stunnel_ca_options(efs_config, _get_config(), options)
+        mount_efs.add_stunnel_ca_options(efs_config, _get_config(), options, DEFAULT_REGION)
 
     assert 0 != ex.value.code
 
@@ -64,7 +67,7 @@ def test_stunnel_cafile_configuration_in_option(mocker):
 
     mocker.patch('os.path.exists', return_value=True)
 
-    mount_efs.add_stunnel_ca_options(efs_config, _get_config(), options)
+    mount_efs.add_stunnel_ca_options(efs_config, _get_config(), options, DEFAULT_REGION)
 
     assert CAFILE == efs_config.get('CAfile')
 
@@ -78,7 +81,7 @@ def test_stunnel_cafile_configuration_in_config(mocker):
 
     mocker.patch('os.path.exists', return_value=True)
 
-    mount_efs.add_stunnel_ca_options(efs_config, config, options)
+    mount_efs.add_stunnel_ca_options(efs_config, config, options, DEFAULT_REGION)
 
     assert CAFILE == efs_config.get('CAfile')
 
@@ -89,6 +92,23 @@ def test_stunnel_cafile_not_configured(mocker):
 
     mocker.patch('os.path.exists', return_value=True)
 
-    mount_efs.add_stunnel_ca_options(efs_config, _get_config(), options)
+    mount_efs.add_stunnel_ca_options(efs_config, _get_config(), options, DEFAULT_REGION)
 
     assert mount_efs.DEFAULT_STUNNEL_CAFILE == efs_config.get('CAfile')
+
+
+def test_stunnel_cafile_configured_in_mount_region_section(mocker):
+    options = {}
+    efs_config = {}
+
+    config = _get_config()
+    config.set(mount_efs.CONFIG_SECTION, 'stunnel_cafile', CAFILE)
+    config_section = '%s.%s' % (mount_efs.CONFIG_SECTION, ISOLATED_REGION)
+    config.add_section(config_section)
+    config.set(config_section, 'stunnel_cafile', ISOLATED_REGION_STUNNEL_CAFILE)
+    
+    mocker.patch('os.path.exists', return_value=True)
+
+    mount_efs.add_stunnel_ca_options(efs_config, config, options, ISOLATED_REGION)
+
+    assert ISOLATED_REGION_STUNNEL_CAFILE == efs_config.get('CAfile')
