@@ -134,20 +134,6 @@ def test_get_dns_name_bad_format_too_many_specifiers_2(mocker):
     assert 'incorrect number' in str(ex.value)
 
 
-def test_get_dns_name_unresolvable(mocker, capsys):
-    config = _get_mock_config()
-
-    mocker.patch('socket.gethostbyname', side_effect=socket.gaierror)
-
-    with pytest.raises(SystemExit) as ex:
-        mount_efs.get_dns_name(config, FS_ID, DEFAULT_NFS_OPTIONS)
-
-    assert 0 != ex.value.code
-
-    out, err = capsys.readouterr()
-    assert 'Failed to resolve' in err
-
-
 def test_get_dns_name_special_region(mocker):
     for special_region in SPECIAL_REGIONS:
         mocker.patch('mount_efs.get_target_region', return_value=special_region)

@@ -1514,14 +1514,16 @@ def get_dns_name(config, fs_id, options):
 
     dns_name = dns_name_format.format(**format_args)
 
+    return dns_name
+
+
+def validate_dns_resolves(dns_name):
     try:
         socket.gethostbyname(dns_name)
     except socket.gaierror:
         fatal_error('Failed to resolve "%s" - check that your file system ID is correct.\nSee %s for more detail.'
                     % (dns_name, 'https://docs.aws.amazon.com/console/efs/mount-dns-name'),
                     'Failed to resolve "%s"' % dns_name)
-
-    return dns_name
 
 
 def tls_paths_dictionary(mount_name, base_path=STATE_FILE_DIR):
@@ -1717,6 +1719,7 @@ def match_device(config, device, options):
                     'mount options, expected = %s, given = %s' % (hostname, remote, options['az'], az))
 
             expected_dns_name = get_dns_name(config, fs_id, add_field_in_options(options, 'az', az))
+            validate_dns_resolves(expected_dns_name)
 
             # check that the DNS name of the mount target matches exactly the DNS name the CNAME resolves to
             if hostname == expected_dns_name:
@@ -2189,6 +2192,7 @@ def main():
     check_network_status(fs_id, init_system)
 
     dns_name = get_dns_name(config, fs_id, options)
+    validate_dns_resolves(dns_name)
 
     if 'tls' in options:
         mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options)
