@@ -210,6 +210,25 @@ man mount.efs
 
 or refer to the [documentation](https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html).
 
+### MacOS 
+
+For EC2 instances using Mac distribution, the recommended default options will perform a tls mount:
+
+```
+$ sudo mount -t efs file-system-id efs-mount-point/
+```
+ or
+```
+$ sudo mount -t efs -o tls file-system-id efs-mount-point/
+```
+
+To mount without TLS, simply add the `notls` option:
+
+```
+$ sudo mount -t efs -o notls file-system-id efs-mount-point/
+```
+
+
 ### amazon-efs-mount-watchdog
 
 `efs-utils` contains a watchdog process to monitor the health of TLS mounts. This process is managed by either `upstart` or `systemd` depending on your Linux distribution and `launchd` on Mac distribution, and is started automatically the first time an EFS file system is mounted over TLS.
@@ -313,6 +332,36 @@ Attach AWS managed policy `AmazonElasticFileSystemsUtils` to the iam role you at
 configured on your instance.
 
 After completing the three prerequisite steps, you will be able to see mount status notifications in CloudWatch Logs.
+
+## Optimize readahead max window size on Linux 5.4+
+
+A change in the Linux kernel 5.4+ results a throughput regression on NFS client. With [patch](https://www.spinics.net/lists/linux-nfs/msg75018.html), starting from 5.4.\*, Kernels containing this patch now set the default read_ahead_kb size to 128 KB instead of the previous 15 MB. This read_ahead_kb is used by the Linux kernel to optimize performance on NFS read requests by defining the maximum amount of data an NFS client can pre-fetch in a read call. With the reduced value, an NFS client has to make more read calls to the file system, resulting in reduced performance.
+
+To avoid above throughput regression, efs-utils will modify read_ahead_kb to 15 \* rsize (could be configured via mount option, 1MB by default) after mount success on Linux 5.4+. (not support on MacOS)
+
+This optimization will be enabled by default. To disable this optimization:
+
+```bash
+sed -i "s/optimize_readahead = false/optimize_readahead = true/" /etc/amazon/efs/efs-utils.conf
+```
+
+To re-enable this optimization
+
+```bash
+sed -i "s/optimize_readahead = true/optimize_readahead = false/" /etc/amazon/efs/efs-utils.conf
+```
+
+You can mount file system with a given rsize, run:
+
+```bash
+$ sudo mount -t efs -o rsize=rsize-value-in-bytes file-system-id efs-mount-point/
+```
+
+You can also manually chose a value of read_ahead_kb to optimize read throughput on Linux 5.4+ after mount.
+
+```bash
+$ sudo bash -c "echo read-ahead-value-in-kb > /sys/class/bdi/0:$(stat -c '%d' efs-mount-point)/read_ahead_kb"
+```
 
 ## License Summary
 

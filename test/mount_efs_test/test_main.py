@@ -34,10 +34,13 @@ def dummy_contextmanager(*args, **kwargs):
 
 
 def _test_main(mocker, tls=False, root=True, ap_id=None, iam=False, awsprofile=None, ocsp=False, noocsp=False, port=None,
-               tlsport=None, awscredsuri=None):
+               tlsport=None, awscredsuri=None, notls=False):
     options = {}
+
     if tls:
         options['tls'] = None
+    if notls:
+        options['notls'] = None
     if ap_id is not None:
         options['accesspoint'] = ap_id
     if iam:
@@ -64,6 +67,7 @@ def _test_main(mocker, tls=False, root=True, ap_id=None, iam=False, awsprofile=N
     get_dns_mock = mocker.patch('mount_efs.get_dns_name')
     parse_arguments_mock = mocker.patch('mount_efs.parse_arguments', return_value=('fs-deadbeef', '/', '/mnt', options))
     bootstrap_tls_mock = mocker.patch('mount_efs.bootstrap_tls', side_effect=dummy_contextmanager)
+
     if tls:
         mocker.patch('mount_efs.verify_tlsport_can_be_connected', return_value=True)
     mount_mock = mocker.patch('mount_efs.mount_nfs')
@@ -214,3 +218,12 @@ def test_main_supported_macos(mocker):
     mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
     mocker.patch('mount_efs.check_if_mac_version_is_supported', return_value=True)
     _test_main(mocker, tls=True, tlsport=TLS_PORT)
+
+def test_main_tls_notls_option(mocker):
+    mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
+    mocker.patch('mount_efs.check_if_mac_version_is_supported', return_value=True)
+    _test_main(mocker, notls=True)
+
+def test_main_tls_ocsp_and_noocsp_option(mocker, capsys):
+    expected_err = 'The "tls" and "notls" options are mutually exclusive'
+    _test_main_assert_error(mocker, capsys, expected_err, tls=True, tlsport=TLS_PORT, notls=True)

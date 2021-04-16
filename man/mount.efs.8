@@ -39,6 +39,7 @@ hard
 timeo=600
 retrans=2
 noresvport
+tls (for Mac distributions)
 .fi
 .if n \{\
 .RE
@@ -69,6 +70,10 @@ options:
 .TP
 \fBtls\fR
 Mounts the EFS file system over TLS\&.
+.TP
+\fBnotls\fR
+Mounts the EFS file system without TLS. For EC2 instances using Mac distributions, \
+the default mount command mounts the EFS file system over TLS.\&.
 .TP
 \fBtlsport=\fR\fIn\fR
 Configure the TLS relay to listen on the specified port\&.

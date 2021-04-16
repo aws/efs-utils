@@ -48,7 +48,7 @@ except ImportError:
     from urllib import urlencode
 
 
-VERSION = '1.30.1'
+VERSION = '1.30.2'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -56,6 +56,7 @@ CONFIG_SECTION = 'mount-watchdog'
 CLIENT_INFO_SECTION = 'client-info'
 CLIENT_SOURCE_STR_LEN_LIMIT = 100
 DEFAULT_UNKNOWN_VALUE = 'unknown'
+DEFAULT_MACOS_VALUE = 'macos'
 
 LOG_DIR = '/var/log/amazon/efs'
 LOG_FILE = 'mount-watchdog.log'
@@ -717,7 +718,10 @@ def get_client_info(config):
         if 0 < len(client_source) <= CLIENT_SOURCE_STR_LEN_LIMIT:
             client_info['source'] = client_source
     if not client_info.get('source'):
-        client_info['source'] = DEFAULT_UNKNOWN_VALUE
+        if check_if_running_on_macos():
+            client_info['source'] = DEFAULT_MACOS_VALUE
+        else:
+            client_info['source'] = DEFAULT_UNKNOWN_VALUE
 
     client_info['efs_utils_version'] = VERSION
 

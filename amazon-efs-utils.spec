@@ -31,7 +31,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.30.1
+Version   : 1.30.2
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -131,6 +131,9 @@ fi
 %clean
 
 %changelog
+* Thu Apr 15 2021 Yue Wang <wangnyue@amazon.com> - 1.30.2
+- Fix the throughput regression due to read_ahead configuration change on Linux distribution with kernel version 5.4.x and above
+
 * Mon Mar 22 2021 Yuan Gao <ygaochn@amazon.com> - 1.30.1
 - Support new option: az, enable mount file system to specific availability zone mount target
 - Merge PR #84 on Github. Fix to use regional AWS STS endpoints instead of the global endpoint to reduce latency

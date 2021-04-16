@@ -51,8 +51,9 @@ def _mock_popen(mocker, returncode=0, stdout='stdout', stderr='stderr'):
 
 def test_mount_nfs(mocker):
     mock = _mock_popen(mocker)
+    optimize_readahead_window_mock = mocker.patch('mount_efs.optimize_readahead_window')
 
-    mount_efs.mount_nfs(DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
+    mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
 
     args, _ = mock.call_args
     args = args[0]
@@ -61,14 +62,17 @@ def test_mount_nfs(mocker):
     assert DNS_NAME in args[NFS_MOUNT_PATH_IDX]
     assert '/mnt' == args[NFS_MOUNT_POINT_IDX]
 
+    utils.assert_called_once(optimize_readahead_window_mock)
+
 
 def test_mount_nfs_tls(mocker):
     mock = _mock_popen(mocker)
+    optimize_readahead_window_mock = mocker.patch('mount_efs.optimize_readahead_window')
 
     options = dict(DEFAULT_OPTIONS)
     options['tls'] = None
 
-    mount_efs.mount_nfs(DNS_NAME, '/', '/mnt', options)
+    mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', options)
 
     args, _ = mock.call_args
     args = args[0]
@@ -76,24 +80,30 @@ def test_mount_nfs_tls(mocker):
     assert DNS_NAME not in args[NFS_MOUNT_PATH_IDX]
     assert '127.0.0.1' in args[NFS_MOUNT_PATH_IDX]
 
+    utils.assert_called_once(optimize_readahead_window_mock)
+
 
 def test_mount_nfs_failure(mocker):
     _mock_popen(mocker, returncode=1)
+    optimize_readahead_window_mock = mocker.patch('mount_efs.optimize_readahead_window')
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.mount_nfs(DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
+        mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
 
     assert 0 != ex.value.code
+
+    utils.assert_not_called(optimize_readahead_window_mock)
 
 
 def test_mount_nfs_tls_netns(mocker):
     mock = _mock_popen(mocker)
+    optimize_readahead_window_mock = mocker.patch('mount_efs.optimize_readahead_window')
 
     options = dict(DEFAULT_OPTIONS)
     options['tls'] = None
     options['netns'] = NETNS
 
-    mount_efs.mount_nfs(DNS_NAME, '/', '/mnt', options)
+    mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', options)
 
     args, _ = mock.call_args
     args = args[0]
@@ -105,12 +115,15 @@ def test_mount_nfs_tls_netns(mocker):
     assert '127.0.0.1' in args[NFS_MOUNT_PATH_IDX + NETNS_NFS_OFFSET]
     assert '/mnt' in args[NFS_MOUNT_POINT_IDX + NETNS_NFS_OFFSET]
 
+    utils.assert_called_once(optimize_readahead_window_mock)
+
 
 def test_mount_tls_mountpoint_mounted_with_nfs(mocker, capsys):
     options = dict(DEFAULT_OPTIONS)
     options['tls'] = None
 
     bootstrap_tls_mock = mocker.patch('mount_efs.bootstrap_tls')
+    optimize_readahead_window_mock = mocker.patch('mount_efs.optimize_readahead_window')
     mocker.patch('os.path.ismount', return_value=True)
     _mock_popen(mocker, stdout='nfs')
     mount_efs.mount_tls(CONFIG, INIT_SYSTEM, DNS_NAME, PATH, FS_ID, MOUNT_POINT, options)
@@ -118,12 +131,15 @@ def test_mount_tls_mountpoint_mounted_with_nfs(mocker, capsys):
     assert 'is already mounted' in out
     utils.assert_not_called(bootstrap_tls_mock)
 
+    utils.assert_not_called(optimize_readahead_window_mock)
+
 
 def test_mount_nfs_macos(mocker):
     mock = _mock_popen(mocker)
     mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
+    optimize_readahead_window_mock = mocker.patch('mount_efs.optimize_readahead_window')
     DEFAULT_OPTIONS['nfsvers'] = 4.0
-    mount_efs.mount_nfs(DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
+    mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
 
     args, _ = mock.call_args
     args = args[0]
@@ -132,18 +148,22 @@ def test_mount_nfs_macos(mocker):
     assert DNS_NAME in args[-2]
     assert '/mnt' == args[-1]
 
+    utils.assert_called_once(optimize_readahead_window_mock)
 
 def test_mount_nfs_tls_macos(mocker):
     mock = _mock_popen(mocker)
     mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
+    optimize_readahead_window_mock = mocker.patch('mount_efs.optimize_readahead_window')
     DEFAULT_OPTIONS['nfsvers'] = 4.0
     options = dict(DEFAULT_OPTIONS)
     options['tls'] = None
 
-    mount_efs.mount_nfs(DNS_NAME, '/', '/mnt', options)
+    mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', options)
 
     args, _ = mock.call_args
     args = args[0]
 
     assert DNS_NAME not in args[NFS_MOUNT_PATH_IDX_MACOS]
     assert '127.0.0.1' in args[NFS_MOUNT_PATH_IDX_MACOS]
+
+    utils.assert_called_once(optimize_readahead_window_mock)

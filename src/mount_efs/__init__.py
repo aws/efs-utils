@@ -78,7 +78,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = '1.30.1'
+VERSION = '1.30.2'
 SERVICE = 'elasticfilesystem'
 
 CLONE_NEWNET = 0x40000000
@@ -92,6 +92,7 @@ CLOUDWATCH_LOG_SECTION = 'cloudwatch-log'
 DEFAULT_CLOUDWATCH_LOG_GROUP = '/aws/efs/utils'
 DEFAULT_RETENTION_DAYS = 14
 DEFAULT_UNKNOWN_VALUE = 'unknown'
+DEFAULT_MACOS_VALUE = 'macos'
 
 LOG_DIR = '/var/log/amazon/efs'
 LOG_FILE = 'mount.log'
@@ -186,6 +187,7 @@ EFS_ONLY_OPTIONS = [
     'iam',
     'netns',
     'noocsp',
+    'notls',
     'ocsp',
     'tls',
     'tlsport',
@@ -231,6 +233,12 @@ MACOS_BIG_SUR_RELEASE = 'macOS-11'
 
 SKIP_NO_LIBWRAP_RELEASES = [RHEL8_RELEASE_NAME, CENTOS8_RELEASE_NAME, FEDORA_RELEASE_NAME, OPEN_SUSE_LEAP_RELEASE_NAME,
                             SUSE_RELEASE_NAME, MACOS_BIG_SUR_RELEASE]
+
+# Multiplier for max read ahead buffer size
+# Set default as 15 aligning with prior linux kernel 5.4
+DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER = 15
+NFS_READAHEAD_CONFIG_PATH_FORMAT = '/sys/class/bdi/0:%s/read_ahead_kb'
+NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION = [5, 4]
 
 # MacOS does not support the property of Socket SO_BINDTODEVICE in stunnel configuration
 SKIP_NO_SO_BINDTODEVICE_RELEASES = [MACOS_BIG_SUR_RELEASE]
@@ -1126,7 +1134,7 @@ def get_nfs_mount_options(options):
     return ','.join(nfs_options)
 
 
-def mount_nfs(dns_name, path, mountpoint, options):
+def mount_nfs(config, dns_name, path, mountpoint, options):
 
     if 'tls' in options:
         mount_path = '127.0.0.1:%s' % path
@@ -1150,6 +1158,9 @@ def mount_nfs(dns_name, path, mountpoint, options):
         message = 'Successfully mounted %s at %s' % (dns_name, mountpoint)
         logging.info(message)
         publish_cloudwatch_log(CLOUDWATCHLOG_AGENT, message)
+
+        # only perform readahead optimize after mount succeed
+        optimize_readahead_window(mountpoint, options, config)
     else:
         message = 'Failed to mount %s at %s: returncode=%d, stderr="%s"' % (dns_name, mountpoint, proc.returncode, err.strip())
         fatal_error(err.strip(), message, proc.returncode)
@@ -1219,7 +1230,10 @@ def get_client_info(config):
         if 0 < len(client_source) <= CLIENT_SOURCE_STR_LEN_LIMIT:
             client_info['source'] = client_source
     if not client_info.get('source'):
-        client_info['source'] = DEFAULT_UNKNOWN_VALUE
+        if check_if_platform_is_mac():
+            client_info['source'] = DEFAULT_MACOS_VALUE
+        else:
+            client_info['source'] = DEFAULT_UNKNOWN_VALUE
 
     client_info['efs_utils_version'] = VERSION
 
@@ -1764,7 +1778,7 @@ def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
         t = threading.Thread(target=poll_tunnel_process, args=(tunnel_proc, fs_id, mount_completed))
         t.daemon = True
         t.start()
-        mount_nfs(dns_name, path, mountpoint, options)
+        mount_nfs(config, dns_name, path, mountpoint, options)
         mount_completed.set()
         t.join()
 
@@ -1808,6 +1822,9 @@ def check_options_validity(options):
 
         if 'ocsp' in options and 'noocsp' in options:
             fatal_error('The "ocsp" and "noocsp" options are mutually exclusive')
+
+        if 'notls' in options:
+            fatal_error('The "tls" and "notls" options are mutually exclusive')
 
     if 'accesspoint' in options:
         if 'tls' not in options:
@@ -2164,6 +2181,61 @@ def handle_general_botocore_exceptions(error):
         logging.debug('Unexpected error: %s' % error)
 
 
+# A change in the Linux kernel 5.4+ results a throughput regression on NFS client.
+# With patch (https://bugzilla.kernel.org/show_bug.cgi?id=204939), starting from 5.4.*,
+# Linux NFS client is using a fixed default value of 128K as read_ahead_kb.
+# Before this patch, the read_ahead_kb equation is (NFS_MAX_READAHEAD) 15 * (client configured read size).
+# Thus, with EFS recommendation of rsize (1MB) in mount option,
+# NFS client might see a throughput drop in kernel 5.4+, especially for sequential read.
+# To fix the issue, below function will modify read_ahead_kb to 15 * rsize (1MB by default) after mount.
+def optimize_readahead_window(mountpoint, options, config):
+
+    if not should_revise_readahead(config):
+        return
+
+    fixed_readahead_kb = int(DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER * int(options['rsize']) / 1024)
+    try:
+        # use "stat -c '%d' mountpoint" to get Device number in decimal
+        mountpoint_dev_num = subprocess.check_output(['stat', '-c', '"%d"', mountpoint], universal_newlines=True)
+        # modify read_ahead_kb in /sys/class/bdi/0:[Device Number]/read_ahead_kb
+        subprocess.check_call(
+            'echo %s > %s' % (fixed_readahead_kb, NFS_READAHEAD_CONFIG_PATH_FORMAT % mountpoint_dev_num.strip().strip('"')),
+            shell=True)
+    except subprocess.CalledProcessError as e:
+        logging.warning('failed to modify read_ahead_kb: %s with error %s' % (fixed_readahead_kb, e))
+
+
+# Only modify read_ahead_kb iff
+# 1. 'optimize_readahead' is set to true in efs-utils config file
+# 2. instance platform is linux
+# 3. kernel version of instance is 5.4+
+def should_revise_readahead(config):
+    return config.getboolean(CONFIG_SECTION, 'optimize_readahead') and \
+        platform.system() == 'Linux' and \
+        get_linux_kernel_version(
+            len(NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION)) >= NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION
+
+
+# Parse Linux kernel version from platform.release()
+# Failback to 0.0.0... as invalid version
+# Examples:
+#             platform.release()                Parsed version with desired_length:2
+# RHEL        3.10.0-1160.el7.x86_64            [3, 10]
+# AL2         5.4.105-48.177.amzn2.x86_64       [5, 4]
+# Ubuntu      5.4.0-1038-aws                    [5, 4]
+# OpenSUSE    5.3.18-24.37-default              [5, 3]
+def get_linux_kernel_version(desired_length):
+    version = []
+    try:
+        version = [int(v) for v in platform.release().split('-', 1)[0].split('.')[:desired_length]]
+    except ValueError:
+        logging.warning('Failed to retrieve linux kernel version')
+    # filling 0 at the end
+    for i in range(len(version), desired_length):
+        version.append(0)
+    return version
+
+
 def main():
     parse_arguments_early_exit()
 
@@ -2190,10 +2262,13 @@ def main():
 
     dns_name = get_dns_name(config, fs_id, options)
 
+    if check_if_platform_is_mac() and 'notls' not in options:
+        options['tls'] = None
+
     if 'tls' in options:
         mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options)
     else:
-        mount_nfs(dns_name, path, mountpoint, options)
+        mount_nfs(config, dns_name, path, mountpoint, options)
 
 
 if '__main__' == __name__:
