@@ -2206,14 +2206,24 @@ def optimize_readahead_window(mountpoint, options, config):
 
 
 # Only modify read_ahead_kb iff
-# 1. 'optimize_readahead' is set to true in efs-utils config file
-# 2. instance platform is linux
-# 3. kernel version of instance is 5.4+
+# 1. instance platform is linux
+# 2. kernel version of instance is 5.4+
+# 3. 'optimize_readahead' is set to true in efs-utils config file
 def should_revise_readahead(config):
-    return config.getboolean(CONFIG_SECTION, 'optimize_readahead') and \
-        platform.system() == 'Linux' and \
-        get_linux_kernel_version(
-            len(NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION)) >= NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION
+    if platform.system() != 'Linux':
+        return False
+
+    if get_linux_kernel_version(len(NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION)) \
+            < NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION:
+        return False
+
+    config_item = 'optimize_readahead'
+    if not config.has_option(CONFIG_SECTION, config_item):
+        sys.stdout.write('Warning: config file does not have %s section. You should be able to find a new config file in the '
+                         'same folder as current config file %s. Consider update the new config file to latest config file.'
+                         % (config_item, CONFIG_FILE))
+        return False
+    return config.getboolean(CONFIG_SECTION, config_item)
 
 
 # Parse Linux kernel version from platform.release()
