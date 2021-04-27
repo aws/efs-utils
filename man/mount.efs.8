@@ -3,7 +3,7 @@
 \fBmount\&.efs\fR \- Mount helper for using Amazon EFS file systems\&.
 .SH "SYNOPSIS"
 .sp
-\fBmount\&.efs\fR \fIfs-id-or-dns-name\fR \fImount-point\fR [\fB\-o\fR \fIoptions\fR]
+\fBmount\&.efs\fR \fIefstarget\fR \fImount-point\fR [\fB\-o\fR \fIoptions\fR]
 .SH "DESCRIPTION"
 .sp
 \fBmount\&.efs\fR is part of the \fBamazon\-efs\-utils\fR \
@@ -12,16 +12,19 @@ package, which simplifies using EFS file systems\&.
 \fBmount\&.efs\fR is meant to be used through the \
 \fBmount\fR(8) command for mounting EFS file systems\&.
 .sp
-\fIfs-id-or-dns-name\fR has to be of one of the following \
-two forms:
+\fIefstarget\fR has to be in one of the following \
+forms\&. If the target /path is not provided then / will be used as a default:
 .P
 .IP \(bu
-An EFS filesystem ID in the form of "fs\-abcd1234", generated \
-when the file system is created\&.
+An EFS IP address in form of "1.2.3.4" or "1.2.3.4:/path/to/share"\&.
+.IP \(bu
+An EFS filesystem ID in the form of "fs\-abcd1234" or \
+"fs\-abcd1234:/path/to/share", generated when the file system is created\&.
 .IP \(bu
 A domain name that has a resolvable DNS-CNAME record, \
 which in turn points to a fully-qualified EFS DNS name \
-in the form of "fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com"\&.
+in the form of "fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com" or \
+"fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com:/path/to/share"\&.
 .P
 \fImount-point\fR is the local directory \
 on which the file system will be mounted\&.
@@ -123,6 +126,10 @@ Use the port 2049 to bypass portmapper daemon on EC2 Mac instances running macOS
 .\}
 .SH "EXAMPLES"
 .TP
+sudo mount -t efs 1.2.3.4 /mnt/efs
+Mount an EFS file system with the IP 1.2.3.4 at mount point "/mnt/efs" without \
+encryption of data in transit\&.
+.TP
 sudo mount -t efs fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 "/mnt/efs" without encryption of data in transit\&.
@@ -135,6 +142,10 @@ Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 sudo mount -t efs -o az=us-east-1a fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 "/mnt/efs" to the mount target in availability zone us-east-1a
+.TP
+sudo mount -t efs 1.2.3.4:/child /mnt/efs
+Mount a non-root directory of an EFS file system with the IP 1.2.3.4 at \
+mount point "/mnt/efs" without encryption of data in transit\&.
 .TP
 sudo mount -t efs fs-abcd1234:/child /mnt/efs
 Mount a non-root directory of an EFS file system with file system ID \

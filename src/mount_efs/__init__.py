@@ -155,6 +155,10 @@ SIGNED_HEADERS = ';'.join(CANONICAL_HEADERS_DICT.keys())
 REQUEST_PAYLOAD = ''
 
 FS_ID_RE = re.compile('^(?P<fs_id>fs-[0-9a-f]+)$')
+IP_RE = re.compile('([01]?[0-9]{1,2}|2[0-4][0-9]|25[0-5])\.'
+                   '([01]?[0-9]{1,2}|2[0-4][0-9]|25[0-5])\.'
+                   '([01]?[0-9]{1,2}|2[0-4][0-9]|25[0-5])\.'
+                   '([01]?[0-9]{1,2}|2[0-4][0-9]|25[0-5])')
 EFS_FQDN_RE = re.compile(r'^((?P<az>[a-z0-9-]+)\.)?(?P<fs_id>fs-[0-9a-f]+)\.efs\.'
                          r'(?P<region>[a-z0-9-]+)\.(?P<dns_name_suffix>[a-z0-9.]+)$')
 AP_ID_RE = re.compile('^fsap-[0-9a-f]{17}$')
@@ -686,8 +690,21 @@ def is_ocsp_enabled(config, options):
         return config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_validity')
 
 
-def get_mount_specific_filename(fs_id, mountpoint, tls_port):
-    return '%s.%s.%d' % (fs_id, os.path.abspath(mountpoint).replace(os.sep, '.').lstrip('.'), tls_port)
+def get_mount_specific_filename(fs_id, fs_ip, mountpoint, tls_port):
+    """
+    Return a filename unique to the mountpoint which will be used to contain
+    the stunnel config.
+    """
+    if fs_id:
+        device = fs_id
+    else:
+        device = fs_ip
+
+    return '%s.%s.%d' % (
+        device,
+        os.path.abspath(mountpoint).replace(os.sep, '.').lstrip('.'),
+        tls_port
+    )
 
 
 def serialize_stunnel_config(config, header=None):
@@ -790,7 +807,7 @@ def get_system_release_version():
 
     try:
         with open(OS_RELEASE_PATH) as f:
-            for line in f:
+           for line in f:
                 if 'PRETTY_NAME' in line:
                     return line.split('=')[1].strip()
     except IOError:
@@ -798,15 +815,16 @@ def get_system_release_version():
 
     return DEFAULT_UNKNOWN_VALUE
 
-
-def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level, ocsp_enabled,
-                              options, region, log_dir=LOG_DIR, cert_details=None):
+def write_stunnel_config_file(config, state_file_dir, fs_id, fs_ip, mountpoint,
+                              tls_port, dns_name, verify_level, ocsp_enabled,
+                              options, region, log_dir=LOG_DIR,
+                              cert_details=None):
     """
-    Serializes stunnel configuration to a file. Unfortunately this does not conform to Python's config file format, so we have to
-    hand-serialize it.
+    Serializes stunnel configuration to a file. Unfortunately this does not
+    conform to Python's config file format, so we have to hand-serialize it.
     """
-
-    mount_filename = get_mount_specific_filename(fs_id, mountpoint, tls_port)
+    mount_filename = get_mount_specific_filename(fs_id, fs_ip, mountpoint,
+                                                 tls_port)
 
     system_release_version = get_system_release_version()
     global_config = dict(STUNNEL_GLOBAL_CONFIG)
@@ -817,13 +835,23 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
         global_config['debug'] = 'debug'
 
         if config.has_option(CONFIG_SECTION, 'stunnel_logs_file'):
-            global_config['output'] = config.get(CONFIG_SECTION, 'stunnel_logs_file').replace('{fs_id}', fs_id)
+            if fs_id:
+                device = fs_id
+            else:
+                device = fs_ip
+            global_config['output'] = config.get(
+                CONFIG_SECTION, 'stunnel_logs_file'
+            ).replace('{device}', device)
         else:
-            global_config['output'] = os.path.join(log_dir, '%s.stunnel.log' % mount_filename)
+            global_config['output'] = os.path.join(log_dir, '%s.stunnel.log'
+                                                   % mount_filename)
 
     efs_config = dict(STUNNEL_EFS_CONFIG)
     efs_config['accept'] = efs_config['accept'] % tls_port
-    efs_config['connect'] = efs_config['connect'] % dns_name
+    if dns_name:
+        efs_config['connect'] = efs_config['connect'] % dns_name
+    else:
+        efs_config['connect'] = efs_config['connect'] % fs_ip
     efs_config['verify'] = verify_level
     if verify_level > 0:
         add_stunnel_ca_options(efs_config, config, options, region)
@@ -834,15 +862,19 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
 
     check_host_supported, ocsp_aia_supported = get_version_specific_stunnel_options()
 
-    tls_controls_message = 'WARNING: Your client lacks sufficient controls to properly enforce TLS. Please upgrade stunnel, ' \
-        'or disable "%%s" in %s.\nSee %s for more detail.' % (CONFIG_FILE,
-                                                              'https://docs.aws.amazon.com/console/efs/troubleshooting-tls')
+    tls_controls_message = ('WARNING: Your client lacks sufficient controls to '
+                            'properly enforce TLS. Please upgrade stunnel, or '
+                            'disable "%%s" in %s.\nSee %s for more detail.' %
+                            (CONFIG_FILE,
+                             'https://docs.aws.amazon.com/console/efs/troubleshooting-tls'))
 
-    if config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname'):
+    if (config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname') and
+        not fs_ip):
         if check_host_supported:
-            # Stunnel checkHost option checks if the specified DNS host name or wildcard matches any of the provider in peer
-            # certificate's CN fields, after introducing the AZ field in dns name, the host name in the stunnel config file
-            # is not valid, remove the az info there
+            # Stunnel checkHost option checks if the specified DNS host name or
+            # wildcard matches any of the providers in peer certificate's CN
+            # fields, after introducing the AZ field in dns name, the host name
+            # in the stunnel config file is not valid, remove the az info there
             efs_config['checkHost'] = dns_name[dns_name.index(fs_id):]
         else:
             fatal_error(tls_controls_message % 'stunnel_check_cert_hostname')
@@ -857,10 +889,12 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
     if not any(release in system_release_version for release in SKIP_NO_LIBWRAP_RELEASES):
         efs_config['libwrap'] = 'no'
 
-    stunnel_config = '\n'.join(serialize_stunnel_config(global_config) + serialize_stunnel_config(efs_config, 'efs'))
+    stunnel_config = '\n'.join(serialize_stunnel_config(global_config) +
+                               serialize_stunnel_config(efs_config, 'efs'))
     logging.debug('Writing stunnel configuration:\n%s', stunnel_config)
 
-    stunnel_config_file = os.path.join(state_file_dir, 'stunnel-config.%s' % mount_filename)
+    stunnel_config_file = os.path.join(state_file_dir, 'stunnel-config.%s'
+                                       % mount_filename)
 
     with open(stunnel_config_file, 'w') as f:
         f.write(stunnel_config)
@@ -868,12 +902,16 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_por
     return stunnel_config_file
 
 
-def write_tls_tunnel_state_file(fs_id, mountpoint, tls_port, tunnel_pid, command, files, state_file_dir, cert_details=None):
+def write_tls_tunnel_state_file(fs_id, fs_ip, mountpoint, tls_port, tunnel_pid,
+                                command, files, state_file_dir,
+                                cert_details=None):
     """
-    Return the name of the temporary file containing TLS tunnel state, prefixed with a '~'. This file needs to be renamed to a
-    non-temporary version following a successful mount.
+    Return the name of the temporary file containing TLS tunnel state, prefixed
+    with a '~'. This file needs to be renamed to a non-temporary version
+    following a successful mount.
     """
-    state_file = '~' + get_mount_specific_filename(fs_id, mountpoint, tls_port)
+    state_file = '~' + get_mount_specific_filename(fs_id, fs_ip, mountpoint,
+                                                   tls_port)
 
     state = {
         'pid': tunnel_pid,
@@ -890,23 +928,24 @@ def write_tls_tunnel_state_file(fs_id, mountpoint, tls_port, tunnel_pid, command
     return state_file
 
 
-def test_tunnel_process(tunnel_proc, fs_id):
+def test_tunnel_process(tunnel_proc, device):
     tunnel_proc.poll()
     if tunnel_proc.returncode is not None:
         out, err = tunnel_proc.communicate()
-        fatal_error('Failed to initialize TLS tunnel for %s' % fs_id,
+        fatal_error('Failed to initialize TLS tunnel for %s' % device,
                     'Failed to start TLS tunnel (errno=%d). stdout="%s" stderr="%s"'
                     % (tunnel_proc.returncode, out.strip(), err.strip()))
 
 
-def poll_tunnel_process(tunnel_proc, fs_id, mount_completed):
+def poll_tunnel_process(tunnel_proc, device, mount_completed):
     """
-    poll the tunnel process health every .5s during the mount attempt to fail fast if the tunnel dies - since this is not called
-    from the main thread, if the tunnel fails, exit uncleanly with os._exit
+    Poll the tunnel process health every .5s during the mount attempt to fail
+    fast if the tunnel dies - since this is not called from the main thread, if
+    the tunnel fails, exit uncleanly with os._exit
     """
     while not mount_completed.is_set():
         try:
-            test_tunnel_process(tunnel_proc, fs_id)
+            test_tunnel_process(tunnel_proc, device)
         except SystemExit as e:
             os._exit(e.code)
         mount_completed.wait(.5)
@@ -927,24 +966,32 @@ def get_init_system(comm_file='/proc/1/comm'):
     return init_system
 
 
-def check_network_target(fs_id):
+def check_network_target(device):
     with open(os.devnull, 'w') as devnull:
+        # FIXME: The init_system for macos is launchd so we'll never even arrive
+        # at this fx if we're on a mac...which makes much of the code below
+        # unnecessary. Even if we're not on a mac but still not using systemd,
+        # we'll never arrive here. This whole fx could just be consolidated
+        # into check_network_status() and remove the macos check.
         if not check_if_platform_is_mac():
-            rc = subprocess.call(['systemctl', 'status', 'network.target'], stdout=devnull, stderr=devnull, close_fds=True)
+            rc = subprocess.call(['systemctl', 'status', 'network.target'],
+                                 stdout=devnull, stderr=devnull, close_fds=True)
         else:
-            rc = subprocess.call(['sudo', 'ifconfig', 'en0'], stdout=devnull, stderr=devnull, close_fds=True)
+            rc = subprocess.call(['sudo', 'ifconfig', 'en0'], stdout=devnull,
+                                 stderr=devnull, close_fds=True)
 
     if rc != 0:
-        fatal_error('Failed to mount %s because the network was not yet available, add "_netdev" to your mount options' % fs_id,
-                    exit_code=0)
+        fatal_error('Failed to mount %s because the network was not yet '
+                    'available, add "_netdev" to your mount options'
+                    % device, exit_code=0)
 
 
-def check_network_status(fs_id, init_system):
+def check_network_status(device, init_system):
     if init_system != 'systemd':
         logging.debug('Not testing network on non-systemd init systems')
         return
 
-    check_network_target(fs_id)
+    check_network_target(device)
 
 
 def start_watchdog(init_system):
@@ -1001,12 +1048,17 @@ def create_required_directory(config, directory):
         if errno.EEXIST != e.errno or not os.path.isdir(directory):
             raise
 
-
 @contextmanager
-def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, state_file_dir=STATE_FILE_DIR):
+def bootstrap_tls(config, init_system, dns_name, fs_id, fs_ip, mountpoint,
+                  options, state_file_dir=STATE_FILE_DIR):
+    """
+    Bring up a new stunnel process connected to the requested EFS mount device.
+    Return the process object.
+    """
     tls_port = choose_tls_port(config, options)
-    # override the tlsport option so that we can later override the port the NFS client uses to connect to stunnel.
-    # if the user has specified tlsport=X at the command line this will just re-set tlsport to X.
+    # Override the tlsport option so that we can later override the port the NFS
+    # client uses to connect to stunnel. If the user has specified tlsport=X at
+    # the command line this will just re-set tlsport to X.
     options['tlsport'] = tls_port
 
     use_iam = 'iam' in options
@@ -1023,7 +1075,9 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
         else:
             kwargs = {'awsprofile': get_aws_profile(options, use_iam)}
 
-        security_credentials, credentials_source = get_aws_security_credentials(use_iam, region, **kwargs)
+        security_credentials, credentials_source = get_aws_security_credentials(
+            use_iam, region, **kwargs
+        )
 
         if credentials_source:
             cert_details['awsCredentialsMethod'] = credentials_source
@@ -1032,18 +1086,28 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
         cert_details['accessPoint'] = ap_id
 
     # additional symbol appended to avoid naming collisions
-    cert_details['mountStateDir'] = get_mount_specific_filename(fs_id, mountpoint, tls_port) + '+'
+    cert_details['mountStateDir'] = get_mount_specific_filename(
+        fs_id, fs_ip, mountpoint, tls_port
+    ) + '+'
     # common name for certificate signing request is max 64 characters
     cert_details['commonName'] = socket.gethostname()[0:64]
     region = get_target_region(config)
     cert_details['region'] = region
-    cert_details['certificateCreationTime'] = create_certificate(config, cert_details['mountStateDir'],
-                                                                 cert_details['commonName'], cert_details['region'], fs_id,
-                                                                 security_credentials, ap_id, client_info,
-                                                                 base_path=state_file_dir)
-    cert_details['certificate'] = os.path.join(state_file_dir, cert_details['mountStateDir'], 'certificate.pem')
+
+    cert_details['certificateCreationTime'] = create_certificate(
+        config, cert_details['mountStateDir'], cert_details['commonName'],
+        cert_details['region'], fs_id, fs_ip, security_credentials, ap_id,
+        client_info, base_path=state_file_dir
+    )
+    cert_details['certificate'] = os.path.join(
+        state_file_dir, cert_details['mountStateDir'], 'certificate.pem'
+    )
     cert_details['privateKey'] = get_private_key_path()
-    cert_details['fsId'] = fs_id
+
+    if fs_id:
+        cert_details['fsId'] = fs_id
+    else:
+        cert_details['fsIP'] = fs_ip
 
     start_watchdog(init_system)
 
@@ -1053,20 +1117,27 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
     verify_level = int(options.get('verify', DEFAULT_STUNNEL_VERIFY_LEVEL))
     ocsp_enabled = is_ocsp_enabled(config, options)
 
-    stunnel_config_file = write_stunnel_config_file(config, state_file_dir, fs_id, mountpoint, tls_port, dns_name, verify_level,
-                                                    ocsp_enabled, options, region, cert_details=cert_details)
+    stunnel_config_file = write_stunnel_config_file(
+        config, state_file_dir, fs_id, fs_ip, mountpoint, tls_port, dns_name,
+        verify_level, ocsp_enabled, options, region, cert_details=cert_details
+    )
     tunnel_args = [_stunnel_bin(), stunnel_config_file]
     if 'netns' in options:
         tunnel_args = ['nsenter', '--net=' + options['netns']] + tunnel_args
 
-    # launch the tunnel in a process group so if it has any child processes, they can be killed easily by the mount watchdog
+    # launch the tunnel in a process group so if it has any child processes,
+    # they can be killed easily by the mount watchdog
     logging.info('Starting TLS tunnel: "%s"', ' '.join(tunnel_args))
     tunnel_proc = subprocess.Popen(
-        tunnel_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid, close_fds=True)
+        tunnel_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        preexec_fn=os.setsid, close_fds=True
+    )
     logging.info('Started TLS tunnel, pid: %d', tunnel_proc.pid)
 
-    temp_tls_state_file = write_tls_tunnel_state_file(fs_id, mountpoint, tls_port, tunnel_proc.pid, tunnel_args,
-                                                      [stunnel_config_file], state_file_dir, cert_details=cert_details)
+    temp_tls_state_file = write_tls_tunnel_state_file(
+        fs_id, fs_ip, mountpoint, tls_port, tunnel_proc.pid, tunnel_args,
+        [stunnel_config_file], state_file_dir, cert_details=cert_details
+    )
 
     if 'netns' not in options:
         test_tlsport(options['tlsport'])
@@ -1077,7 +1148,8 @@ def bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options, sta
     try:
         yield tunnel_proc
     finally:
-        os.rename(os.path.join(state_file_dir, temp_tls_state_file), os.path.join(state_file_dir, temp_tls_state_file[1:]))
+        os.rename(os.path.join(state_file_dir, temp_tls_state_file),
+                  os.path.join(state_file_dir, temp_tls_state_file[1:]))
 
 
 def test_tlsport(tlsport):
@@ -1134,40 +1206,53 @@ def get_nfs_mount_options(options):
     return ','.join(nfs_options)
 
 
-def mount_nfs(config, dns_name, path, mountpoint, options):
-
+def mount_nfs(config, fs_ip, dns_name, path, mountpoint, options):
+    """
+    Attempt to mount the mount target. If 'tls' was passed as a mount option
+    then mount_tls() should've already been called to setup the tunnel and
+    local listener.
+    """
     if 'tls' in options:
         mount_path = '127.0.0.1:%s' % path
     else:
-        mount_path = '%s:%s' % (dns_name, path)
+        if dns_name:
+            mount_path = '%s:%s' % (dns_name, path)
+        else:
+            mount_path = '%s:%s' % (fs_ip, path)
 
     if not check_if_platform_is_mac():
-        command = ['/sbin/mount.nfs4', mount_path, mountpoint, '-o', get_nfs_mount_options(options)]
+        command = ['/sbin/mount.nfs4', mount_path, mountpoint, '-o',
+                   get_nfs_mount_options(options)]
     else:
-        command = ['/sbin/mount_nfs', '-o', get_nfs_mount_options(options), mount_path, mountpoint]
+        command = ['/sbin/mount_nfs', '-o', get_nfs_mount_options(options),
+                   mount_path, mountpoint]
 
     if 'netns' in options:
         command = ['nsenter', '--net=' + options['netns']] + command
 
     logging.info('Executing: "%s"', ' '.join(command))
 
-    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
+    proc = subprocess.Popen(command, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, close_fds=True)
     out, err = proc.communicate()
 
     if proc.returncode == 0:
-        message = 'Successfully mounted %s at %s' % (dns_name, mountpoint)
+        message = 'Successfully mounted %s at %s' % (mount_path, mountpoint)
         logging.info(message)
-        publish_cloudwatch_log(CLOUDWATCHLOG_AGENT, message)
+        if not fs_ip:
+            publish_cloudwatch_log(CLOUDWATCHLOG_AGENT, message)
 
         # only perform readahead optimize after mount succeed
         optimize_readahead_window(mountpoint, options, config)
     else:
-        message = 'Failed to mount %s at %s: returncode=%d, stderr="%s"' % (dns_name, mountpoint, proc.returncode, err.strip())
+        message = ('Failed to mount %s at %s: returncode=%d, stderr="%s"'
+                   % (mount_path, mountpoint, proc.returncode, err.strip()))
         fatal_error(err.strip(), message, proc.returncode)
 
 
 def usage(out, exit_code=1):
-    out.write('Usage: mount.efs [--version] [-h|--help] <fsname> <mountpoint> [-o <options>]\n')
+    out.write('Usage: mount.efs [--version] [-h|--help] <fsname|IP> '
+              '<mountpoint> [-o <options>]\n')
     sys.exit(exit_code)
 
 
@@ -1185,10 +1270,17 @@ def parse_arguments_early_exit(args=None):
 
 
 def parse_arguments(config, args=None):
-    """Parse arguments, return (fsid, path, mountpoint, options)"""
+    """
+    Parse mount arguments.
+    Return (fsid, fsip, path, mountpoint, options). Note that fsid will be
+    None if the device arg provided is an IP and vice-versa if the device
+    is an fsid. path will default to '/' if not provided in device name.
+    """
     if args is None:
         args = sys.argv
 
+    fs_id = None
+    fs_ip = None
     fsname = None
     mountpoint = None
     options = {}
@@ -1214,11 +1306,27 @@ def parse_arguments(config, args=None):
     if not fsname or not mountpoint:
         usage(out=sys.stderr)
 
-    # We treat az as an option when customer is using dns name of az mount target to mount,
-    # even if they don't provide az with option, we update the options with that info
-    fs_id, path, az = match_device(config, fsname, options)
+    # Device name examples: "fs-deadbeef:/", "fs-deadbeef", "1.2.3.4" or
+    # "1.2.3.4:/"
 
-    return fs_id, path, mountpoint, add_field_in_options(options, 'az', az)
+    # Check if an IP was provided as the device name.
+    ip_match = IP_RE.match(fsname)
+    if ip_match:
+        fs_ip = ip_match.group()
+        if ip_match.end() != len(fsname):
+            path = fsname.split(':', 1)[1]
+        else:
+            path = '/'
+
+    if not fs_ip:
+        # An fsid must have bee provided so we parse that.
+        # We treat az as an option when customer is using dns name of az mount
+        # target to mount, even if they don't provide az with option, we update
+        # the options with that info.
+        fs_id, path, az = match_device(config, fsname, options)
+        options = add_field_in_options(options, 'az', az)
+
+    return fs_id, fs_ip, path, mountpoint, options
 
 
 def get_client_info(config):
@@ -1240,7 +1348,8 @@ def get_client_info(config):
     return client_info
 
 
-def create_certificate(config, mount_name, common_name, region, fs_id, security_credentials, ap_id, client_info,
+def create_certificate(config, mount_name, common_name, region, fs_id, fs_ip,
+                       security_credentials, ap_id, client_info,
                        base_path=STATE_FILE_DIR):
     current_time = get_utc_now()
     tls_paths = tls_paths_dictionary(mount_name, base_path)
@@ -1250,7 +1359,8 @@ def create_certificate(config, mount_name, common_name, region, fs_id, security_
     certificate = os.path.join(tls_paths['mount_dir'], 'certificate.pem')
 
     ca_dirs_check(config, tls_paths['database_dir'], tls_paths['certs_dir'])
-    ca_supporting_files_check(tls_paths['index'], tls_paths['index_attr'], tls_paths['serial'], tls_paths['rand'])
+    ca_supporting_files_check(tls_paths['index'], tls_paths['index_attr'],
+                              tls_paths['serial'], tls_paths['rand'])
 
     private_key = check_and_create_private_key(base_path)
 
@@ -1258,16 +1368,23 @@ def create_certificate(config, mount_name, common_name, region, fs_id, security_
         public_key = os.path.join(tls_paths['mount_dir'], 'publicKey.pem')
         create_public_key(private_key, public_key)
 
-    create_ca_conf(certificate_config, common_name, tls_paths['mount_dir'], private_key, current_time, region, fs_id,
+    create_ca_conf(certificate_config, common_name, tls_paths['mount_dir'],
+                   private_key, current_time, region, fs_id, fs_ip,
                    security_credentials, ap_id, client_info)
-    create_certificate_signing_request(certificate_config, private_key, certificate_signing_request)
 
-    not_before = get_certificate_timestamp(current_time, minutes=-NOT_BEFORE_MINS)
+    create_certificate_signing_request(certificate_config, private_key,
+                                       certificate_signing_request)
+
+    not_before = get_certificate_timestamp(current_time,
+                                           minutes=-NOT_BEFORE_MINS)
     not_after = get_certificate_timestamp(current_time, hours=NOT_AFTER_HOURS)
 
-    cmd = 'openssl ca -startdate %s -enddate %s -selfsign -batch -notext -config %s -in %s -out %s' % \
-          (not_before, not_after, certificate_config, certificate_signing_request, certificate)
+    cmd = ('openssl ca -startdate %s -enddate %s -selfsign -batch -notext '
+           '-config %s -in %s -out %s' %
+           (not_before, not_after, certificate_config,
+            certificate_signing_request, certificate))
     subprocess_call(cmd, 'Failed to create self-signed client-side certificate')
+    
     return current_time.strftime(CERT_DATETIME_FORMAT)
 
 
@@ -1325,16 +1442,30 @@ def create_certificate_signing_request(config_path, private_key, csr_path):
 
 
 def create_ca_conf(config_path, common_name, directory, private_key, date,
-                   region, fs_id, security_credentials, ap_id, client_info):
-    """Populate ca/req configuration file with fresh configurations at every mount since SigV4 signature can change"""
+                   region, fs_id, fs_ip, security_credentials, ap_id,
+                   client_info):
+    """
+    Populate ca/req configuration file with fresh configurations at every mount
+    since SigV4 signature can change.
+    """
+    if fs_id:
+        device = fs_id
+    else:
+        device = fs_ip
+
     public_key_path = os.path.join(directory, 'publicKey.pem')
-    ca_extension_body = ca_extension_builder(ap_id, security_credentials, fs_id, client_info)
-    efs_client_auth_body = efs_client_auth_builder(public_key_path, security_credentials['AccessKeyId'],
-                                                   security_credentials['SecretAccessKey'], date, region, fs_id,
-                                                   security_credentials['Token']) if security_credentials else ''
+    ca_extension_body = ca_extension_builder(ap_id, security_credentials,
+                                             device, client_info)
+    efs_client_auth_body = efs_client_auth_builder(
+        public_key_path, security_credentials['AccessKeyId'],
+        security_credentials['SecretAccessKey'], date, region, device,
+        security_credentials['Token']
+    ) if security_credentials else ''
     efs_client_info_body = efs_client_info_builder(client_info) if client_info else ''
-    full_config_body = CA_CONFIG_BODY % (directory, private_key, common_name, ca_extension_body,
-                                         efs_client_auth_body, efs_client_info_body)
+    full_config_body = CA_CONFIG_BODY % (directory, private_key, common_name,
+                                         ca_extension_body,
+                                         efs_client_auth_body,
+                                         efs_client_info_body)
 
     with open(config_path, 'w') as f:
         f.write(full_config_body)
@@ -1342,14 +1473,14 @@ def create_ca_conf(config_path, common_name, directory, private_key, date,
     return full_config_body
 
 
-def ca_extension_builder(ap_id, security_credentials, fs_id, client_info):
+def ca_extension_builder(ap_id, security_credentials, device, client_info):
     ca_extension_str = '[ v3_ca ]\nsubjectKeyIdentifier = hash'
     if ap_id:
         ca_extension_str += '\n1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:' + ap_id
     if security_credentials:
         ca_extension_str += '\n1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth'
 
-    ca_extension_str += '\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:' + fs_id
+    ca_extension_str += '\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:' + device
 
     if client_info:
         ca_extension_str += '\n1.3.6.1.4.1.4843.7.4 = ASN1:SEQUENCE:efs_client_info'
@@ -1357,18 +1488,24 @@ def ca_extension_builder(ap_id, security_credentials, fs_id, client_info):
     return ca_extension_str
 
 
-def efs_client_auth_builder(public_key_path, access_key_id, secret_access_key, date, region, fs_id, session_token=None):
+def efs_client_auth_builder(public_key_path, access_key_id, secret_access_key,
+                            date, region, device, session_token=None):
     public_key_hash = get_public_key_sha1(public_key_path)
-    canonical_request = create_canonical_request(public_key_hash, date, access_key_id, region, fs_id, session_token)
+    canonical_request = create_canonical_request(public_key_hash, date,
+                                                 access_key_id, region, device,
+                                                 session_token)
     string_to_sign = create_string_to_sign(canonical_request, date, region)
-    signature = calculate_signature(string_to_sign, date, secret_access_key, region)
+    signature = calculate_signature(string_to_sign, date, secret_access_key,
+                                    region)
     efs_client_auth_str = '[ efs_client_auth ]'
     efs_client_auth_str += '\naccessKeyId = UTF8String:' + access_key_id
     efs_client_auth_str += '\nsignature = OCTETSTRING:' + signature
-    efs_client_auth_str += '\nsigv4DateTime = UTCTIME:' + date.strftime(CERT_DATETIME_FORMAT)
+    efs_client_auth_str += ('\nsigv4DateTime = UTCTIME:'
+                            + date.strftime(CERT_DATETIME_FORMAT))
 
     if session_token:
-        efs_client_auth_str += '\nsessionToken = EXPLICIT:0,UTF8String:' + session_token
+        efs_client_auth_str += ('\nsessionToken = EXPLICIT:0,UTF8String:'
+                                + session_token)
 
     return efs_client_auth_str
 
@@ -1616,7 +1753,8 @@ def get_public_key_sha1(public_key):
     return sha1.hexdigest()
 
 
-def create_canonical_request(public_key_hash, date, access_key, region, fs_id, session_token=None):
+def create_canonical_request(public_key_hash, date, access_key, region, device,
+                             session_token=None):
     """
     Create a Canonical Request - https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html
     """
@@ -1625,8 +1763,10 @@ def create_canonical_request(public_key_hash, date, access_key, region, fs_id, s
 
     request = HTTP_REQUEST_METHOD + '\n'
     request += CANONICAL_URI + '\n'
-    request += create_canonical_query_string(public_key_hash, credential, formatted_datetime, session_token) + '\n'
-    request += CANONICAL_HEADERS % fs_id + '\n'
+    request += create_canonical_query_string(public_key_hash, credential,
+                                             formatted_datetime,
+                                             session_token) + '\n'
+    request += CANONICAL_HEADERS % device + '\n'
     request += SIGNED_HEADERS + '\n'
 
     sha256 = hashlib.sha256()
@@ -1767,18 +1907,26 @@ def is_nfs_mount(mountpoint):
         return False
 
 
-def mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options):
+def mount_tls(config, init_system, dns_name, path, fs_id, fs_ip, mountpoint,
+              options):
     if os.path.ismount(mountpoint) and is_nfs_mount(mountpoint):
-        sys.stdout.write("%s is already mounted, please run 'mount' command to verify\n" % mountpoint)
+        sys.stdout.write("%s is already mounted, please run 'mount' command to "
+                         "verify\n" % mountpoint)
         logging.warning("%s is already mounted, mount aborted" % mountpoint)
         return
 
-    with bootstrap_tls(config, init_system, dns_name, fs_id, mountpoint, options) as tunnel_proc:
+    with bootstrap_tls(config, init_system, dns_name, fs_id, fs_ip, mountpoint,
+                       options) as tunnel_proc:
         mount_completed = threading.Event()
-        t = threading.Thread(target=poll_tunnel_process, args=(tunnel_proc, fs_id, mount_completed))
+        if fs_id:
+            device = fs_id
+        else:
+            device = fs_ip
+        t = threading.Thread(target=poll_tunnel_process,
+                             args=(tunnel_proc, device, mount_completed))
         t.daemon = True
         t.start()
-        mount_nfs(config, dns_name, path, mountpoint, options)
+        mount_nfs(config, fs_ip, dns_name, path, mountpoint, options)
         mount_completed.set()
         t.join()
 
@@ -2257,28 +2405,36 @@ def main():
     if check_if_platform_is_mac() and not check_if_mac_version_is_supported():
         fatal_error("We do not support EFS on MacOS " + platform.release())
 
-    fs_id, path, mountpoint, options = parse_arguments(config)
+    # Either fs_id or fs_ip will be None depending on what was provided in the
+    # device name.
+    fs_id, fs_ip, path, mountpoint, options = parse_arguments(config)
 
     logging.info('version=%s options=%s', VERSION, options)
 
-    global CLOUDWATCHLOG_AGENT
-    CLOUDWATCHLOG_AGENT = bootstrap_cloudwatch_logging(config, fs_id)
+    if fs_id:
+        global CLOUDWATCHLOG_AGENT
+        CLOUDWATCHLOG_AGENT = bootstrap_cloudwatch_logging(config, fs_id)
 
     check_unsupported_options(options)
     check_options_validity(options)
 
     init_system = get_init_system()
-    check_network_status(fs_id, init_system)
 
-    dns_name = get_dns_name(config, fs_id, options)
+    if fs_id:
+        check_network_status(fs_id, init_system)
+        dns_name = get_dns_name(config, fs_id, options)
+    else:
+        check_network_status(fs_ip, init_system)
+        dns_name = None
 
     if check_if_platform_is_mac() and 'notls' not in options:
         options['tls'] = None
 
     if 'tls' in options:
-        mount_tls(config, init_system, dns_name, path, fs_id, mountpoint, options)
+        mount_tls(config, init_system, dns_name, path, fs_id, fs_ip,
+                  mountpoint, options)
     else:
-        mount_nfs(config, dns_name, path, mountpoint, options)
+        mount_nfs(config, fs_ip, dns_name, path, mountpoint, options)
 
 
 if '__main__' == __name__:
