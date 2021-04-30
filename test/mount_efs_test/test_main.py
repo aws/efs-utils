@@ -65,7 +65,7 @@ def _test_main(mocker, tls=False, root=True, ap_id=None, iam=False, awsprofile=N
 
     bootstrap_logging_mock = mocker.patch('mount_efs.bootstrap_logging')
     get_dns_mock = mocker.patch('mount_efs.get_dns_name')
-    parse_arguments_mock = mocker.patch('mount_efs.parse_arguments', return_value=('fs-deadbeef', '/', '/mnt', options))
+    parse_arguments_mock = mocker.patch('mount_efs.parse_arguments', return_value=('fs-deadbeef', None, '/', '/mnt', options))
     bootstrap_tls_mock = mocker.patch('mount_efs.bootstrap_tls', side_effect=dummy_contextmanager)
 
     if tls:

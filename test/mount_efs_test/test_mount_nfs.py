@@ -16,6 +16,7 @@ from .. import utils
 CONFIG = MagicMock()
 DNS_NAME = 'fs-deadbeef.efs.us-east-1.amazonaws.com'
 FS_ID = 'fs-deadbeef'
+FS_IP = None
 INIT_SYSTEM = 'upstart'
 MOUNT_POINT = '/mnt'
 PATH = '/'
@@ -53,7 +54,7 @@ def test_mount_nfs(mocker):
     mock = _mock_popen(mocker)
     optimize_readahead_window_mock = mocker.patch('mount_efs.optimize_readahead_window')
 
-    mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
+    mount_efs.mount_nfs(CONFIG, FS_IP, DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
 
     args, _ = mock.call_args
     args = args[0]
@@ -72,7 +73,7 @@ def test_mount_nfs_tls(mocker):
     options = dict(DEFAULT_OPTIONS)
     options['tls'] = None
 
-    mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', options)
+    mount_efs.mount_nfs(CONFIG, FS_IP, DNS_NAME, '/', '/mnt', options)
 
     args, _ = mock.call_args
     args = args[0]
@@ -88,7 +89,8 @@ def test_mount_nfs_failure(mocker):
     optimize_readahead_window_mock = mocker.patch('mount_efs.optimize_readahead_window')
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
+        mount_efs.mount_nfs(CONFIG, FS_IP, DNS_NAME, '/', '/mnt',
+                            DEFAULT_OPTIONS)
 
     assert 0 != ex.value.code
 
@@ -103,7 +105,7 @@ def test_mount_nfs_tls_netns(mocker):
     options['tls'] = None
     options['netns'] = NETNS
 
-    mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', options)
+    mount_efs.mount_nfs(CONFIG, FS_IP, DNS_NAME, '/', '/mnt', options)
 
     args, _ = mock.call_args
     args = args[0]
@@ -126,7 +128,8 @@ def test_mount_tls_mountpoint_mounted_with_nfs(mocker, capsys):
     optimize_readahead_window_mock = mocker.patch('mount_efs.optimize_readahead_window')
     mocker.patch('os.path.ismount', return_value=True)
     _mock_popen(mocker, stdout='nfs')
-    mount_efs.mount_tls(CONFIG, INIT_SYSTEM, DNS_NAME, PATH, FS_ID, MOUNT_POINT, options)
+    mount_efs.mount_tls(CONFIG, INIT_SYSTEM, DNS_NAME, PATH, FS_ID, FS_IP,
+                        MOUNT_POINT, options)
     out, err = capsys.readouterr()
     assert 'is already mounted' in out
     utils.assert_not_called(bootstrap_tls_mock)
@@ -139,7 +142,7 @@ def test_mount_nfs_macos(mocker):
     mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
     optimize_readahead_window_mock = mocker.patch('mount_efs.optimize_readahead_window')
     DEFAULT_OPTIONS['nfsvers'] = 4.0
-    mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
+    mount_efs.mount_nfs(CONFIG, FS_IP, DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS)
 
     args, _ = mock.call_args
     args = args[0]
@@ -158,7 +161,7 @@ def test_mount_nfs_tls_macos(mocker):
     options = dict(DEFAULT_OPTIONS)
     options['tls'] = None
 
-    mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', options)
+    mount_efs.mount_nfs(CONFIG, FS_IP, DNS_NAME, '/', '/mnt', options)
 
     args, _ = mock.call_args
     args = args[0]

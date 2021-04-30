@@ -674,8 +674,14 @@ def check_certificate(config, state, state_file_dir, state_file, base_path=STATE
         logging.debug('Refreshing self-signed certificate (at %s)' % state['certificate'])
 
     credentials_source = state.get('awsCredentialsMethod')
-    updated_certificate_creation_time = recreate_certificate(config, state['mountStateDir'], state['commonName'], state['fsId'],
-                                                             credentials_source, ap_state, state['region'], base_path=base_path)
+    if state.get('fsId'):
+        device = state['fsId']
+    else:
+        device = state['fsIP']
+    updated_certificate_creation_time = recreate_certificate(
+        config, state['mountStateDir'], state['commonName'], device,
+        credentials_source, ap_state, state['region'], base_path=base_path
+    )
     if updated_certificate_creation_time:
         state['certificateCreationTime'] = updated_certificate_creation_time
         rewrite_state_file(state, state_file_dir, state_file)
@@ -728,7 +734,8 @@ def get_client_info(config):
     return client_info
 
 
-def recreate_certificate(config, mount_name, common_name, fs_id, credentials_source, ap_id, region,
+def recreate_certificate(config, mount_name, common_name, device,
+                         credentials_source, ap_id, region,
                          base_path=STATE_FILE_DIR):
     current_time = get_utc_now()
     tls_paths = tls_paths_dictionary(mount_name, base_path)
@@ -747,8 +754,11 @@ def recreate_certificate(config, mount_name, common_name, fs_id, credentials_sou
         create_public_key(private_key, public_key)
 
     client_info = get_client_info(config)
-    config_body = create_ca_conf(certificate_config, common_name, tls_paths['mount_dir'], private_key, current_time, region,
-                                 fs_id, credentials_source, ap_id=ap_id, client_info=client_info)
+    config_body = create_ca_conf(certificate_config, common_name,
+                                 tls_paths['mount_dir'], private_key,
+                                 current_time, region, device,
+                                 credentials_source, ap_id=ap_id,
+                                 client_info=client_info)
 
     if not config_body:
         logging.error('Cannot recreate self-signed certificate')
@@ -820,8 +830,9 @@ def create_certificate_signing_request(config_path, key_path, csr_path):
     subprocess_call(cmd, 'Failed to create certificate signing request (csr)')
 
 
-def create_ca_conf(config_path, common_name, directory, private_key, date, region, fs_id, credentials_source,
-                   ap_id=None, client_info=None):
+def create_ca_conf(config_path, common_name, directory, private_key, date,
+                   region, device, credentials_source, ap_id=None,
+                   client_info=None):
     """Populate ca/req configuration file with fresh configurations at every mount since SigV4 signature can change"""
     public_key_path = os.path.join(directory, 'publicKey.pem')
     security_credentials = get_aws_security_credentials(credentials_source, region) if credentials_source else ''
@@ -830,10 +841,12 @@ def create_ca_conf(config_path, common_name, directory, private_key, date, regio
         logging.error('Failed to retrieve AWS security credentials using lookup method: %s', credentials_source)
         return None
 
-    ca_extension_body = ca_extension_builder(ap_id, security_credentials, fs_id, client_info)
-    efs_client_auth_body = efs_client_auth_builder(public_key_path, security_credentials['AccessKeyId'],
-                                                   security_credentials['SecretAccessKey'], date, region, fs_id,
-                                                   security_credentials['Token']) if credentials_source else ''
+    ca_extension_body = ca_extension_builder(ap_id, security_credentials,
+                                             device, client_info)
+    efs_client_auth_body = efs_client_auth_builder(
+        public_key_path, security_credentials['AccessKeyId'],
+        security_credentials['SecretAccessKey'], date, region, device,
+        security_credentials['Token']) if credentials_source else ''
     if credentials_source and not efs_client_auth_body:
         logging.error('Failed to create AWS SigV4 signature section for OpenSSL config. Public Key path: %s', public_key_path)
         return None
@@ -847,27 +860,30 @@ def create_ca_conf(config_path, common_name, directory, private_key, date, regio
     return full_config_body
 
 
-def ca_extension_builder(ap_id, security_credentials, fs_id, client_info):
+def ca_extension_builder(ap_id, security_credentials, device, client_info):
     ca_extension_str = '[ v3_ca ]\nsubjectKeyIdentifier = hash'
     if ap_id:
         ca_extension_str += '\n1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:' + ap_id
     if security_credentials:
         ca_extension_str += '\n1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth'
 
-    ca_extension_str += '\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:' + fs_id
+    ca_extension_str += '\n1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:' + device
     if client_info:
         ca_extension_str += '\n1.3.6.1.4.1.4843.7.4 = ASN1:SEQUENCE:efs_client_info'
 
     return ca_extension_str
 
 
-def efs_client_auth_builder(public_key_path, access_key_id, secret_access_key, date, region, fs_id, session_token=None):
+def efs_client_auth_builder(public_key_path, access_key_id, secret_access_key,
+                            date, region, device, session_token=None):
     public_key_hash = get_public_key_sha1(public_key_path)
 
     if not public_key_hash:
         return None
 
-    canonical_request = create_canonical_request(public_key_hash, date, access_key_id, region, fs_id, session_token)
+    canonical_request = create_canonical_request(public_key_hash, date,
+                                                 access_key_id, region, device,
+                                                 session_token)
     string_to_sign = create_string_to_sign(canonical_request, date, region)
     signature = calculate_signature(string_to_sign, date, secret_access_key, region)
     efs_client_auth_str = '[ efs_client_auth ]'
@@ -1011,7 +1027,8 @@ def get_public_key_sha1(public_key):
     return sha1.hexdigest()
 
 
-def create_canonical_request(public_key_hash, date, access_key, region, fs_id, session_token=None):
+def create_canonical_request(public_key_hash, date, access_key, region,
+                             device, session_token=None):
     """
     Create a Canonical Request - https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html
     """
@@ -1021,7 +1038,7 @@ def create_canonical_request(public_key_hash, date, access_key, region, fs_id, s
     request = HTTP_REQUEST_METHOD + '\n'
     request += CANONICAL_URI + '\n'
     request += create_canonical_query_string(public_key_hash, credential, formatted_datetime, session_token) + '\n'
-    request += CANONICAL_HEADERS % fs_id + '\n'
+    request += CANONICAL_HEADERS % device + '\n'
     request += SIGNED_HEADERS + '\n'
 
     sha256 = hashlib.sha256()

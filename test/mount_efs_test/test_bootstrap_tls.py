@@ -14,6 +14,7 @@ from mock import MagicMock
 
 AP_ID = 'fsap-beefdead'
 FS_ID = 'fs-deadbeef'
+FS_IP = None
 CLIENT_SOURCE = 'test'
 DNS_NAME = '%s.efs.us-east-1.amazonaws.com' % FS_ID
 MOUNT_POINT = '/mnt'
@@ -66,7 +67,8 @@ def test_bootstrap_tls_state_file_dir_exists(mocker, tmpdir):
     state_file_dir = str(tmpdir)
 
     mocker.patch('mount_efs._stunnel_bin', return_value='/usr/bin/stunnel')
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID,
+                                 FS_IP, MOUNT_POINT, {}, state_file_dir):
         pass
 
     args, _ = popen_mock.call_args
@@ -95,7 +97,8 @@ def test_bootstrap_tls_state_file_nonexistent_dir(mocker, tmpdir):
     assert not os.path.exists(state_file_dir)
 
     mocker.patch('mount_efs._stunnel_bin', return_value='/usr/bin/stunnel')
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID,
+                                 FS_IP, MOUNT_POINT, {}, state_file_dir):
         pass
 
     assert os.path.exists(state_file_dir)
@@ -126,7 +129,8 @@ def test_bootstrap_tls_cert_created(mocker, tmpdir):
     mocker.patch('mount_efs._stunnel_bin', return_value='/usr/bin/stunnel')
     try:
         with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID,
-                                     MOUNT_POINT, {'accesspoint': AP_ID}, state_file_dir):
+                                     FS_IP, MOUNT_POINT, {'accesspoint': AP_ID},
+                                     state_file_dir):
             pass
     except OSError as e:
         assert '[Errno 2] No such file or directory' in str(e)
@@ -144,7 +148,8 @@ def test_bootstrap_tls_non_default_port(mocker, tmpdir):
 
     tls_port = 1000
     mocker.patch('mount_efs._stunnel_bin', return_value='/usr/bin/stunnel')
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'tlsport': tls_port},
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID,
+                                 FS_IP, MOUNT_POINT, {'tlsport': tls_port},
                                  state_file_dir):
         pass
 
@@ -163,7 +168,8 @@ def test_bootstrap_tls_non_default_verify_level(mocker, tmpdir):
 
     verify = 0
     mocker.patch('mount_efs._stunnel_bin', return_value='/usr/bin/stunnel')
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'verify': verify},
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID,
+                                 FS_IP, MOUNT_POINT, {'verify': verify},
                                  state_file_dir):
         pass
 
@@ -181,7 +187,9 @@ def test_bootstrap_tls_ocsp_option(mocker, tmpdir):
     state_file_dir = str(tmpdir)
 
     mocker.patch('mount_efs._stunnel_bin', return_value='/usr/bin/stunnel')
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'ocsp': None}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID,
+                                 FS_IP, MOUNT_POINT, {'ocsp': None},
+                                 state_file_dir):
         pass
 
     popen_args, _ = popen_mock.call_args
@@ -199,7 +207,9 @@ def test_bootstrap_tls_noocsp_option(mocker, tmpdir):
     state_file_dir = str(tmpdir)
 
     mocker.patch('mount_efs._stunnel_bin', return_value='/usr/bin/stunnel')
-    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {'noocsp': None}, state_file_dir):
+    with mount_efs.bootstrap_tls(MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID,
+                                 FS_IP, MOUNT_POINT, {'noocsp': None},
+                                 state_file_dir):
         pass
 
     popen_args, _ = popen_mock.call_args

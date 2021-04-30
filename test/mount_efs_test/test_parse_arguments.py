@@ -60,7 +60,7 @@ def test_parse_arguments_no_mount_point(capsys):
 
 
 def test_parse_arguments_default_path():
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', 'fs-deadbeef', '/dir'])
+    fsid, fs_ip, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', 'fs-deadbeef', '/dir'])
 
     assert 'fs-deadbeef' == fsid
     assert '/' == path
@@ -69,7 +69,7 @@ def test_parse_arguments_default_path():
 
 
 def test_parse_arguments_custom_path():
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', 'fs-deadbeef:/home', '/dir'])
+    fsid, fs_ip, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', 'fs-deadbeef:/home', '/dir'])
 
     assert 'fs-deadbeef' == fsid
     assert '/home' == path
@@ -78,7 +78,7 @@ def test_parse_arguments_custom_path():
 
 
 def test_parse_arguments_verbose():
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', 'fs-deadbeef:/home', '/dir',
+    fsid, fs_ip, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', 'fs-deadbeef:/home', '/dir',
                                                                        '-v', '-o', 'foo,bar=baz,quux'])
 
     assert 'fs-deadbeef' == fsid
@@ -88,7 +88,7 @@ def test_parse_arguments_verbose():
 
 
 def test_parse_arguments():
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(None,
+    fsid, fs_ip, path, mountpoint, options = mount_efs.parse_arguments(None,
                                                                 ['mount', 'fs-deadbeef:/home', '/dir', '-o', 'foo,bar=baz,quux'])
 
     assert 'fs-deadbeef' == fsid
@@ -102,7 +102,7 @@ def test_parse_arguments_with_az_dns_name_mount_az_not_in_option(mocker):
     # info, verify that the az info is present in the options
     dns_name = 'us-east-1a.fs-deadbeef.efs.us-east-1.amazonaws.com'
     mocker.patch('mount_efs.match_device', return_value=('fs-deadbeef', '/', 'us-east-1a'))
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(None,
+    fsid, fs_ip, path, mountpoint, options = mount_efs.parse_arguments(None,
                                                                 ['mount', dns_name, '/dir', '-o', 'foo,bar=baz,quux'])
 
     assert 'fs-deadbeef' == fsid
@@ -113,7 +113,7 @@ def test_parse_arguments_with_az_dns_name_mount_az_not_in_option(mocker):
 
 def test_parse_arguments_macos(mocker):
     mocker.patch('mount_efs.check_if_platform_is_mac', return_value=True)
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', '-o', 'foo', '-o', 'bar=baz', '-o', 'quux',
+    fsid, fs_ip, path, mountpoint, options = mount_efs.parse_arguments(None, ['mount', '-o', 'foo', '-o', 'bar=baz', '-o', 'quux',
                                                                        'fs-deadbeef:/home', '/dir'])
 
     assert 'fs-deadbeef' == fsid

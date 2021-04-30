@@ -13,6 +13,7 @@ import os
 from datetime import datetime
 
 FS_ID = 'fs-deadbeef'
+FS_IP = None
 PID = 1234
 PORT = 54323
 COMMAND = ['stunnel', '/some/config/file']
@@ -42,8 +43,10 @@ def test_write_tls_tunnel_state_file_netns(tmpdir):
         'useIam': True
     }
 
-    state_file = mount_efs.write_tls_tunnel_state_file(FS_ID, mount_point, PORT, PID, NETNS_COMMAND, FILES,
-                                                       state_file_dir, cert_details)
+    state_file = mount_efs.write_tls_tunnel_state_file(
+        FS_ID, FS_IP, mount_point, PORT, PID, NETNS_COMMAND, FILES,
+        state_file_dir, cert_details
+    )
 
     assert FS_ID in state_file
     assert os.sep not in state_file[state_file.find(FS_ID):]
@@ -90,8 +93,10 @@ def test_write_tls_tunnel_state_file(tmpdir):
         'useIam': True
     }
 
-    state_file = mount_efs.write_tls_tunnel_state_file(FS_ID, mount_point, PORT, PID, COMMAND, FILES, state_file_dir,
-                                                       cert_details)
+    state_file = mount_efs.write_tls_tunnel_state_file(
+        FS_ID, FS_IP, mount_point, PORT, PID, COMMAND, FILES, state_file_dir,
+        cert_details
+    )
 
     assert FS_ID in state_file
     assert os.sep not in state_file[state_file.find(FS_ID):]
@@ -123,7 +128,9 @@ def test_write_tls_tunnel_state_file_no_cert(tmpdir):
 
     mount_point = '/home/user/foo/mount'
 
-    state_file = mount_efs.write_tls_tunnel_state_file(FS_ID, mount_point, PORT, PID, COMMAND, FILES, state_file_dir)
+    state_file = mount_efs.write_tls_tunnel_state_file(
+        FS_ID, FS_IP, mount_point, PORT, PID, COMMAND, FILES, state_file_dir
+    )
 
     assert FS_ID in state_file
     assert os.sep not in state_file[state_file.find(FS_ID):]

@@ -24,6 +24,7 @@ except ImportError:
 
 DT_PATTERN = watchdog.CERT_DATETIME_FORMAT
 FS_ID = 'fs-deadbeef'
+FS_IP = None
 COMMON_NAME = 'fs-deadbeef.efs.us-east-1.amazonaws.com'
 PID = 1234
 STATE_FILE = 'stunnel-config.fs-deadbeef.mount.dir.12345'
@@ -90,8 +91,9 @@ def _create_certificate_and_state(tls_dict, temp_dir, pk_path, timestamp, securi
                                   credentials_source=None, ap_id=None, remove_cert=False, client_info=None):
     config = _get_config()
     good_ap_id = AP_ID if ap_id else None
-    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID, security_credentials, good_ap_id, client_info,
-                                 base_path=str(temp_dir))
+    mount_efs.create_certificate(config, MOUNT_NAME, COMMON_NAME, REGION, FS_ID,
+                                 FS_IP, security_credentials, good_ap_id,
+                                 client_info, base_path=str(temp_dir))
 
     assert os.path.exists(pk_path)
     assert os.path.exists(os.path.join(tls_dict['mount_dir'], 'request.csr'))
@@ -522,9 +524,9 @@ def test_create_ca_conf_without_client_info(mocker, tmpdir):
     tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True, client_info=False)
 
     ca_extension_body = ('[ v3_ca ]\n'
-                         'subjectKeyIdentifier = hash\n' 
-                        '1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n' 
-                        '1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth\n' 
+                         'subjectKeyIdentifier = hash\n'
+                        '1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n'
+                        '1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth\n'
                         '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s'
                          ) % (AP_ID, FS_ID)
     efs_client_auth_body = watchdog.efs_client_auth_builder(tls_dict['public_key'], CREDENTIALS['AccessKeyId'],
@@ -541,11 +543,11 @@ def test_create_ca_conf_with_all(mocker, tmpdir):
     current_time = mount_efs.get_utc_now()
     tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True, client_info=True)
 
-    ca_extension_body = ('[ v3_ca ]\n' 
-                        'subjectKeyIdentifier = hash\n' 
-                        '1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n' 
-                        '1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth\n' 
-                        '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s\n' 
+    ca_extension_body = ('[ v3_ca ]\n'
+                        'subjectKeyIdentifier = hash\n'
+                        '1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n'
+                        '1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth\n'
+                        '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s\n'
                         '1.3.6.1.4.1.4843.7.4 = ASN1:SEQUENCE:efs_client_info'
                          ) % (AP_ID, FS_ID)
     efs_client_auth_body = watchdog.efs_client_auth_builder(tls_dict['public_key'], CREDENTIALS['AccessKeyId'],
@@ -562,10 +564,10 @@ def test_create_ca_conf_with_iam_no_accesspoint(mocker, tmpdir):
     current_time = mount_efs.get_utc_now()
     tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=False, client_info=True)
 
-    ca_extension_body = ('[ v3_ca ]\n' 
-                        'subjectKeyIdentifier = hash\n' 
-                        '1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth\n' 
-                        '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s\n' 
+    ca_extension_body = ('[ v3_ca ]\n'
+                        'subjectKeyIdentifier = hash\n'
+                        '1.3.6.1.4.1.4843.7.2 = ASN1:SEQUENCE:efs_client_auth\n'
+                        '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s\n'
                         '1.3.6.1.4.1.4843.7.4 = ASN1:SEQUENCE:efs_client_info'
                          ) % (FS_ID)
     efs_client_auth_body = watchdog.efs_client_auth_builder(tls_dict['public_key'], CREDENTIALS['AccessKeyId'],
@@ -582,10 +584,10 @@ def test_create_ca_conf_with_accesspoint_no_iam(mocker, tmpdir):
     current_time = mount_efs.get_utc_now()
     tls_dict, full_config_body = _create_ca_conf_helper(mocker, tmpdir, current_time, iam=False, ap=True, client_info=True)
 
-    ca_extension_body = ('[ v3_ca ]\n' 
-                        'subjectKeyIdentifier = hash\n' 
-                        '1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n' 
-                        '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s\n' 
+    ca_extension_body = ('[ v3_ca ]\n'
+                        'subjectKeyIdentifier = hash\n'
+                        '1.3.6.1.4.1.4843.7.1 = ASN1:UTF8String:%s\n'
+                        '1.3.6.1.4.1.4843.7.3 = ASN1:UTF8String:%s\n'
                         '1.3.6.1.4.1.4843.7.4 = ASN1:SEQUENCE:efs_client_info'
                          ) % (AP_ID, FS_ID)
     efs_client_auth_body = ''
