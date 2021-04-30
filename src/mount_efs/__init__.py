@@ -807,13 +807,14 @@ def get_system_release_version():
 
     try:
         with open(OS_RELEASE_PATH) as f:
-           for line in f:
+            for line in f:
                 if 'PRETTY_NAME' in line:
                     return line.split('=')[1].strip()
     except IOError:
         logging.debug('Unable to read %s', OS_RELEASE_PATH)
 
     return DEFAULT_UNKNOWN_VALUE
+
 
 def write_stunnel_config_file(config, state_file_dir, fs_id, fs_ip, mountpoint,
                               tls_port, dns_name, verify_level, ocsp_enabled,
@@ -870,6 +871,7 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, fs_ip, mountpoint,
 
     if (config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname') and
         not fs_ip):
+
         if check_host_supported:
             # Stunnel checkHost option checks if the specified DNS host name or
             # wildcard matches any of the providers in peer certificate's CN
@@ -1047,6 +1049,7 @@ def create_required_directory(config, directory):
     except OSError as e:
         if errno.EEXIST != e.errno or not os.path.isdir(directory):
             raise
+
 
 @contextmanager
 def bootstrap_tls(config, init_system, dns_name, fs_id, fs_ip, mountpoint,
@@ -1384,7 +1387,7 @@ def create_certificate(config, mount_name, common_name, region, fs_id, fs_ip,
            (not_before, not_after, certificate_config,
             certificate_signing_request, certificate))
     subprocess_call(cmd, 'Failed to create self-signed client-side certificate')
-    
+
     return current_time.strftime(CERT_DATETIME_FORMAT)
 
 
