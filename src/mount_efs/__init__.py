@@ -869,9 +869,7 @@ def write_stunnel_config_file(config, state_file_dir, fs_id, fs_ip, mountpoint,
                             (CONFIG_FILE,
                              'https://docs.aws.amazon.com/console/efs/troubleshooting-tls'))
 
-    if (config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname') and
-        not fs_ip):
-
+    if (config.getboolean(CONFIG_SECTION, 'stunnel_check_cert_hostname') and not fs_ip):
         if check_host_supported:
             # Stunnel checkHost option checks if the specified DNS host name or
             # wildcard matches any of the providers in peer certificate's CN
