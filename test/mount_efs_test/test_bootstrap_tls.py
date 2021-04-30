@@ -159,7 +159,7 @@ def test_bootstrap_tls_non_default_port(mocker, tmpdir):
 
     assert '/usr/bin/stunnel' in popen_args
     assert EXPECTED_STUNNEL_CONFIG_FILE in popen_args
-    assert 1000 == write_config_args[4]  # positional argument for tls_port
+    assert 1000 == write_config_args[5]  # positional argument for tls_port
 
 
 def test_bootstrap_tls_non_default_verify_level(mocker, tmpdir):
@@ -179,7 +179,7 @@ def test_bootstrap_tls_non_default_verify_level(mocker, tmpdir):
 
     assert '/usr/bin/stunnel' in popen_args
     assert EXPECTED_STUNNEL_CONFIG_FILE in popen_args
-    assert 0 == write_config_args[6]  # positional argument for verify_level
+    assert 0 == write_config_args[7]  # positional argument for verify_level
 
 
 def test_bootstrap_tls_ocsp_option(mocker, tmpdir):
@@ -199,7 +199,7 @@ def test_bootstrap_tls_ocsp_option(mocker, tmpdir):
     assert '/usr/bin/stunnel' in popen_args
     assert EXPECTED_STUNNEL_CONFIG_FILE in popen_args
     # positional argument for ocsp_override
-    assert write_config_args[7] is True
+    assert write_config_args[8] is True
 
 
 def test_bootstrap_tls_noocsp_option(mocker, tmpdir):
@@ -219,4 +219,4 @@ def test_bootstrap_tls_noocsp_option(mocker, tmpdir):
     assert '/usr/bin/stunnel' in popen_args
     assert EXPECTED_STUNNEL_CONFIG_FILE in popen_args
     # positional argument for ocsp_override
-    assert write_config_args[7] is False
+    assert write_config_args[8] is False
