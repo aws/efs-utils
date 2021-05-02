@@ -7,7 +7,8 @@
 #
 
 PACKAGE_NAME = amazon-efs-utils
-SOURCE_TARBALL = $(PACKAGE_NAME).tar.gz
+VERSION = 1.30.2
+SOURCE_TARBALL = $(PACKAGE_NAME)-$(VERSION).tar.gz
 SPECFILE = $(PACKAGE_NAME).spec
 BUILD_DIR = build/rpmbuild
 export PYTHONPATH := $(shell pwd)/src
@@ -16,36 +17,43 @@ export PYTHONPATH := $(shell pwd)/src
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -rf $(PACKAGE_NAME)
-	rm -f $(SOURCE_TARBALL)
+	rm -f *.gz
+	rm -f *.spec
 
 .PHONY: tarball
 tarball: clean
-	mkdir -p $(PACKAGE_NAME)
+	mkdir -p $(PACKAGE_NAME)-$(VERSION)
 
-	mkdir -p $(PACKAGE_NAME)/dist
-	cp -p dist/amazon-efs-mount-watchdog.conf $(PACKAGE_NAME)/dist
-	cp -p dist/amazon-efs-mount-watchdog.service $(PACKAGE_NAME)/dist
-	cp -p dist/efs-utils.conf $(PACKAGE_NAME)/dist
-	cp -p dist/efs-utils.crt $(PACKAGE_NAME)/dist
+	mkdir -p $(PACKAGE_NAME)-$(VERSION)/dist
+	cp -p dist/amazon-efs-mount-watchdog.conf $(PACKAGE_NAME)-$(VERSION)/dist
+	cp -p dist/amazon-efs-mount-watchdog.service $(PACKAGE_NAME)-$(VERSION)/dist
+	cp -p dist/efs-utils.conf $(PACKAGE_NAME)-$(VERSION)/dist
+	cp -p dist/efs-utils.crt $(PACKAGE_NAME)-$(VERSION)/dist
 
-	mkdir -p $(PACKAGE_NAME)/src
-	cp -rp src/mount_efs $(PACKAGE_NAME)/src
-	cp -rp src/watchdog $(PACKAGE_NAME)/src
+	mkdir -p $(PACKAGE_NAME)-$(VERSION)/src
+	cp -rp src/mount_efs $(PACKAGE_NAME)-$(VERSION)/src
+	cp -rp src/watchdog $(PACKAGE_NAME)-$(VERSION)/src
 
-	mkdir -p ${PACKAGE_NAME}/man
-	cp -rp man/mount.efs.8 ${PACKAGE_NAME}/man
+	mkdir -p ${PACKAGE_NAME}-$(VERSION)/man
+	cp -rp man/mount.efs.8 ${PACKAGE_NAME}-$(VERSION)/man
 
-	tar -czf $(SOURCE_TARBALL) $(PACKAGE_NAME)/*
+	tar -czf $(SOURCE_TARBALL) $(PACKAGE_NAME)-$(VERSION)/*
 
 .PHONY: sources
 sources: tarball
 
+.PHONLY: $(SPECFILE)
+$(SPECFILE): $(SPECFILE).in
+	sed 's/^Version:.*/Version:    $(VERSION)/g' $? > $@
+
 .PHONY: rpm-only
-rpm-only:
+rpm-only:: $(TARBALL)
+rpm-only:: $(SPECFILE)
 	mkdir -p $(BUILD_DIR)/{SPECS,COORD_SOURCES,DATA_SOURCES,BUILD,RPMS,SOURCES,SRPMS}
-	cp $(SPECFILE) $(BUILD_DIR)/SPECS
-	cp $(SOURCE_TARBALL) $(BUILD_DIR)/SOURCES
-	rpmbuild -ba --define "_topdir `pwd`/$(BUILD_DIR)" $(BUILD_DIR)/SPECS/$(SPECFILE)
+	rpmbuild -ba \
+		--define "_topdir `pwd`/$(BUILD_DIR)" \
+		--define '_sourcedir $(PWD)' \
+		$(SPECFILE)
 	cp $(BUILD_DIR)/RPMS/*/*rpm build
 
 .PHONY: rpm
