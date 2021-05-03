@@ -44,7 +44,8 @@ sources: tarball
 
 .PHONLY: $(SPECFILE)
 $(SPECFILE):
-	sed 's/^Version:.*/Version:    $(VERSION)/g'  $(SPECFILE).in > $@
+	mkdir -p dist
+	sed 's/^Version:.*/Version:    $(VERSION)/g'  > dist/$(SPECFILE) > $@
 
 .PHONY: rpm-only
 rpm-only:: $(TARBALL)
@@ -53,7 +54,7 @@ rpm-only:: $(SPECFILE)
 	rpmbuild -ba \
 		--define "_topdir `pwd`/$(BUILD_DIR)" \
 		--define '_sourcedir $(PWD)' \
-		$(SPECFILE)
+		dist/$(SPECFILE)
 	cp $(BUILD_DIR)/RPMS/*/*rpm build
 
 .PHONY: rpm

@@ -14,10 +14,10 @@ except ImportError:
     from configparser import ConfigParser
 
 
-SPEC_FILE = 'amazon-efs-utils.spec.in'
+SPEC_FILE = 'amazon-efs-utils.spec'
 DEB_FILE = 'build-deb.sh'
 FILE_LIST = ['build-deb.sh', 'src/watchdog/__init__.py', 'src/mount_efs/__init__.py',
-                  'dist/amazon-efs-utils.control', 'build-deb.sh', 'amazon-efs-utils.spec.in']
+                  'dist/amazon-efs-utils.control', 'build-deb.sh', 'amazon-efs-utils.spec']
 
 GLOBAL_CONFIG = 'config.ini'
 
