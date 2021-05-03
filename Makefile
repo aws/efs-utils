@@ -43,8 +43,8 @@ tarball: clean
 sources: tarball
 
 .PHONLY: $(SPECFILE)
-$(SPECFILE): $(SPECFILE).in
-	sed 's/^Version:.*/Version:    $(VERSION)/g' $? > $@
+$(SPECFILE):
+	sed 's/^Version:.*/Version:    $(VERSION)/g'  $(SPECFILE).in > $@
 
 .PHONY: rpm-only
 rpm-only:: $(TARBALL)
