@@ -18,7 +18,6 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -rf $(PACKAGE_NAME)*/
 	rm -f *.gz
-	rm -f *.spec
 
 .PHONY: tarball
 tarball: clean
@@ -42,10 +41,10 @@ tarball: clean
 .PHONY: sources
 sources: tarball
 
-.PHONLY: $(SPECFILE)
+.PHONY: $(SPECFILE)
 $(SPECFILE):
 	mkdir -p dist
-	sed 's/^Version:.*/Version:    $(VERSION)/g'  > dist/$(SPECFILE) > $@
+	sed 's/^Version:.*/Version:    $(VERSION)/g' $(SPECFILE) > dist/$(SPECFILE)
 
 .PHONY: rpm-only
 rpm-only:: $(TARBALL)
