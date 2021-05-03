@@ -16,7 +16,7 @@ export PYTHONPATH := $(shell pwd)/src
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -rf $(PACKAGE_NAME)
+	rm -rf $(PACKAGE_NAME)*/
 	rm -f *.gz
 	rm -f *.spec
 
