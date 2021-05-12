@@ -237,13 +237,14 @@ SYSTEM_RELEASE_PATH = '/etc/system-release'
 OS_RELEASE_PATH = '/etc/os-release'
 RHEL8_RELEASE_NAME = 'Red Hat Enterprise Linux release 8'
 CENTOS8_RELEASE_NAME = 'CentOS Linux release 8'
+ORACLE_RELEASE_NAME = 'Oracle Linux Server release 8'
 FEDORA_RELEASE_NAME = 'Fedora release'
 OPEN_SUSE_LEAP_RELEASE_NAME = 'openSUSE Leap'
 SUSE_RELEASE_NAME = 'SUSE Linux Enterprise Server'
 MACOS_BIG_SUR_RELEASE = 'macOS-11'
 
 SKIP_NO_LIBWRAP_RELEASES = [RHEL8_RELEASE_NAME, CENTOS8_RELEASE_NAME, FEDORA_RELEASE_NAME, OPEN_SUSE_LEAP_RELEASE_NAME,
-                            SUSE_RELEASE_NAME, MACOS_BIG_SUR_RELEASE]
+                            SUSE_RELEASE_NAME, MACOS_BIG_SUR_RELEASE, ORACLE_RELEASE_NAME]
 
 # Multiplier for max read ahead buffer size
 # Set default as 15 aligning with prior linux kernel 5.4
