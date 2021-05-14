@@ -18,6 +18,7 @@ import os
 import pwd
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -48,15 +49,19 @@ except ImportError:
     from urllib import urlencode
 
 
-VERSION = '1.30.2'
+VERSION = '1.31.1'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
 CONFIG_SECTION = 'mount-watchdog'
+MOUNT_CONFIG_SECTION = 'mount'
 CLIENT_INFO_SECTION = 'client-info'
 CLIENT_SOURCE_STR_LEN_LIMIT = 100
+DISABLE_FETCH_EC2_METADATA_TOKEN_ITEM = 'disable_fetch_ec2_metadata_token'
 DEFAULT_UNKNOWN_VALUE = 'unknown'
 DEFAULT_MACOS_VALUE = 'macos'
+# 50ms
+DEFAULT_TIMEOUT = 0.05
 
 LOG_DIR = '/var/log/amazon/efs'
 LOG_FILE = 'mount-watchdog.log'
@@ -132,6 +137,9 @@ INSTANCE_METADATA_TOKEN_URL = 'http://169.254.169.254/latest/api/token'
 SECURITY_CREDS_ECS_URI_HELP_URL = 'https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html'
 SECURITY_CREDS_WEBIDENTITY_HELP_URL = 'https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html'
 SECURITY_CREDS_IAM_ROLE_HELP_URL = 'https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html'
+NAMED_PROFILE_HELP_URL = 'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-profiles.html'
+CONFIG_FILE_SETTINGS_HELP_URL \
+    = 'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html#cli-configure-files-settings'
 
 Mount = namedtuple('Mount', ['server', 'mountpoint', 'type', 'options', 'freq', 'passno'])
 
@@ -147,7 +155,7 @@ def fatal_error(user_message, log_message=None):
     sys.exit(1)
 
 
-def get_aws_security_credentials(credentials_source, region):
+def get_aws_security_credentials(config, credentials_source, region):
     """
     Lookup AWS security credentials (access key ID and secret access key). Adapted credentials provider chain from:
     https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html and
@@ -157,32 +165,64 @@ def get_aws_security_credentials(credentials_source, region):
 
     if method == 'credentials':
         return get_aws_security_credentials_from_file('credentials', value)
+    elif method == 'named_profile':
+        return get_aws_security_credentials_from_assumed_profile(value)
     elif method == 'config':
         return get_aws_security_credentials_from_file('config', value)
     elif method == 'ecs':
-        return get_aws_security_credentials_from_ecs(value)
+        return get_aws_security_credentials_from_ecs(config, value)
     elif method == 'webidentity':
-        return get_aws_security_credentials_from_webidentity(*(value.split(',')), region=region)
+        return get_aws_security_credentials_from_webidentity(config, *(value.split(',')), region=region)
     elif method == 'metadata':
-        return get_aws_security_credentials_from_instance_metadata()
+        return get_aws_security_credentials_from_instance_metadata(config)
     else:
         logging.error('Improper credentials source string "%s" found from mount state file', credentials_source)
         return None
 
 
-def get_aws_ec2_metadata_token():
+def get_boolean_config_item_value(config, config_section, config_item, default_value, emit_warning_message=True):
+    warning_message = None
+    if not config.has_section(config_section):
+        warning_message = 'Warning: config file does not have section %s.' % config_section
+    elif not config.has_option(config_section, config_item):
+        warning_message = 'Warning: config file does not have %s item in section %s.' % (config_item, config_section)
+
+    if warning_message:
+        if emit_warning_message:
+            sys.stdout.write('%s. You should be able to find a new config file in the same folder as current config file %s. '
+                             'Consider update the new config file to latest config file. Use the default value [%s = %s].'
+                             % (warning_message, CONFIG_FILE, config_item, default_value))
+        return default_value
+    return config.getboolean(config_section, config_item)
+
+
+def fetch_ec2_metadata_token_disabled(config):
+    return get_boolean_config_item_value(config, MOUNT_CONFIG_SECTION, DISABLE_FETCH_EC2_METADATA_TOKEN_ITEM, default_value=False)
+
+
+def get_aws_ec2_metadata_token(timeout=DEFAULT_TIMEOUT):
+    # Normally the session token is fetched within 10ms, setting a timeout of 50ms here to abort the request
+    # and return None if the token has not returned within 50ms
     try:
         opener = build_opener(HTTPHandler)
         request = Request(INSTANCE_METADATA_TOKEN_URL)
-        request.add_header('X-aws-ec2-metadata-token-ttl-seconds', 21600)
+        request.add_header('X-aws-ec2-metadata-token-ttl-seconds', '21600')
         request.get_method = lambda: 'PUT'
-        res = opener.open(request)
-        return res.read()
+        try:
+            res = opener.open(request, timeout=timeout)
+            return res.read()
+        except socket.timeout:
+            logging.debug('Timeout when get the aws ec2 metadata token')
+            return None
     except NameError:
-        headers = {'X-aws-ec2-metadata-token-ttl-seconds': 21600}
+        headers = {'X-aws-ec2-metadata-token-ttl-seconds': '21600'}
         req = Request(INSTANCE_METADATA_TOKEN_URL, headers=headers, method='PUT')
-        res = urlopen(req)
-        return res.read()
+        try:
+            res = urlopen(req, timeout=timeout)
+            return res.read()
+        except socket.timeout:
+            logging.debug('Timeout when get the aws ec2 metadata token')
+            return None
 
 
 def get_aws_security_credentials_from_file(file_name, awsprofile):
@@ -197,14 +237,49 @@ def get_aws_security_credentials_from_file(file_name, awsprofile):
     return None
 
 
-def get_aws_security_credentials_from_ecs(uri):
+def get_aws_security_credentials_from_assumed_profile(awsprofile):
+    credentials = botocore_credentials_helper(awsprofile)
+    if credentials['AccessKeyId']:
+        return credentials
+
+    logging.error('AWS security credentials not found via assuming named profile [%s] using botocore', awsprofile)
+    return None
+
+
+def botocore_credentials_helper(awsprofile):
+    credentials = {'AccessKeyId': None, 'SecretAccessKey': None, 'Token': None}
+
+    try:
+        import botocore.session
+        from botocore.exceptions import ProfileNotFound
+    except ImportError:
+        logging.error('Named profile credentials cannot be retrieved without botocore, please install botocore first.')
+        return credentials
+
+    session = botocore.session.get_session()
+    session.set_config_variable('profile', awsprofile)
+
+    try:
+        frozen_credentials = session.get_credentials().get_frozen_credentials()
+    except ProfileNotFound as e:
+        logging.error('%s, please add the [profile %s] section in the aws config file following %s and %s.'
+                      % (e, awsprofile, NAMED_PROFILE_HELP_URL, CONFIG_FILE_SETTINGS_HELP_URL))
+        return credentials
+
+    credentials['AccessKeyId'] = frozen_credentials.access_key
+    credentials['SecretAccessKey'] = frozen_credentials.secret_key
+    credentials['Token'] = frozen_credentials.token
+    return credentials
+
+
+def get_aws_security_credentials_from_ecs(config, uri):
     # through ECS security credentials uri found in AWS_CONTAINER_CREDENTIALS_RELATIVE_URI environment variable
     dict_keys = ['AccessKeyId', 'SecretAccessKey', 'Token']
     ecs_uri = ECS_TASK_METADATA_API + uri
     ecs_unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % ecs_uri
     ecs_url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.' % \
                         (ecs_uri, SECURITY_CREDS_ECS_URI_HELP_URL)
-    ecs_security_dict = url_request_helper(ecs_uri, ecs_unsuccessful_resp, ecs_url_error_msg)
+    ecs_security_dict = url_request_helper(config, ecs_uri, ecs_unsuccessful_resp, ecs_url_error_msg)
 
     if ecs_security_dict and all(k in ecs_security_dict for k in dict_keys):
         return ecs_security_dict
@@ -212,7 +287,7 @@ def get_aws_security_credentials_from_ecs(uri):
     return None
 
 
-def get_aws_security_credentials_from_webidentity(role_arn, token_file, region):
+def get_aws_security_credentials_from_webidentity(config, role_arn, token_file, region):
     try:
         with open(token_file, 'r') as f:
             token = f.read()
@@ -232,7 +307,7 @@ def get_aws_security_credentials_from_webidentity(role_arn, token_file, region):
     unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % STS_ENDPOINT_URL
     url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.' % \
                     (STS_ENDPOINT_URL, SECURITY_CREDS_WEBIDENTITY_HELP_URL)
-    resp = url_request_helper(webidentity_url, unsuccessful_resp, url_error_msg, headers={'Accept': 'application/json'})
+    resp = url_request_helper(config, webidentity_url, unsuccessful_resp, url_error_msg, headers={'Accept': 'application/json'})
 
     if resp:
         creds = resp \
@@ -249,21 +324,19 @@ def get_aws_security_credentials_from_webidentity(role_arn, token_file, region):
     return None
 
 
-def get_aws_security_credentials_from_instance_metadata():
+def get_aws_security_credentials_from_instance_metadata(config):
     # through IAM role name security credentials lookup uri (after lookup for IAM role name attached to instance)
     dict_keys = ['AccessKeyId', 'SecretAccessKey', 'Token']
     iam_role_unsuccessful_resp = 'Unsuccessful retrieval of IAM role name at %s.' % INSTANCE_IAM_URL
     iam_role_url_error_msg = 'Unable to reach %s to retrieve IAM role name. See %s for more info.' % \
                              (INSTANCE_IAM_URL, SECURITY_CREDS_IAM_ROLE_HELP_URL)
-    iam_role_name = url_request_helper(INSTANCE_IAM_URL, iam_role_unsuccessful_resp,
-                                       iam_role_url_error_msg, retry_with_new_header_token=True)
+    iam_role_name = url_request_helper(config, INSTANCE_IAM_URL, iam_role_unsuccessful_resp, iam_role_url_error_msg)
     if iam_role_name:
         security_creds_lookup_url = INSTANCE_IAM_URL + iam_role_name
         unsuccessful_resp = 'Unsuccessful retrieval of AWS security credentials at %s.' % security_creds_lookup_url
         url_error_msg = 'Unable to reach %s to retrieve AWS security credentials. See %s for more info.' % \
                         (security_creds_lookup_url, SECURITY_CREDS_IAM_ROLE_HELP_URL)
-        iam_security_dict = url_request_helper(security_creds_lookup_url, unsuccessful_resp,
-                                               url_error_msg, retry_with_new_header_token=True)
+        iam_security_dict = url_request_helper(config, security_creds_lookup_url, unsuccessful_resp, url_error_msg)
 
         if iam_security_dict and all(k in iam_security_dict for k in dict_keys):
             return iam_security_dict
@@ -297,22 +370,37 @@ def credentials_file_helper(file_path, awsprofile):
     return credentials
 
 
-def url_request_helper(url, unsuccessful_resp, url_error_msg, headers={}, retry_with_new_header_token=False):
+def is_instance_metadata_url(url):
+    return url.startswith('http://169.254.169.254')
+
+
+def url_request_helper(config, url, unsuccessful_resp, url_error_msg, headers={}):
     try:
         req = Request(url)
         for k, v in headers.items():
             req.add_header(k, v)
+
+        if not fetch_ec2_metadata_token_disabled(config) and is_instance_metadata_url(url):
+            # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html
+            # IMDSv1 is a request/response method to access instance metadata
+            # IMDSv2 is a session-oriented method to access instance metadata
+            # We expect the token retrieve will fail in bridge networking environment (e.g. container) since the default hop
+            # limit for getting the token is 1. If the token retrieve does timeout, we fallback to use IMDSv1 instead
+            token = get_aws_ec2_metadata_token()
+            if token:
+                req.add_header('X-aws-ec2-metadata-token', token)
+
         request_resp = urlopen(req, timeout=1)
 
         return get_resp_obj(request_resp, url, unsuccessful_resp)
+    except socket.timeout:
+        err_msg = 'Request timeout'
     except HTTPError as e:
-        # For instance enable with IMDSv2, Unauthorized 401 error will be thrown,
-        # to retrieve metadata, the header should embeded with metadata token
-        if e.code == 401 and retry_with_new_header_token:
-            token = get_aws_ec2_metadata_token()
-            req.add_header('X-aws-ec2-metadata-token', token)
-            request_resp = urlopen(req, timeout=1)
-            return get_resp_obj(request_resp, url, unsuccessful_resp)
+        # For instance enable with IMDSv2 and fetch token disabled, Unauthorized 401 error will be thrown
+        if e.code == 401 and fetch_ec2_metadata_token_disabled(config) and is_instance_metadata_url(url):
+            logging.warning('Unauthorized request to instance metadata url %s, IMDSv2 is enabled on the instance, while fetching '
+                            'ec2 metadata token is disabled. Please set the value of config item '
+                            '"%s" to "false" in config file %s.' % (url, DISABLE_FETCH_EC2_METADATA_TOKEN_ITEM, CONFIG_FILE))
         err_msg = 'Unable to reach the url at %s: status=%d, reason is %s' % (url, e.code, e.reason)
     except URLError as e:
         err_msg = 'Unable to reach the url at %s, reason is %s' % (url, e.reason)
@@ -496,7 +584,7 @@ def is_pid_running(pid):
 def start_tls_tunnel(child_procs, state_file, command):
     # launch the tunnel in a process group so if it has any child processes, they can be killed easily
     logging.info('Starting TLS tunnel: "%s"', ' '.join(command))
-    tunnel = subprocess.Popen(command, preexec_fn=os.setsid, close_fds=True)
+    tunnel = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=os.setsid, close_fds=True)
 
     if not is_pid_running(tunnel.pid):
         fatal_error('Failed to initialize TLS tunnel for %s' % state_file, 'Failed to start TLS tunnel.')
@@ -747,8 +835,8 @@ def recreate_certificate(config, mount_name, common_name, fs_id, credentials_sou
         create_public_key(private_key, public_key)
 
     client_info = get_client_info(config)
-    config_body = create_ca_conf(certificate_config, common_name, tls_paths['mount_dir'], private_key, current_time, region,
-                                 fs_id, credentials_source, ap_id=ap_id, client_info=client_info)
+    config_body = create_ca_conf(config, certificate_config, common_name, tls_paths['mount_dir'], private_key, current_time,
+                                 region, fs_id, credentials_source, ap_id=ap_id, client_info=client_info)
 
     if not config_body:
         logging.error('Cannot recreate self-signed certificate')
@@ -797,8 +885,8 @@ def check_and_create_private_key(base_path=STATE_FILE_DIR):
                     return function()
             except OSError as e:
                 if e.errno == errno.EEXIST:
-                    logging.info('Failed to take out private key creation lock, sleeping 50 ms')
-                    time.sleep(0.05)
+                    logging.info('Failed to take out private key creation lock, sleeping %s (s)' % DEFAULT_TIMEOUT)
+                    time.sleep(DEFAULT_TIMEOUT)
                 else:
                     raise
 
@@ -820,11 +908,11 @@ def create_certificate_signing_request(config_path, key_path, csr_path):
     subprocess_call(cmd, 'Failed to create certificate signing request (csr)')
 
 
-def create_ca_conf(config_path, common_name, directory, private_key, date, region, fs_id, credentials_source,
+def create_ca_conf(config, config_path, common_name, directory, private_key, date, region, fs_id, credentials_source,
                    ap_id=None, client_info=None):
     """Populate ca/req configuration file with fresh configurations at every mount since SigV4 signature can change"""
     public_key_path = os.path.join(directory, 'publicKey.pem')
-    security_credentials = get_aws_security_credentials(credentials_source, region) if credentials_source else ''
+    security_credentials = get_aws_security_credentials(config, credentials_source, region) if credentials_source else ''
 
     if credentials_source and security_credentials is None:
         logging.error('Failed to retrieve AWS security credentials using lookup method: %s', credentials_source)
@@ -1175,7 +1263,7 @@ def main():
 
     child_procs = []
 
-    if config.getboolean(CONFIG_SECTION, 'enabled'):
+    if get_boolean_config_item_value(config, CONFIG_SECTION, 'enabled', default_value=True):
         logging.info('amazon-efs-mount-watchdog, version %s, is enabled and started', VERSION)
         poll_interval_sec = config.getint(CONFIG_SECTION, 'poll_interval_sec')
         unmount_grace_period_sec = config.getint(CONFIG_SECTION, 'unmount_grace_period_sec')

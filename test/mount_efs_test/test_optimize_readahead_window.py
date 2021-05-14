@@ -9,7 +9,6 @@
 import subprocess
 import mount_efs
 
-from mock import MagicMock
 from .. import utils
 
 try:

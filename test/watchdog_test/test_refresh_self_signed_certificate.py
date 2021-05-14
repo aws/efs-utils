@@ -129,6 +129,7 @@ def _create_certificate_and_state(tls_dict, temp_dir, pk_path, timestamp, securi
 
 
 def _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True, client_info=True):
+    config = _get_config()
     tls_dict = mount_efs.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     mount_efs.create_required_directory({}, tls_dict['mount_dir'])
     tls_dict['certificate_path'] = os.path.join(tls_dict['mount_dir'], 'config.conf')
@@ -143,7 +144,7 @@ def _create_ca_conf_helper(mocker, tmpdir, current_time, iam=True, ap=True, clie
     credentials = 'dummy:lookup' if iam else None
     ap_id = AP_ID if ap else None
     client_info = CLIENT_INFO if client_info else None
-    full_config_body = watchdog.create_ca_conf(tls_dict['certificate_path'], COMMON_NAME, tls_dict['mount_dir'],
+    full_config_body = watchdog.create_ca_conf(config, tls_dict['certificate_path'], COMMON_NAME, tls_dict['mount_dir'],
                                                tls_dict['private_key'], current_time, REGION, FS_ID, credentials,
                                                ap_id, client_info)
     assert os.path.exists(tls_dict['certificate_path'])
@@ -430,7 +431,7 @@ def _test_recreate_certificate_with_valid_client_source_config(mocker, tmpdir, c
 
     with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
         conf_body = f.read()
-        assert conf_body == watchdog.create_ca_conf(tmp_config_path, COMMON_NAME, tls_dict['mount_dir'],
+        assert conf_body == watchdog.create_ca_conf(config, tmp_config_path, COMMON_NAME, tls_dict['mount_dir'],
                                                     pk_path, current_time, REGION, FS_ID, CREDENTIALS,
                                                     AP_ID, expected_client_info)
     assert os.path.exists(pk_path)
@@ -457,7 +458,7 @@ def _test_recreate_certificate_with_invalid_client_source_config(mocker, tmpdir,
 
     with open(os.path.join(tls_dict['mount_dir'], 'config.conf')) as f:
         conf_body = f.read()
-        assert conf_body == watchdog.create_ca_conf(tmp_config_path, COMMON_NAME, tls_dict['mount_dir'],
+        assert conf_body == watchdog.create_ca_conf(config, tmp_config_path, COMMON_NAME, tls_dict['mount_dir'],
                                                     pk_path, current_time, REGION, FS_ID, CREDENTIALS,
                                                     AP_ID, expected_client_info)
     assert os.path.exists(pk_path)
@@ -511,8 +512,9 @@ def test_create_ca_supporting_files(tmpdir):
 
 
 def test_create_ca_conf_with_awsprofile_no_credentials_found(mocker, caplog, tmpdir):
+    config = _get_config()
     mocker.patch('watchdog.get_aws_security_credentials', return_value=None)
-    watchdog.create_ca_conf(None, None, str(tmpdir), None, None, None, None, CREDENTIALS_SOURCE, None)
+    watchdog.create_ca_conf(config, None, None, str(tmpdir), None, None, None, None, CREDENTIALS_SOURCE, None)
     assert 'Failed to retrieve AWS security credentials using lookup method: %s' % CREDENTIALS_SOURCE in \
            [rec.message for rec in caplog.records][0]
 

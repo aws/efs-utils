@@ -17,6 +17,7 @@ CONFIG = MagicMock()
 DNS_NAME = 'fs-deadbeef.efs.us-east-1.amazonaws.com'
 FS_ID = 'fs-deadbeef'
 INIT_SYSTEM = 'upstart'
+FALLBACK_IP_ADDRESS = '192.0.0.1'
 MOUNT_POINT = '/mnt'
 PATH = '/'
 
@@ -60,6 +61,23 @@ def test_mount_nfs(mocker):
 
     assert '/sbin/mount.nfs4' == args[NFS_BIN_ARG_IDX]
     assert DNS_NAME in args[NFS_MOUNT_PATH_IDX]
+    assert '/mnt' == args[NFS_MOUNT_POINT_IDX]
+
+    utils.assert_called_once(optimize_readahead_window_mock)
+
+
+def test_mount_nfs_with_fallback_ip_address(mocker):
+    mock = _mock_popen(mocker)
+    optimize_readahead_window_mock = mocker.patch('mount_efs.optimize_readahead_window')
+
+    mount_efs.mount_nfs(CONFIG, DNS_NAME, '/', '/mnt', DEFAULT_OPTIONS, fallback_ip_address=FALLBACK_IP_ADDRESS)
+
+    args, _ = mock.call_args
+    args = args[0]
+
+    assert '/sbin/mount.nfs4' == args[NFS_BIN_ARG_IDX]
+    assert DNS_NAME not in args[NFS_MOUNT_PATH_IDX]
+    assert FALLBACK_IP_ADDRESS in args[NFS_MOUNT_PATH_IDX]
     assert '/mnt' == args[NFS_MOUNT_POINT_IDX]
 
     utils.assert_called_once(optimize_readahead_window_mock)

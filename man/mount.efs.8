@@ -101,8 +101,9 @@ can be used to mount EFS\&.
 .TP
 \fBawsprofile\fR
 Use the named profile used to lookup IAM credentials in the AWS CLI credentials file \
-(~/.aws/credentials) or AWS CLI config file (~/.aws/config). If "awsprofile" is not \
-specified, the "default" profile is used\&.
+(~/.aws/credentials) or AWS CLI config file (~/.aws/config). If botocore is installed, \
+assume the named profile and use the credentials of the assumed profile. If "awsprofile" \
+is not specified, the "default" profile is used\&.
 .TP
 \fBawscredsuri\fR
 Use the relative uri to lookup IAM credentials from ecs task metadata endpoint\&.
@@ -118,6 +119,9 @@ Mount the EFS file system to the specified availability zone mount target\&.
 .TP
 \fBmountport\fR
 Use the port 2049 to bypass portmapper daemon on EC2 Mac instances running macOS Big Sur\&.
+.TP
+\fBmounttargetip\fR
+Mount the EFS file system to the specified mount target ip address\&.
 .if n \{\
 .RE
 .\}
@@ -126,6 +130,11 @@ Use the port 2049 to bypass portmapper daemon on EC2 Mac instances running macOS
 sudo mount -t efs fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 "/mnt/efs" without encryption of data in transit\&.
+.TP
+sudo mount -t efs -o mounttargetip=192.0.0.1 /mnt/efs
+Mount an EFS file system with file system ID "fs-abcd1234" on the mount target \
+that belongs to the file system with address "192.0.0.1" without encryption of \
+data in transit\&.
 .TP
 sudo mount -t efs -o netns=/proc/1/net/ns fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
@@ -172,6 +181,16 @@ sudo mount -t efs -o tls,iam fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point "/mnt/efs" \
 with encryption of data in transit. The mount helper will authenticate with EFS using \
 the system's IAM identity\&.
+.TP
+sudo mount -t efs -o tls,iam,awsprofile=test-profile fs-abcd1234 /mnt/efs
+Mount an EFS file system with file system ID "fs-abcd1234" at mount point "/mnt/efs" \
+with encryption of data in transit. The mount helper will authenticate with EFS using \
+the system's IAM identity named profile "test profile", for which the credentials are retrieved \
+either from /root/.aws/credentials or /root/.aws/config. If the credentials are not present \
+in the credentials or config files, and there is a "[profile test-profile]" section in the \
+/root/.aws/config file, the mount helper will assume the named profile "test-profile" based \
+on the profile section configuration in root/.aws/config and use the credentials retrieved \
+with botocore to mount (botocore must be pre-installed)\&.
 .TP
 sudo mount -t efs -o tls,accesspoint=fsap-12345678 fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point "/mnt/efs" \

@@ -21,6 +21,7 @@ except ImportError:
 FS_ID = 'fs-deadbeef'
 DNS_NAME = 'fs-deadbeef.com'
 DNS_NAME_WITH_AZ = 'us-east-1a.fs-deadbeef.com'
+FALLBACK_IP_ADDRESS = '192.0.0.1'
 MOUNT_POINT = '/mnt'
 PORT = 12345
 VERIFY_LEVEL = 2
@@ -100,11 +101,14 @@ def _validate_config(stunnel_config_file, expected_global_config, expected_efs_c
 
 def _get_expected_efs_config(port=PORT, dns_name=DNS_NAME, verify=mount_efs.DEFAULT_STUNNEL_VERIFY_LEVEL,
                              ocsp_override=True, check_cert_hostname=True, check_cert_validity=False,
-                             disable_libwrap=True):
+                             disable_libwrap=True, fallback_ip_address=None):
 
     expected_efs_config = dict(mount_efs.STUNNEL_EFS_CONFIG)
     expected_efs_config['accept'] = expected_efs_config['accept'] % port
-    expected_efs_config['connect'] = expected_efs_config['connect'] % dns_name
+    if not fallback_ip_address:
+        expected_efs_config['connect'] = expected_efs_config['connect'] % dns_name
+    else:
+        expected_efs_config['connect'] = expected_efs_config['connect'] % fallback_ip_address
     expected_efs_config['verify'] = str(verify)
 
     if check_cert_hostname:
@@ -126,7 +130,7 @@ def _test_check_cert_hostname(mocker, tmpdir, stunnel_check_cert_hostname_suppor
     config_file = mount_efs.write_stunnel_config_file(
         _get_config(mocker, stunnel_check_cert_hostname_supported=stunnel_check_cert_hostname_supported,
                     stunnel_check_cert_hostname=stunnel_check_cert_hostname),
-        str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL, OCSP_ENABLED, _get_mount_options(), 
+        str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL, OCSP_ENABLED, _get_mount_options(),
         DEFAULT_REGION)
 
     utils.assert_called_once(ca_mocker)
@@ -141,7 +145,7 @@ def _test_check_cert_validity(mocker, tmpdir, stunnel_check_cert_validity_suppor
 
     config_file = mount_efs.write_stunnel_config_file(
         _get_config(mocker, stunnel_check_cert_validity_supported=stunnel_check_cert_validity_supported),
-        str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL, stunnel_check_cert_validity, _get_mount_options(), 
+        str(tmpdir), FS_ID, MOUNT_POINT, PORT, DNS_NAME, VERIFY_LEVEL, stunnel_check_cert_validity, _get_mount_options(),
         DEFAULT_REGION)
 
     utils.assert_called_once(ca_mocker)
@@ -150,7 +154,7 @@ def _test_check_cert_validity(mocker, tmpdir, stunnel_check_cert_validity_suppor
                      _get_expected_efs_config(check_cert_validity=expected_check_cert_validity_config_value))
 
 
-def _test_write_stunnel_config_file(mocker, tmpdir):
+def test_write_stunnel_config_file(mocker, tmpdir):
     ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
     state_file_dir = str(tmpdir)
 
@@ -161,12 +165,13 @@ def _test_write_stunnel_config_file(mocker, tmpdir):
     _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG, _get_expected_efs_config())
 
 
-def _test_write_stunnel_config_file_with_az_as_dns_name(mocker, tmpdir):
+def test_write_stunnel_config_file_with_az_as_dns_name(mocker, tmpdir):
     ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
     state_file_dir = str(tmpdir)
 
     config_file = mount_efs.write_stunnel_config_file(_get_config(mocker), state_file_dir, FS_ID, MOUNT_POINT, PORT,
-                                                      DNS_NAME_WITH_AZ, VERIFY_LEVEL, OCSP_ENABLED, _get_mount_options())
+                                                      DNS_NAME_WITH_AZ, VERIFY_LEVEL, OCSP_ENABLED, _get_mount_options(),
+                                                      DEFAULT_REGION)
     utils.assert_called_once(ca_mocker)
 
     _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG, _get_expected_efs_config(dns_name=DNS_NAME_WITH_AZ))
@@ -311,3 +316,16 @@ def test_write_stunnel_config_for_unknown_system_enable_libwrap(mocker, tmpdir):
 
 def test_write_stunnel_config_for_non_rhel8_enable_libwrap(mocker, tmpdir):
     _test_disable_libwrap(mocker, tmpdir, system_release='Amazon Linux release 2 (Karoo)', disable_libwrap=True)
+
+
+def test_write_stunnel_config_with_fall_back_ip_address(mocker, tmpdir):
+    ca_mocker = mocker.patch('mount_efs.add_stunnel_ca_options')
+    state_file_dir = str(tmpdir)
+
+    config_file = mount_efs.write_stunnel_config_file(_get_config(mocker), state_file_dir, FS_ID, MOUNT_POINT, PORT, DNS_NAME,
+                                                      VERIFY_LEVEL, OCSP_ENABLED, _get_mount_options(), DEFAULT_REGION,
+                                                      fallback_ip_address=FALLBACK_IP_ADDRESS)
+
+    utils.assert_called_once(ca_mocker)
+
+    _validate_config(config_file, mount_efs.STUNNEL_GLOBAL_CONFIG, _get_expected_efs_config(fallback_ip_address=FALLBACK_IP_ADDRESS))

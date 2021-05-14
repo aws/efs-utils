@@ -5,6 +5,7 @@
 # for the specific language governing permissions and limitations under
 # the License.
 #
+
 import socket
 
 import pytest
@@ -12,7 +13,11 @@ import pytest
 import mount_efs
 
 from .. import utils
-from mock import MagicMock
+
+try:
+    import ConfigParser
+except ImportError:
+    from configparser import ConfigParser
 
 DEFAULT_AZ = 'us-east-1a'
 CORRECT_DEVICE_DESCRIPTORS_FS_ID = [
@@ -44,41 +49,22 @@ def setup(mocker):
     mocker.patch('socket.gethostbyname')
 
 def _get_mock_config(dns_name_format='{az}.{fs_id}.efs.{region}.{dns_name_suffix}', dns_name_suffix='amazonaws.com',
-                     cloudwatch_enabled='false'):
-    def config_get_side_effect(section, field):
-        if section == mount_efs.CONFIG_SECTION and field == 'dns_name_format':
-            return dns_name_format
-        elif section == mount_efs.CONFIG_SECTION and field == 'dns_name_suffix':
-            return dns_name_suffix
-        else:
-            raise ValueError('Unexpected arguments')
+                     cloudwatch_enabled='false', has_fallback_to_mount_target_ip_address_item=True,
+                     fallback_to_mount_target_ip_address=False):
+    try:
+        config = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        config = ConfigParser()
+    config.add_section(mount_efs.CONFIG_SECTION)
+    config.add_section(mount_efs.CLOUDWATCH_LOG_SECTION)
+    config.set(mount_efs.CONFIG_SECTION, 'dns_name_format', dns_name_format)
+    config.set(mount_efs.CONFIG_SECTION, 'dns_name_suffix', dns_name_suffix)
+    config.set(mount_efs.CLOUDWATCH_LOG_SECTION, 'enabled', cloudwatch_enabled)
+    if has_fallback_to_mount_target_ip_address_item:
+        config.set(mount_efs.CONFIG_SECTION, mount_efs.FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM,
+                   str(fallback_to_mount_target_ip_address))
 
-    def config_getboolean_side_effect(section, field):
-        if section == mount_efs.CLOUDWATCH_LOG_SECTION and field == 'enabled':
-            return True if cloudwatch_enabled == 'true' else False
-        else:
-            raise ValueError('Unexpected arguments')
-
-    mock_config = MagicMock()
-    mock_config.get.side_effect = config_get_side_effect
-    mock_config.getboolean.side_effect = config_getboolean_side_effect
-    mock_config.has_section.return_value = False
-    return mock_config
-
-
-def _get_new_mock_config(dns_name_format='{az}.{fs_id}.efs.{region}.{dns_name_suffix}', dns_name_suffix='amazonaws.com'):
-    def config_get_side_effect(section, field):
-        if section == mount_efs.CONFIG_SECTION and field == 'dns_name_format':
-            return dns_name_format
-        elif section == mount_efs.CONFIG_SECTION and field == 'dns_name_suffix':
-            return dns_name_suffix
-        else:
-            raise ValueError('Unexpected arguments')
-
-    mock_config = MagicMock()
-    mock_config.get.side_effect = config_get_side_effect
-    mock_config.has_section.return_value = False
-    return mock_config
+    return config
 
 
 def test_match_device_correct_descriptors_fs_id(mocker):
@@ -88,7 +74,8 @@ def test_match_device_correct_descriptors_fs_id(mocker):
 
 
 def test_match_device_correct_descriptors_cname_dns_suffix_override_region(mocker):
-    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value='fs-deadbeef.efs.cn-north-1.amazonaws.com.cn')
+    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name_and_fallback_mount_target_ip_address',
+                                     return_value=('fs-deadbeef.efs.cn-north-1.amazonaws.com.cn', None))
     gethostbyname_ex_mock = mocker.patch('socket.gethostbyname_ex',
                                          return_value=('fs-deadbeef.efs.cn-north-1.amazonaws.com.cn', [], None))
     config = _get_mock_config()
@@ -99,7 +86,8 @@ def test_match_device_correct_descriptors_cname_dns_suffix_override_region(mocke
 
 
 def test_match_device_correct_descriptors_cname_dns_primary(mocker):
-    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value='fs-deadbeef.efs.us-east-1.amazonaws.com')
+    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name_and_fallback_mount_target_ip_address',
+                                     return_value=('fs-deadbeef.efs.us-east-1.amazonaws.com', None))
     gethostbyname_ex_mock = mocker.patch('socket.gethostbyname_ex',
                                          return_value=('fs-deadbeef.efs.us-east-1.amazonaws.com', [], None))
     config = _get_mock_config()
@@ -110,7 +98,8 @@ def test_match_device_correct_descriptors_cname_dns_primary(mocker):
 
 
 def test_match_device_correct_descriptors_cname_dns_secondary(mocker):
-    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value='fs-deadbeef.efs.us-east-1.amazonaws.com')
+    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name_and_fallback_mount_target_ip_address',
+                                     return_value=('fs-deadbeef.efs.us-east-1.amazonaws.com', None))
     gethostbyname_ex_mock = mocker.patch('socket.gethostbyname_ex',
                                          return_value=(None, ['fs-deadbeef.efs.us-east-1.amazonaws.com'], None))
     config = _get_mock_config()
@@ -121,7 +110,8 @@ def test_match_device_correct_descriptors_cname_dns_secondary(mocker):
 
 
 def test_match_device_correct_descriptors_cname_dns_tertiary(mocker):
-    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value='fs-deadbeef.efs.us-east-1.amazonaws.com')
+    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name_and_fallback_mount_target_ip_address',
+                                     return_value=('fs-deadbeef.efs.us-east-1.amazonaws.com', None))
     gethostbyname_ex_mock = mocker.patch('socket.gethostbyname_ex',
                                          return_value=(None, [None, 'fs-deadbeef.efs.us-east-1.amazonaws.com'], None))
     config = _get_mock_config()
@@ -132,7 +122,8 @@ def test_match_device_correct_descriptors_cname_dns_tertiary(mocker):
 
 
 def test_match_device_correct_descriptors_cname_dns_amongst_invalid(mocker):
-    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value='fs-deadbeef.efs.us-east-1.amazonaws.com')
+    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name_and_fallback_mount_target_ip_address',
+                                     return_value=('fs-deadbeef.efs.us-east-1.amazonaws.com', None))
     gethostbyname_ex_mock = mocker.patch(
         'socket.gethostbyname_ex',
         return_value=('fs-deadbeef.efs.us-west-1.amazonaws.com',
@@ -197,7 +188,8 @@ def test_match_device_resolve_to_invalid_efs_dns_name(mocker, capsys):
 
 
 def test_match_device_resolve_to_unexpected_efs_dns_name(mocker, capsys):
-    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value='fs-deadbeef.efs.us-west-1.amazonaws.com')
+    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name_and_fallback_mount_target_ip_address',
+                                     return_value=('fs-deadbeef.efs.us-west-1.amazonaws.com', None))
     gethostbyname_ex_mock = mocker.patch('socket.gethostbyname_ex',
                                          return_value=('fs-deadbeef.efs.us-east-1.amazonaws.com', [], None))
     config = _get_mock_config()
@@ -219,9 +211,11 @@ def test_match_device_fqdn_same_as_dns_name(mocker, capsys):
     assert efs_fqdn_match
     assert FS_ID == efs_fqdn_match.group('fs_id')
 
-    config = _get_new_mock_config()
-    expected_dns_name = mount_efs.get_dns_name(config, FS_ID, DEFAULT_NFS_OPTIONS)
+    config = _get_mock_config()
+    expected_dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(config, FS_ID, DEFAULT_NFS_OPTIONS)
     assert dns_name == expected_dns_name
+    assert None == ip_address
+
     for device, (fs_id, path, az) in CORRECT_DEVICE_DESCRIPTORS_CNAME_DNS:
         assert (fs_id, path, az) == mount_efs.match_device(config, device, DEFAULT_NFS_OPTIONS)
     utils.assert_called(gethostbyname_ex_mock)
@@ -235,9 +229,10 @@ def test_match_device_fqdn_same_as_dns_name_with_az(mocker, capsys):
     assert efs_fqdn_match
     assert FS_ID == efs_fqdn_match.group('fs_id')
 
-    config = _get_new_mock_config()
-    expected_dns_name = mount_efs.get_dns_name(config, FS_ID, OPTIONS_WITH_AZ)
+    config = _get_mock_config()
+    expected_dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(config, FS_ID, OPTIONS_WITH_AZ)
     assert dns_name == expected_dns_name
+    assert None == ip_address
     for device, (fs_id, path, az) in CORRECT_DEVICE_DESCRIPTORS_CNAME_DNS_WITH_AZ:
         assert (fs_id, path, az) == mount_efs.match_device(config, device, OPTIONS_WITH_AZ)
     utils.assert_called(gethostbyname_ex_mock)
@@ -247,8 +242,8 @@ def test_match_device_with_az_dns_name_mount_az_not_in_option(mocker):
     # When dns_name is provided for mounting, if the az is not provided in the mount option, also dns_name contains az
     # info, verify that the az info returned is equal to the az info in the dns name
     dns_name = 'us-east-1a.fs-deadbeef.efs.us-east-1.amazonaws.com'
-    config = _get_new_mock_config()
-    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value=dns_name)
+    config = _get_mock_config()
+    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name_and_fallback_mount_target_ip_address', return_value=(dns_name, None))
     gethostbyname_ex_mock = mocker.patch('socket.gethostbyname_ex', return_value=(dns_name, [], None))
     fsid, path, az = mount_efs.match_device(config, dns_name, DEFAULT_NFS_OPTIONS)
 
@@ -262,8 +257,8 @@ def test_match_device_with_az_dns_name_mount_az_in_option(mocker):
     # When dns_name is provided for mounting, if the az is provided in the mount option, also dns_name contains az
     # info, verify that the az info returned is equal to the az info in the dns name
     dns_name = 'us-east-1a.fs-deadbeef.efs.us-east-1.amazonaws.com'
-    config = _get_new_mock_config()
-    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value=dns_name)
+    config = _get_mock_config()
+    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name_and_fallback_mount_target_ip_address', return_value=(dns_name, None))
     gethostbyname_ex_mock = mocker.patch('socket.gethostbyname_ex', return_value=(dns_name, [], None))
     fsid, path, az = mount_efs.match_device(config, dns_name, OPTIONS_WITH_AZ)
 
@@ -278,8 +273,9 @@ def test_match_device_with_dns_name_mount_az_in_option(mocker):
     # equal to the az info in the dns name
     dns_name = 'example.random.com'
     az_dns_name = 'us-east-1a.fs-deadbeef.efs.us-east-1.amazonaws.com'
-    config = _get_new_mock_config()
-    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value=az_dns_name)
+    config = _get_mock_config()
+    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name_and_fallback_mount_target_ip_address',
+                                     return_value=(az_dns_name, None))
     gethostbyname_ex_mock = mocker.patch('socket.gethostbyname_ex', return_value=(az_dns_name, [], None))
     fsid, path, az = mount_efs.match_device(config, dns_name, OPTIONS_WITH_AZ)
 
@@ -294,8 +290,9 @@ def test_match_device_with_dns_name_mount_az_in_option_not_match(mocker, capsys)
     # the same, verify that exception is thrown
     dns_name = 'example.random.com'
     az_dns_name = 'us-east-1b.fs-deadbeef.efs.us-east-1.amazonaws.com'
-    config = _get_new_mock_config()
-    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name', return_value=az_dns_name)
+    config = _get_mock_config()
+    get_dns_name_mock = mocker.patch('mount_efs.get_dns_name_and_fallback_mount_target_ip_address',
+                                     return_value=(az_dns_name, None))
     gethostbyname_ex_mock = mocker.patch('socket.gethostbyname_ex', return_value=(az_dns_name, [], None))
 
     with pytest.raises(SystemExit) as ex:

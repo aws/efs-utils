@@ -42,6 +42,10 @@ The `efs-utils` package has been verified against the following MacOS distributi
 * Python 3.4+
 * `stunnel` 4.56+
 
+## Optional
+
+* `botocore` 1.12.0+
+
 ## Installation
 
 ### On Amazon Linux distributions
@@ -165,6 +169,12 @@ To mount with the recommended default options, simply run:
 $ sudo mount -t efs file-system-id efs-mount-point/
 ```
 
+To mount file system to a specific mount target of the file system, run:
+
+```
+$ sudo mount -t efs -o mounttargetip=mount-target-ip-address file-system-id efs-mount-point/
+```
+
 To mount file system within a given network namespace, run:
 
 ```
@@ -256,13 +266,12 @@ The installation installs latest stunnel available in brew repository. You can a
 brew upgrade stunnel
 ```
 
+## Install botocore
 
-## Enable mount success/failure notification via CloudWatch log
-`efs-utils` now support publishing mount success/failure logs to CloudWatch log. By default, this feature is disabled. There are three
-steps you must follow to enable and use this feature:
-
-### Step 1. Install botocore
-`efs-utils` uses botocore to interact with CloudWatch log service . Please note the package type from the above table. 
+`efs-utils` uses botocore to interact with other AWS services. Please note the package type from the above table and install
+botocore based on that info. If botocore is already installed and does not meet the minimum required version, 
+you can upgrade the botocore by following the [upgrade botocore section](#Upgrade-botocore).
+ 
 - Download the `get-pip.py` script
 #### RPM
 ```bash
@@ -316,6 +325,20 @@ sudo pip3 install --target /usr/lib/python3/dist-packages botocore || sudo /usr/
 sudo pip3 install botocore
 ```
 
+## Upgrade botocore
+Pass `--upgrade` to the corresponding installation scripts above based on system platform and distribution
+
+```bash
+sudo pip3 install botocore --upgrade
+```
+
+## Enable mount success/failure notification via CloudWatch log
+`efs-utils` now support publishing mount success/failure logs to CloudWatch log. By default, this feature is disabled. There are three
+steps you must follow to enable and use this feature:
+
+### Step 1. Install botocore
+Follow [install botocore section](#Install-botocore)
+
 ### Step 2. Enable CloudWatch log feature in efs-utils config file `/etc/amazon/efs/efs-utils.conf`
 ```bash
 sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/}' /etc/amazon/efs/efs-utils.conf
@@ -363,7 +386,86 @@ You can also manually chose a value of read_ahead_kb to optimize read throughput
 $ sudo bash -c "echo read-ahead-value-in-kb > /sys/class/bdi/0:$(stat -c '%d' efs-mount-point)/read_ahead_kb"
 ```
 
+## Using botocore to retrieve mount target ip address when dns name cannot be resolved
+
+`efs-utils` now supports using botocore to retrieve mount target ip address when dns name cannot be resolved, e.g. 
+when user is mounting a file system in another VPC. There are two prerequisites to use this feature:
+
+### Step 1. Install botocore
+Follow [install botocore section](#Install-botocore)
+
+### Step 2. Allow DescribeMountTargets and DescribeAvailabilityZones action in the IAM policy
+Allow the `elasticfilesystem:DescribeMountTargets` and `ec2:DescribeAvailabilityZones` action in your policy attached to 
+the iam role you attached to the instance, or the aws credentials configured on your instance. We recommend you attach 
+AWS managed policy `AmazonElasticFileSystemsUtils`.
+
+This feature will be enabled by default. To disable this feature:
+
+```bash
+sed -i "s/fall_back_to_mount_target_ip_address_enabled = true/fall_back_to_mount_target_ip_address_enabled = false/" /etc/amazon/efs/efs-utils.conf
+```
+
+If you decide that you do not want to use this feature, but need to mount a cross-VPC file system, you can use the mounttargetip 
+option to do so, using the desired mount target ip address in the mount command.
+
+## The way to access instance metadata
+`efs-utils` by default uses IMDSv2, which is a session-oriented method used to access instance metadata. If you don't want to use 
+IMDSv2, you can disable the token fetching feature by running the following command:
+
+```bash
+sed -i "s/disable_fetch_ec2_metadata_token = false/disable_fetch_ec2_metadata_token = true/" /etc/amazon/efs/efs-utils.conf
+```
+
+## Use the assumed profile credentials for IAM
+To authenticate with EFS using the system’s IAM identity of an awsprofile, add the `iam` option and pass the profile name to 
+`awsprofile` option. These options require the `tls` option.
+
+```
+$ sudo mount -t efs -o tls,iam,aws-profile=test-profile file-system-id efs-mount-point/
+```
+
+To configure the named profile, see the [Named Profiles doc](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-profiles.html)
+and [Support Config File Settings doc](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html#cli-configure-files-settings)
+for more details. If the credentials (e.g. aws_access_key_id) are not configured in `/root/.aws/credentials` or `/root/.aws/config` 
+(note that the path prefix may vary based on the root path of sudo), efs-utils will use botocore to assume the named profile. 
+This will require botocore is pre-installed, please follow [install botocore section](#Install-botocore) to install botocore first.
+
+Normally you will need to configure your profile IAM policy to make the assume works. For example, if you want to perform a
+cross-account mounting, suppose you have established 
+[vpc-peering-connections](https://docs.aws.amazon.com/vpc/latest/peering/create-vpc-peering-connection.html) between your vpcs,
+next step you need to do is giving permission to account B so that it can assume a role in account A and then mount the file system 
+that belongs to account A. You can see 
+[IAM doc](https://docs.aws.amazon.com/IAM/latest/UserGuide/tutorial_cross-account-with-roles.html) for more details.
+
+After the IAM identity is setup, you can configure your awsprofile credentials or config. You can refer to 
+[sdk settings](https://docs.aws.amazon.com/sdkref/latest/guide/settings-global.html). For example you can define
+the profile to use the credentials of profile `default` to assume role in account A by defining the `source_profile`.
+
+```bash
+# /root/.aws/credentials
+[default]
+aws_access_key_id = AKIAIOSFODNN7EXAMPLE
+aws_secret_access_key_id =wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+# /root/.aws/config
+[default]
+...
+
+[profile test-profile]
+role_arn = <role-arn-in-account-A>
+source_profile = default
+```
+
+Or you can use the credentials from IAM role attached to instance to assume the named profile, e.g.
+
+```bash
+# /root/.aws/config
+[profile test-profile]
+role_arn = <role-arn-in-account-A>
+credential_source = Ec2InstanceMetadata
+```
+
+
 ## License Summary
 
 This code is made available under the MIT license.
-
