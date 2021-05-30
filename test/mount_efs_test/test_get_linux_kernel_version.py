@@ -6,7 +6,6 @@
 # the License.
 #
 
-
 import mount_efs
 
 DEFAULT_KERNEL_VERSION_NEEDED_LEN = len(mount_efs.NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION)

@@ -110,7 +110,7 @@ def test_botocore_not_called_when_feature_not_enabled(mocker):
     assert enabled == False
 
     get_botocore_client_mock = mocker.patch('mount_efs.get_botocore_client')
-    cloudwatchlog_agent = mount_efs.bootstrap_cloudwatch_logging(config, FS_ID)
+    cloudwatchlog_agent = mount_efs.bootstrap_cloudwatch_logging(config, {}, FS_ID)
     utils.assert_not_called(get_botocore_client_mock)
     assert cloudwatchlog_agent == None
 
@@ -119,7 +119,7 @@ def test_botocore_not_called_when_feature_not_enabled(mocker):
 def test_cloudwatchlog_agent_none_when_botocore_agent_is_none(mocker):
     config = _get_mock_config(DEFAULT_CLOUDWATCH_ENABLED, DEFAULT_CLOUDWATCH_LOG_GROUP, DEFAULT_RETENTION_DAYS)
     get_botocore_client_mock = mocker.patch('mount_efs.get_botocore_client', return_value=None)
-    cloudwatchlog_agent = mount_efs.bootstrap_cloudwatch_logging(config, FS_ID)
+    cloudwatchlog_agent = mount_efs.bootstrap_cloudwatch_logging(config, {}, FS_ID)
     utils.assert_called_once(get_botocore_client_mock)
 
     assert cloudwatchlog_agent == None
@@ -136,7 +136,7 @@ def test_bootstrap_cloudwatch_log(mocker):
     put_retention_policy_mock = mocker.patch('mount_efs.put_cloudwatch_log_retention_policy', return_value=True)
     create_log_stream_mock = mocker.patch('mount_efs.create_cloudwatch_log_stream', return_value=True)
 
-    cloudwatchlog_agent = mount_efs.bootstrap_cloudwatch_logging(config, FS_ID)
+    cloudwatchlog_agent = mount_efs.bootstrap_cloudwatch_logging(config, {}, FS_ID)
     utils.assert_called_once(get_botocore_client_mock)
     utils.assert_called_once(create_log_group_mock)
     utils.assert_called_once(put_retention_policy_mock)
@@ -153,7 +153,7 @@ def test_bootstrap_cloudwatch_log_create_log_group_failed(mocker):
     put_retention_policy_mock = mocker.patch('mount_efs.put_cloudwatch_log_retention_policy')
     create_log_stream_mock = mocker.patch('mount_efs.create_cloudwatch_log_stream')
 
-    cloudwatchlog_agent = mount_efs.bootstrap_cloudwatch_logging(config, FS_ID)
+    cloudwatchlog_agent = mount_efs.bootstrap_cloudwatch_logging(config, {}, FS_ID)
     utils.assert_called_once(get_botocore_client_mock)
     utils.assert_called_once(create_log_group_mock)
     utils.assert_not_called(put_retention_policy_mock)
@@ -170,7 +170,7 @@ def test_bootstrap_cloudwatch_log_put_retention_days_failed(mocker):
     put_retention_policy_mock = mocker.patch('mount_efs.put_cloudwatch_log_retention_policy', return_value=False)
     create_log_stream_mock = mocker.patch('mount_efs.create_cloudwatch_log_stream')
 
-    cloudwatchlog_agent = mount_efs.bootstrap_cloudwatch_logging(config, FS_ID)
+    cloudwatchlog_agent = mount_efs.bootstrap_cloudwatch_logging(config, {}, FS_ID)
     utils.assert_called_once(get_botocore_client_mock)
     utils.assert_called_once(create_log_group_mock)
     utils.assert_called_once(put_retention_policy_mock)
@@ -187,7 +187,7 @@ def test_bootstrap_cloudwatch_log_create_log_stream_failed(mocker):
     put_retention_policy_mock = mocker.patch('mount_efs.put_cloudwatch_log_retention_policy', return_value=True)
     create_log_stream_mock = mocker.patch('mount_efs.create_cloudwatch_log_stream', return_value=False)
 
-    cloudwatchlog_agent = mount_efs.bootstrap_cloudwatch_logging(config, FS_ID)
+    cloudwatchlog_agent = mount_efs.bootstrap_cloudwatch_logging(config, {}, FS_ID)
     utils.assert_called_once(get_botocore_client_mock)
     utils.assert_called_once(create_log_group_mock)
     utils.assert_called_once(put_retention_policy_mock)
@@ -202,7 +202,7 @@ botocore client unit tests
 def test_botocore_none_if_botocore_not_present(mocker):
     config = _get_mock_config(DEFAULT_CLOUDWATCH_ENABLED, DEFAULT_CLOUDWATCH_LOG_GROUP, DEFAULT_RETENTION_DAYS)
     mount_efs.BOTOCORE_PRESENT = False
-    client = mount_efs.get_botocore_client(config, 'logs')
+    client = mount_efs.get_botocore_client(config, 'logs', {})
     assert client == None
 
 
@@ -222,7 +222,7 @@ def _test_botocore_client_established(mocker, iam_name):
     boto_session_mock.create_client.return_value = 'fake-client'
     mocker.patch('botocore.session.get_session', return_value=boto_session_mock)
 
-    client = mount_efs.get_botocore_client(config, 'logs')
+    client = mount_efs.get_botocore_client(config, 'logs', {})
     assert client == 'fake-client'
 
 
@@ -241,7 +241,8 @@ def _test_create_log_group_client_error(mocker, exception, desired_result=False)
     operation_name = 'CreateLogGroup'
     response = {
         'Error': {
-            'Code': exception
+            'Code': exception,
+            'Message': exception
         }
     }
     mocker.patch('mount_efs.cloudwatch_create_log_group_helper', side_effect=[ClientError(response, operation_name)])
@@ -290,7 +291,8 @@ def _test_put_retention_policy_client_error(mocker, exception, desired_result=Fa
     operation_name = 'PutRetentionPolicy'
     response = {
         'Error': {
-            'Code': exception
+            'Code': exception,
+            'Message': exception
         }
     }
     mocker.patch('mount_efs.cloudwatch_put_retention_policy_helper', side_effect=[ClientError(response, operation_name)])
@@ -338,7 +340,8 @@ def _test_create_log_stream_client_error(mocker, exception, desired_result=False
     operation_name = 'CreateLogStream'
     response = {
         'Error': {
-            'Code': exception
+            'Code': exception,
+            'Message': exception
         }
     }
     mocker.patch('mount_efs.cloudwatch_create_log_stream_helper', side_effect=[ClientError(response, operation_name)])
@@ -385,7 +388,8 @@ def _test_put_log_events_client_error(mocker, exception, desired_result=False):
     operation_name = 'PutLogEvents'
     response = {
         'Error': {
-            'Code': exception
+            'Code': exception,
+            'Message': exception
         }
     }
 
@@ -441,7 +445,8 @@ def _test_get_log_stream_next_token_client_error(mocker, exception, desired_resu
     operation_name = 'DescribeLogStream'
     response = {
         'Error': {
-            'Code': exception
+            'Code': exception,
+            'Message': exception
         }
     }
 

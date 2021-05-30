@@ -31,7 +31,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.30.2
+Version   : 1.31.1
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -131,6 +131,11 @@ fi
 %clean
 
 %changelog
+* Thu May 06 2021 Yuan Gao <ygaochn@amazon.com> - 1.31.1
+- Support new option: mounttargetip, enable mount file system to specific mount target ip address
+- Support using botocore to retrieve and mount via file system mount target ip address when DNS resolution fails
+- Use IMDSv2 by default to access instance metadata service
+
 * Thu Apr 15 2021 Yue Wang <wangnyue@amazon.com> - 1.30.2
 - Fix the throughput regression due to read_ahead configuration change on Linux distribution with kernel version 5.4.x and above
 

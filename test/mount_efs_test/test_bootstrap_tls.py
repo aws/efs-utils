@@ -33,7 +33,7 @@ def setup_mocks(mocker):
     mocker.patch('mount_efs.start_watchdog')
     mocker.patch('mount_efs.get_tls_port_range', return_value=(DEFAULT_TLS_PORT, DEFAULT_TLS_PORT + 10))
     mocker.patch('socket.socket', return_value=MagicMock())
-    mocker.patch('mount_efs.get_dns_name', return_value=DNS_NAME)
+    mocker.patch('mount_efs.get_dns_name_and_fallback_mount_target_ip_address', return_value=(DNS_NAME, None))
     mocker.patch('mount_efs.get_target_region', return_value=REGION)
     mocker.patch('mount_efs.write_tls_tunnel_state_file', return_value='~mocktempfile')
     mocker.patch('mount_efs.create_certificate')
@@ -53,7 +53,7 @@ def setup_mocks_without_popen(mocker):
     mocker.patch('mount_efs.start_watchdog')
     mocker.patch('mount_efs.get_tls_port_range', return_value=(DEFAULT_TLS_PORT, DEFAULT_TLS_PORT + 10))
     mocker.patch('socket.gethostname', return_value=DNS_NAME)
-    mocker.patch('mount_efs.get_dns_name', return_value=DNS_NAME)
+    mocker.patch('mount_efs.get_dns_name_and_fallback_mount_target_ip_address', return_value=(DNS_NAME, None))
     mocker.patch('mount_efs.write_tls_tunnel_state_file', return_value='~mocktempfile')
     mocker.patch('os.kill')
 

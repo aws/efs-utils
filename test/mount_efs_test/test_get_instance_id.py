@@ -9,6 +9,9 @@
 import mount_efs
 import json
 
+import pytest
+import socket
+
 from .. import utils
 
 try:
@@ -41,6 +44,11 @@ INSTANCE_DATA = {
 INSTANCE_DOCUMENT = json.dumps(INSTANCE_DATA)
 
 
+@pytest.fixture(autouse=True)
+def setup(mocker):
+    mount_efs.INSTANCE_IDENTITY = None
+
+
 class MockHeaders(object):
     def __init__(self, content_charset=None):
         self.content_charset = content_charset
@@ -62,37 +70,42 @@ class MockUrlLibResponse(object):
         return self.data
 
 
+def get_config():
+    try:
+        config = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        config = ConfigParser()
+    config.add_section(mount_efs.CONFIG_SECTION)
+    return config
+
+
+def test_get_instance_id_helper():
+    return mount_efs.get_instance_identity_info_from_instance_metadata(get_config(), 'instanceId')
+
+
 def test_get_instance_id_with_token(mocker):
     mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value='ABCDEFG==')
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse())
-    assert INSTANCE_ID == mount_efs.get_instance_identity_info_from_instance_metadata('instanceId')
+    assert INSTANCE_ID == test_get_instance_id_helper()
 
 
 def test_get_instance_id_without_token(mocker):
     mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value=None)
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse())
-    assert INSTANCE_ID == mount_efs.get_instance_identity_info_from_instance_metadata('instanceId')
-
-
-def test_get_instance_id_metadata_endpoint_unauthorized(mocker):
-    mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value='ABCDEFG==')
-    mocker.patch('mount_efs.urlopen', side_effect=[HTTPError('url', 401, 'Unauthorized', None, None), MockUrlLibResponse()])
-    assert INSTANCE_ID == mount_efs.get_instance_identity_info_from_instance_metadata('instanceId')
+    assert INSTANCE_ID == test_get_instance_id_helper()
 
 
 # Reproduce https://github.com/aws/efs-utils/issues/46
-def test_get_instance_id_token_endpoint_not_allowed(mocker):
-    get_aws_ec2_metadata_token_mock = mocker.patch('mount_efs.get_aws_ec2_metadata_token',
-                                                   side_effect=HTTPError('url', 405, 'Not allowed', None, None))
-    mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse())
-    assert INSTANCE_ID == mount_efs.get_instance_identity_info_from_instance_metadata('instanceId')
-    utils.assert_not_called(get_aws_ec2_metadata_token_mock)
+def test_get_instance_id_token_fetch_time_out(mocker):
+    # get_aws_ec2_metadata_token timeout, fallback to call without session token
+    mocker.patch('mount_efs.urlopen', side_effect=[socket.timeout, MockUrlLibResponse()])
+    assert INSTANCE_ID == test_get_instance_id_helper()
 
 
 def test_get_instance_id_py3_no_charset(mocker):
     mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value=None)
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse(data=bytearray(INSTANCE_DOCUMENT, 'us-ascii')))
-    assert INSTANCE_ID == mount_efs.get_instance_identity_info_from_instance_metadata('instanceId')
+    assert INSTANCE_ID == test_get_instance_id_helper()
 
 
 def test_get_instance_id_py3_utf8_charset(mocker):
@@ -100,13 +113,13 @@ def test_get_instance_id_py3_utf8_charset(mocker):
     mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value=None)
     mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse(data=bytearray(INSTANCE_DOCUMENT, charset)),
                  headers=MockHeaders(content_charset=charset))
-    assert INSTANCE_ID == mount_efs.get_instance_identity_info_from_instance_metadata('instanceId')
+    assert INSTANCE_ID == test_get_instance_id_helper()
 
 
 def test_get_instance_id_config_metadata_unavailable(mocker):
     mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value=None)
     mocker.patch('mount_efs.urlopen', side_effect=URLError('test error'))
-    instance_id = mount_efs.get_instance_identity_info_from_instance_metadata('instanceId')
+    instance_id = test_get_instance_id_helper()
     assert instance_id == None
 
 
@@ -119,7 +132,7 @@ def _test_get_instance_id_error(mocker, response=None, error=None):
     elif error:
         mocker.patch('mount_efs.urlopen', side_effect=error)
 
-    instance_id = mount_efs.get_instance_identity_info_from_instance_metadata('instanceId')
+    instance_id = test_get_instance_id_helper()
     assert instance_id == None
 
 
@@ -137,3 +150,18 @@ def test_get_instance_id_bad_json(mocker):
 
 def test_get_instance_id_missing_instance_id(mocker):
     _test_get_instance_id_error(mocker, response=MockUrlLibResponse(data=json.dumps({'accountId': '123412341234'})))
+
+
+def test_get_instance_id_via_cached_instance_identity(mocker):
+    mocker.patch('mount_efs.get_aws_ec2_metadata_token', return_value='ABCDEFG==')
+    url_request_helper_mock_1 = mocker.patch('mount_efs.urlopen', return_value=MockUrlLibResponse())
+    assert mount_efs.INSTANCE_IDENTITY == None
+    assert INSTANCE_ID == test_get_instance_id_helper()
+    utils.assert_called_n_times(url_request_helper_mock_1, 1)
+
+    # Verify the global INSTANCE_IDENTITY is cached with previous metadata api call result
+    assert mount_efs.INSTANCE_IDENTITY == INSTANCE_DATA
+    url_request_helper_mock_2 = mocker.patch('mount_efs.urlopen')
+    assert INSTANCE_ID == test_get_instance_id_helper()
+    # Verify there is no second api call when INSTANCE_IDENTITY is present
+    utils.assert_not_called(url_request_helper_mock_2)
