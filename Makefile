@@ -7,7 +7,7 @@
 #
 
 PACKAGE_NAME = amazon-efs-utils
-VERSION = 1.30.2
+VERSION = 1.31.1
 SOURCE_TARBALL = $(PACKAGE_NAME)-$(VERSION).tar.gz
 SPECFILE = $(PACKAGE_NAME).spec
 BUILD_DIR = build/rpmbuild
