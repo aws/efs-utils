@@ -31,7 +31,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.31.1
+Version   : 1.31.2
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -131,6 +131,10 @@ fi
 %clean
 
 %changelog
+* Thu Jun 10 2021 Yuan Gao <ygaochn@amazon.com> - 1.31.2
+- Handle the fallback to IMDSv1 call when either HTTPError or unknown exception is thrown
+- Cleanup private key lock file at watchdog startup
+
 * Thu May 06 2021 Yuan Gao <ygaochn@amazon.com> - 1.31.1
 - Support new option: mounttargetip, enable mount file system to specific mount target ip address
 - Support using botocore to retrieve and mount via file system mount target ip address when DNS resolution fails

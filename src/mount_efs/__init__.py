@@ -78,7 +78,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = '1.31.1'
+VERSION = '1.31.2'
 SERVICE = 'elasticfilesystem'
 
 CLONE_NEWNET = 0x40000000
@@ -433,7 +433,6 @@ def fetch_ec2_metadata_token_disabled(config):
 def get_aws_ec2_metadata_token(timeout=DEFAULT_TIMEOUT):
     # Normally the session token is fetched within 10ms, setting a timeout of 50ms here to abort the request
     # and return None if the token has not returned within 50ms
-    timeout_error_message = 'Timeout when getting the aws ec2 metadata token'
     try:
         opener = build_opener(HTTPHandler)
         request = Request(INSTANCE_METADATA_TOKEN_URL)
@@ -444,8 +443,13 @@ def get_aws_ec2_metadata_token(timeout=DEFAULT_TIMEOUT):
             res = opener.open(request, timeout=timeout)
             return res.read()
         except socket.timeout:
-            logging.debug(timeout_error_message)
-            return None
+            exception_message = 'Timeout when getting the aws ec2 metadata token'
+        except HTTPError as e:
+            exception_message = 'Failed to fetch token due to %s' % e
+        except Exception as e:
+            exception_message = 'Unknown error when fetching aws ec2 metadata token, %s' % e
+        logging.debug(exception_message)
+        return None
     except NameError:
         headers = {'X-aws-ec2-metadata-token-ttl-seconds': '21600'}
         req = Request(INSTANCE_METADATA_TOKEN_URL, headers=headers, method='PUT')
@@ -453,8 +457,13 @@ def get_aws_ec2_metadata_token(timeout=DEFAULT_TIMEOUT):
             res = urlopen(req, timeout=timeout)
             return res.read()
         except socket.timeout:
-            logging.debug(timeout_error_message)
-            return None
+            exception_message = 'Timeout when getting the aws ec2 metadata token'
+        except HTTPError as e:
+            exception_message = 'Failed to fetch token due to %s' % e
+        except Exception as e:
+            exception_message = 'Unknown error when fetching aws ec2 metadata token, %s' % e
+        logging.debug(exception_message)
+        return None
 
 
 def get_aws_security_credentials(config, use_iam, region, awsprofile=None, aws_creds_uri=None):

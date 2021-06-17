@@ -112,9 +112,19 @@ def test_get_target_region_without_token(mocker):
 
 
 # Reproduce https://github.com/aws/efs-utils/issues/46
-def test_get_target_region_token_endpoint_not_allowed(mocker):
+def test_get_target_region_token_endpoint_fetching_timeout(mocker):
     # get_aws_ec2_metadata_token timeout, fallback to call without session token
     mocker.patch('mount_efs.urlopen', side_effect=[socket.timeout, MockUrlLibResponse()])
+    assert 'us-east-1' == get_target_region_helper()
+
+
+def test_get_target_region_token_fetch_httperror(mocker):
+    mocker.patch('mount_efs.urlopen', side_effect=[HTTPError('url', 405, 'Now Allowed', None, None), MockUrlLibResponse()])
+    assert 'us-east-1' == get_target_region_helper()
+
+
+def test_get_target_region_token_fetch_unknownerror(mocker):
+    mocker.patch('mount_efs.urlopen', side_effect=[Exception('Unknown Exception'), MockUrlLibResponse()])
     assert 'us-east-1' == get_target_region_helper()
 
 

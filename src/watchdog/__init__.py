@@ -49,7 +49,7 @@ except ImportError:
     from urllib import urlencode
 
 
-VERSION = '1.31.1'
+VERSION = '1.31.2'
 SERVICE = 'elasticfilesystem'
 
 CONFIG_FILE = '/etc/amazon/efs/efs-utils.conf'
@@ -212,8 +212,13 @@ def get_aws_ec2_metadata_token(timeout=DEFAULT_TIMEOUT):
             res = opener.open(request, timeout=timeout)
             return res.read()
         except socket.timeout:
-            logging.debug('Timeout when get the aws ec2 metadata token')
-            return None
+            exception_message = 'Timeout when getting the aws ec2 metadata token'
+        except HTTPError as e:
+            exception_message = 'Failed to fetch token due to %s' % e
+        except Exception as e:
+            exception_message = 'Unknown error when fetching aws ec2 metadata token, %s' % e
+        logging.debug(exception_message)
+        return None
     except NameError:
         headers = {'X-aws-ec2-metadata-token-ttl-seconds': '21600'}
         req = Request(INSTANCE_METADATA_TOKEN_URL, headers=headers, method='PUT')
@@ -221,8 +226,13 @@ def get_aws_ec2_metadata_token(timeout=DEFAULT_TIMEOUT):
             res = urlopen(req, timeout=timeout)
             return res.read()
         except socket.timeout:
-            logging.debug('Timeout when get the aws ec2 metadata token')
-            return None
+            exception_message = 'Timeout when getting the aws ec2 metadata token'
+        except HTTPError as e:
+            exception_message = 'Failed to fetch token due to %s' % e
+        except Exception as e:
+            exception_message = 'Unknown error when fetching aws ec2 metadata token, %s' % e
+        logging.debug(exception_message)
+        return None
 
 
 def get_aws_security_credentials_from_file(file_name, awsprofile):
@@ -1218,9 +1228,31 @@ def check_if_running_on_macos():
     return sys.platform == 'darwin'
 
 
+def check_and_remove_file(path):
+    try:
+        os.remove(path)
+        logging.debug("Removed %s successfully", path)
+    except OSError as e:
+        if e.errno != errno.ENOENT:
+            logging.debug("Could not remove %s. Unexpected exception: %s", path, e)
+        else:
+            logging.debug("%s does not exist, nothing to do", path)
+
+
+def clean_up_certificate_lock_file(state_file_dir=STATE_FILE_DIR):
+    """
+    Cleans up private key lock file 'efs-utils-lock' left behind by a previous process attempting to create private key
+    and efs-csi-driver is restarted. Once driver restarts, a new mount/watchdog process will fail to create private key
+    since contents of `STATE_FILE_DIR` is persisted on a node across driver pod restarts.
+    """
+    lock_file = os.path.join(state_file_dir, 'efs-utils-lock')
+    logging.debug("Removing private key file")
+    check_and_remove_file(lock_file)
+
+
 def clean_up_previous_stunnel_pids(state_file_dir=STATE_FILE_DIR):
     """
-    Cleans up stunnel pids created by mount watchdog spawned by a previous efs-csi-driver after driver restart, upgrade
+    Cleans up stunnel pids created by mount watchdog spawned by a previous efs-csi-driver pod after driver restart, upgrade
     or crash. This method attempts to clean PIDs from persisted state files after efs-csi-driver restart to
     ensure watchdog creates a new stunnel.
     """
@@ -1269,6 +1301,7 @@ def main():
         unmount_grace_period_sec = config.getint(CONFIG_SECTION, 'unmount_grace_period_sec')
 
         clean_up_previous_stunnel_pids()
+        clean_up_certificate_lock_file()
 
         while True:
             config = read_config()

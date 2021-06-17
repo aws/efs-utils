@@ -19,6 +19,11 @@ try:
 except ImportError:
     from configparser import ConfigParser
 
+try:
+    from urllib2 import HTTPError
+except ImportError:
+    from urllib.error import HTTPError
+
 from .. import utils
 
 
@@ -170,22 +175,27 @@ def test_get_aws_security_credentials_get_ecs_from_option_url(mocker):
 
 
 def test_get_aws_security_credentials_get_instance_metadata_role_name_str(mocker):
-    _test_get_aws_security_credentials_get_instance_metadata_role_name(mocker, is_name_str=True, token_timeout=False)
+    _test_get_aws_security_credentials_get_instance_metadata_role_name(mocker, is_name_str=True)
 
 
-def test_get_aws_security_credentials_get_instance_metadata_role_name_str_token_fetch_timeout(mocker):
-    _test_get_aws_security_credentials_get_instance_metadata_role_name(mocker, is_name_str=True, token_timeout=True)
+def test_get_aws_security_credentials_get_instance_metadata_role_name_str_with_token_fetch_error(mocker):
+    for token_effect in [socket.timeout, HTTPError('url', 405, 'Now Allowed', None, None), Exception('Unknown Error')]:
+        _test_get_aws_security_credentials_get_instance_metadata_role_name(mocker, is_name_str=True,
+                                                                           token_effects=[token_effect])
 
 
 def test_get_aws_security_credentials_get_instance_metadata_role_name_bytes(mocker):
-    _test_get_aws_security_credentials_get_instance_metadata_role_name(mocker, is_name_str=False, token_timeout=False)
+    _test_get_aws_security_credentials_get_instance_metadata_role_name(mocker, is_name_str=False)
 
 
-def test_get_aws_security_credentials_get_instance_metadata_role_name_bytes_token_fetch_timeout(mocker):
-    _test_get_aws_security_credentials_get_instance_metadata_role_name(mocker, is_name_str=False, token_timeout=True)
+def test_get_aws_security_credentials_get_instance_metadata_role_name_bytes_with_token_fetch_error(mocker):
+    for token_effect in [socket.timeout, HTTPError('url', 405, 'Now Allowed', None, None), Exception('Unknown Error')]:
+        _test_get_aws_security_credentials_get_instance_metadata_role_name(mocker, is_name_str=False,
+                                                                           token_effects=[token_effect])
 
 
-def _test_get_aws_security_credentials_get_instance_metadata_role_name(mocker, is_name_str=True, token_timeout=False):
+def _test_get_aws_security_credentials_get_instance_metadata_role_name(mocker, is_name_str=True,
+                                                                       token_effects=[MockUrlLibResponse(data='ABCDEFG==')]):
     config = get_fake_config()
     mocker.patch.dict(os.environ, {})
     mocker.patch('os.path.exists', return_value=False)
@@ -202,11 +212,6 @@ def _test_get_aws_security_credentials_get_instance_metadata_role_name(mocker, i
         role_name_data = b'FAKE_IAM_ROLE_NAME'
     else:
         role_name_data = 'FAKE_IAM_ROLE_NAME'
-
-    if token_timeout:
-        token_effects = [socket.timeout]
-    else:
-        token_effects = [MockUrlLibResponse(data='ABCDEFG==')]
 
     side_effects = token_effects + [MockUrlLibResponse(data=role_name_data)] + token_effects + [MockUrlLibResponse(data=response)]
     mocker.patch('mount_efs.urlopen', side_effect=side_effects)
