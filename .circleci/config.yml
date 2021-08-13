@@ -179,6 +179,18 @@ workflows:
           name: debian11
           image: debian:bullseye
       - build-rpm-package:
+          name: rockylinux8.4
+          image: rockylinux/rockylinux:8.4
+      - build-rpm-package:
+          name: almalinux8.4
+          image: almalinux:8.4
+      - build-rpm-package:
+          name: rockylinux8
+          image: rockylinux/rockylinux:8
+      - build-rpm-package:
+          name: almalinux8
+          image: almalinux:8
+      - build-rpm-package:
           name: centos7
           image: centos:centos7
       - build-rpm-package:
