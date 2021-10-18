@@ -427,7 +427,7 @@ To authenticate with EFS using the system’s IAM identity of an awsprofile, add
 `awsprofile` option. These options require the `tls` option.
 
 ```
-$ sudo mount -t efs -o tls,iam,aws-profile=test-profile file-system-id efs-mount-point/
+$ sudo mount -t efs -o tls,iam,awsprofile=test-profile file-system-id efs-mount-point/
 ```
 
 To configure the named profile, see the [Named Profiles doc](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-profiles.html)
