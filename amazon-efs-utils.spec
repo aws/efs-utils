@@ -31,7 +31,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.31.2
+Version   : 1.31.3
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -131,6 +131,10 @@ fi
 %clean
 
 %changelog
+* Thu Nov 23 2021 Jigar Dedhia <dedhiajd@amazon.com> - 1.31.3
+- Add unmount_time and unmount_count to handle inconsistent mount reads
+- Allow specifying fs_id in cloudwatch log group name
+
 * Thu Jun 10 2021 Yuan Gao <ygaochn@amazon.com> - 1.31.2
 - Handle the fallback to IMDSv1 call when either HTTPError or unknown exception is thrown
 - Cleanup private key lock file at watchdog startup

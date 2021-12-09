@@ -348,7 +348,13 @@ sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/}' /etc
 ```bash
 sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/;}' /usr/local/Cellar/amazon-efs-utils/<version>/etc/amazon/efs/efs-utils.conf
 ```
-You can also configure CloudWatch log group name and log retention days in the config file. 
+You can also configure CloudWatch log group name and log retention days in the config file.
+If you want to have separate log groups in Cloudwatch for every mounted file system, add `/{fs_id}` to the end of the `log_group_name` field in `efs-utils.conf` file. For example, the `log_group_name` in `efs-utils.conf` file would look something like:
+
+```bash
+[cloudwatch-log]
+log_group_name = /aws/efs/utils/{fs_id}
+```
 
 ### Step 3. Attach the CloudWatch logs policy to the IAM role attached to instance.
 Attach AWS managed policy `AmazonElasticFileSystemsUtils` to the iam role you attached to the instance, or the aws credentials

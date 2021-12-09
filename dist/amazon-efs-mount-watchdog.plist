@@ -22,6 +22,7 @@
         <string>amazon-efs-mount-watchdog</string>
         <key>ProgramArguments</key>
         <array>
+            <string>/usr/local/bin/python3</string>
             <string>/usr/local/bin/amazon-efs-mount-watchdog</string>
         </array>
         <key>RunAtLoad</key>

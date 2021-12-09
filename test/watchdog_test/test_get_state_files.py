@@ -10,7 +10,7 @@ import watchdog
 
 
 def test_non_existent_dir(tmpdir):
-    state_files = watchdog.get_state_files(str(tmpdir.join('new-dir')))
+    state_files = watchdog.get_state_files(str(tmpdir.join("new-dir")))
 
     assert {} == state_files
 
@@ -22,7 +22,7 @@ def test_empty_dir(tmpdir):
 
 
 def test_no_state_files(tmpdir):
-    tmpdir.join('~fs-deadbeef.mount.dir.12345').write('')
+    tmpdir.join("~fs-deadbeef.mount.dir.12345").write("")
 
     state_files = watchdog.get_state_files(str(tmpdir))
 
@@ -30,13 +30,13 @@ def test_no_state_files(tmpdir):
 
 
 def test_state_files(tmpdir):
-    efs_config = 'fs-deadbeef.mount.dir.12345'
-    tmpdir.join(efs_config).write('')
+    efs_config = "fs-deadbeef.mount.dir.12345"
+    tmpdir.join(efs_config).write("")
 
-    stunnel_config = 'stunnel-config.fs-deadbeef.mount.dir.12345'
-    tmpdir.join(stunnel_config).write('')
+    stunnel_config = "stunnel-config.fs-deadbeef.mount.dir.12345"
+    tmpdir.join(stunnel_config).write("")
 
     state_files = watchdog.get_state_files(str(tmpdir))
 
     assert 1 == len(state_files)
-    assert 'mount.dir.12345' in state_files
+    assert "mount.dir.12345" in state_files

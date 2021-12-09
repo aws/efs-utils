@@ -19,11 +19,11 @@ def test_no_unsupported_options(capsys):
 
 
 def test_capath_unsupported(capsys):
-    options = {'capath': '/capath'}
+    options = {"capath": "/capath"}
 
     mount_efs.check_unsupported_options(options)
 
     out, err = capsys.readouterr()
-    assert 'not supported' in err
-    assert 'capath' in err
-    assert 'capath' not in options
+    assert "not supported" in err
+    assert "capath" in err
+    assert "capath" not in options

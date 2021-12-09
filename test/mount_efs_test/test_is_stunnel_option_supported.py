@@ -8,20 +8,23 @@
 
 import mount_efs
 
+STUNNEL_OPTION = "stunnelOption"
 
-STUNNEL_OPTION = 'stunnelOption'
-
-STUNNEL_OUTPUT_WITHOUT_OPTION = ['foo', 'bar', 'baz']
+STUNNEL_OUTPUT_WITHOUT_OPTION = ["foo", "bar", "baz"]
 STUNNEL_OUTPUT_WITH_OPTION = STUNNEL_OUTPUT_WITHOUT_OPTION + [STUNNEL_OPTION]
 
 
 def test_supported_option(capsys):
-    enabled = mount_efs.is_stunnel_option_supported(STUNNEL_OUTPUT_WITH_OPTION, STUNNEL_OPTION)
+    enabled = mount_efs.is_stunnel_option_supported(
+        STUNNEL_OUTPUT_WITH_OPTION, STUNNEL_OPTION
+    )
 
     assert enabled
 
 
 def test_unsupported_option():
-    enabled = mount_efs.is_stunnel_option_supported(STUNNEL_OUTPUT_WITHOUT_OPTION, STUNNEL_OPTION)
+    enabled = mount_efs.is_stunnel_option_supported(
+        STUNNEL_OUTPUT_WITHOUT_OPTION, STUNNEL_OPTION
+    )
 
     assert not enabled

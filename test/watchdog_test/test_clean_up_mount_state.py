@@ -6,27 +6,28 @@
 # the License.
 #
 
-import watchdog
 import json
 import os
 import tempfile
+
+import watchdog
 
 from .. import utils
 
 PID = 99999999999999999
 
 
-def create_temp_file(tmpdir, content=''):
+def create_temp_file(tmpdir, content=""):
     temp_file = tmpdir.join(tempfile.mktemp())
     temp_file.write(content, ensure=True)
     return temp_file
 
 
 def create_state_file(tmpdir, extra_files=list(), mount_state_dir=None):
-    state_dict = {'pid': PID, 'files': extra_files}
+    state_dict = {"pid": PID, "files": extra_files}
 
     if mount_state_dir:
-        state_dict['mountStateDir'] = mount_state_dir
+        state_dict["mountStateDir"] = mount_state_dir
 
     state_file = create_temp_file(tmpdir, json.dumps(state_dict))
 
@@ -34,10 +35,10 @@ def create_state_file(tmpdir, extra_files=list(), mount_state_dir=None):
 
 
 def setup_mock(mocker, is_pid_running):
-    mocker.patch('os.getpgid')
-    mocker.patch('watchdog.is_pid_running', return_value=is_pid_running)
+    mocker.patch("os.getpgid")
+    mocker.patch("watchdog.is_pid_running", return_value=is_pid_running)
 
-    killpg_mock = mocker.patch('os.killpg')
+    killpg_mock = mocker.patch("os.killpg")
     return killpg_mock
 
 
@@ -129,27 +130,33 @@ def test_pid_not_running(mocker, tmpdir):
 
 def test_clean_up_mount_state_dir_success(mocker, tmpdir):
     setup_mock(mocker, False)
-    mocker.patch('os.path.isdir', return_value=True)
-    rm_tree = mocker.patch('shutil.rmtree')
+    mocker.patch("os.path.isdir", return_value=True)
+    rm_tree = mocker.patch("shutil.rmtree")
 
-    state_dir, state_file, abs_state_file = create_state_file(tmpdir, mount_state_dir='/fake/path')
+    state_dir, state_file, abs_state_file = create_state_file(
+        tmpdir, mount_state_dir="/fake/path"
+    )
 
     assert os.path.exists(abs_state_file)
 
-    watchdog.clean_up_mount_state(state_dir, state_file, PID, is_running=False, mount_state_dir='/fake/path')
+    watchdog.clean_up_mount_state(
+        state_dir, state_file, PID, is_running=False, mount_state_dir="/fake/path"
+    )
 
     utils.assert_called_once(rm_tree)
 
 
 def test_clean_up_mount_state_dir_fail(mocker, tmpdir):
     setup_mock(mocker, False)
-    mocker.patch('os.path.isdir', return_value=False)
-    rm_tree = mocker.patch('shutil.rmtree')
+    mocker.patch("os.path.isdir", return_value=False)
+    rm_tree = mocker.patch("shutil.rmtree")
 
     state_dir, state_file, abs_state_file = create_state_file(tmpdir)
 
     assert os.path.exists(abs_state_file)
 
-    watchdog.clean_up_mount_state(state_dir, state_file, PID, is_running=False, mount_state_dir='/fake/path')
+    watchdog.clean_up_mount_state(
+        state_dir, state_file, PID, is_running=False, mount_state_dir="/fake/path"
+    )
 
     utils.assert_not_called(rm_tree)
