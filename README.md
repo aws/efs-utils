@@ -118,7 +118,9 @@ $ sudo apt-get -y install ./build/amazon-efs-utils*deb
 
 ### On MacOS Big Sur distribution
 
-For EC2 Mac instances running macOS Big Sur, you can install amazon-efs-utils from the [homebrew-aws](https://github.com/aws/homebrew-aws) respository.
+For EC2 Mac instances running macOS Big Sur, you can install amazon-efs-utils from the 
+[homebrew-aws](https://github.com/aws/homebrew-aws) respository. **Note that this will ONLY work on EC2 instances
+running macOS Big Sur, not local Mac computers.**
 ```
 brew install amazon-efs-utils
 ```
