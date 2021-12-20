@@ -10,8 +10,6 @@ The `efs-utils` package has been verified against the following Linux distributi
 | ------------ | ------------ | ------------- |
 | Amazon Linux 2017.09 | `rpm` | `upstart` |
 | Amazon Linux 2 | `rpm` | `systemd` |
-| Almalinux 8.4 | `rpm` | `systemd` |
-| RockyLinux 8.4 | `rpm` | `systemd` |
 | CentOS 7 | `rpm` | `systemd` |
 | CentOS 8 | `rpm` | `systemd` |
 | RHEL 7 | `rpm`| `systemd` |
