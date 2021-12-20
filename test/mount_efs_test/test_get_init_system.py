@@ -6,17 +6,18 @@
 # the License.
 #
 
-import mount_efs
 import tempfile
+
+import mount_efs
 
 
 def test_get_init_system_from_file(tmpdir):
     temp_file = tmpdir.join(tempfile.mktemp())
-    temp_file.write('systemd\n', ensure=True)
+    temp_file.write("systemd\n", ensure=True)
 
     init_system = mount_efs.get_init_system(str(temp_file))
 
-    assert 'systemd' == init_system
+    assert "systemd" == init_system
 
 
 def test_get_init_system_nonexistent_file(tmpdir):
@@ -24,4 +25,4 @@ def test_get_init_system_nonexistent_file(tmpdir):
 
     init_system = mount_efs.get_init_system(str(temp_file))
 
-    assert 'unknown' == init_system
+    assert "unknown" == init_system

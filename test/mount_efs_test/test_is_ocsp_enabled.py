@@ -21,7 +21,11 @@ def _get_config(stunnel_check_cert_validity):
         config = ConfigParser()
     config.add_section(mount_efs.CONFIG_SECTION)
     if stunnel_check_cert_validity is not None:
-        config.set(mount_efs.CONFIG_SECTION, 'stunnel_check_cert_validity', str(stunnel_check_cert_validity))
+        config.set(
+            mount_efs.CONFIG_SECTION,
+            "stunnel_check_cert_validity",
+            str(stunnel_check_cert_validity),
+        )
     return config
 
 
@@ -42,7 +46,7 @@ def test_is_ocsp_enabled_config_true_no_cli():
 
 
 def test_is_ocsp_enabled_config_false_cli_true():
-    options = {'ocsp': None}
+    options = {"ocsp": None}
 
     ocsp_enabled = mount_efs.is_ocsp_enabled(_get_config(False), options)
 
@@ -50,7 +54,7 @@ def test_is_ocsp_enabled_config_false_cli_true():
 
 
 def test_is_ocsp_enabled_config_true_cli_true():
-    options = {'ocsp': None}
+    options = {"ocsp": None}
 
     ocsp_enabled = mount_efs.is_ocsp_enabled(_get_config(True), options)
 
@@ -58,7 +62,7 @@ def test_is_ocsp_enabled_config_true_cli_true():
 
 
 def test_is_ocsp_enabled_config_false_cli_false():
-    options = {'noocsp': None}
+    options = {"noocsp": None}
 
     ocsp_enabled = mount_efs.is_ocsp_enabled(_get_config(False), options)
 
@@ -66,7 +70,7 @@ def test_is_ocsp_enabled_config_false_cli_false():
 
 
 def test_is_ocsp_enabled_config_true_cli_false():
-    options = {'noocsp': None}
+    options = {"noocsp": None}
 
     ocsp_enabled = mount_efs.is_ocsp_enabled(_get_config(True), options)
 

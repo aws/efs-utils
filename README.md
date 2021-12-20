@@ -118,7 +118,9 @@ $ sudo apt-get -y install ./build/amazon-efs-utils*deb
 
 ### On MacOS Big Sur distribution
 
-For EC2 Mac instances running macOS Big Sur, you can install amazon-efs-utils from the [homebrew-aws](https://github.com/aws/homebrew-aws) respository.
+For EC2 Mac instances running macOS Big Sur, you can install amazon-efs-utils from the 
+[homebrew-aws](https://github.com/aws/homebrew-aws) respository. **Note that this will ONLY work on EC2 instances
+running macOS Big Sur, not local Mac computers.**
 ```
 brew install amazon-efs-utils
 ```
@@ -348,7 +350,13 @@ sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/}' /etc
 ```bash
 sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/;}' /usr/local/Cellar/amazon-efs-utils/<version>/etc/amazon/efs/efs-utils.conf
 ```
-You can also configure CloudWatch log group name and log retention days in the config file. 
+You can also configure CloudWatch log group name and log retention days in the config file.
+If you want to have separate log groups in Cloudwatch for every mounted file system, add `/{fs_id}` to the end of the `log_group_name` field in `efs-utils.conf` file. For example, the `log_group_name` in `efs-utils.conf` file would look something like:
+
+```bash
+[cloudwatch-log]
+log_group_name = /aws/efs/utils/{fs_id}
+```
 
 ### Step 3. Attach the CloudWatch logs policy to the IAM role attached to instance.
 Attach AWS managed policy `AmazonElasticFileSystemsUtils` to the iam role you attached to the instance, or the aws credentials
@@ -421,7 +429,7 @@ To authenticate with EFS using the system’s IAM identity of an awsprofile, add
 `awsprofile` option. These options require the `tls` option.
 
 ```
-$ sudo mount -t efs -o tls,iam,aws-profile=test-profile file-system-id efs-mount-point/
+$ sudo mount -t efs -o tls,iam,awsprofile=test-profile file-system-id efs-mount-point/
 ```
 
 To configure the named profile, see the [Named Profiles doc](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-profiles.html)

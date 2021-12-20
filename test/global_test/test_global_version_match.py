@@ -14,45 +14,59 @@ except ImportError:
     from configparser import ConfigParser
 
 
-SPEC_FILE = 'amazon-efs-utils.spec'
-DEB_FILE = 'build-deb.sh'
-FILE_LIST = ['build-deb.sh', 'src/watchdog/__init__.py', 'src/mount_efs/__init__.py',
-                  'dist/amazon-efs-utils.control', 'build-deb.sh', 'amazon-efs-utils.spec']
+SPEC_FILE = "amazon-efs-utils.spec"
+DEB_FILE = "build-deb.sh"
+FILE_LIST = [
+    "build-deb.sh",
+    "src/watchdog/__init__.py",
+    "src/mount_efs/__init__.py",
+    "dist/amazon-efs-utils.control",
+    "build-deb.sh",
+    "amazon-efs-utils.spec",
+]
 
-GLOBAL_CONFIG = 'config.ini'
+GLOBAL_CONFIG = "config.ini"
 
 
 def test_file_version_match():
     global_version = get_global_version()
     for f in FILE_LIST:
         version_in_file = get_version_for_file(f)
-        assert version_in_file == global_version, 'version in {} is {}, does not match global version {}'\
-            .format(f, version_in_file, global_version)
+        assert (
+            version_in_file == global_version
+        ), "version in {} is {}, does not match global version {}".format(
+            f, version_in_file, global_version
+        )
 
 
 def test_file_release_match():
     global_release = get_global_release()
     for f in [DEB_FILE, SPEC_FILE]:
         release_in_file = get_release_for_file(f)
-        assert release_in_file == global_release, 'release in {} is {}, does not match global release {}'\
-            .format(f, release_in_file, global_release)
+        assert (
+            release_in_file == global_release
+        ), "release in {} is {}, does not match global release {}".format(
+            f, release_in_file, global_release
+        )
 
 
 def test_changelog_version_match():
     global_version = get_global_version()
 
     version_in_changelog = get_version_for_changelog(SPEC_FILE)
-    assert version_in_changelog is not None and version_in_changelog == global_version, \
-        'version in {} is {}, does not match expected_version_release {}, you need to add changelog in the spec file'\
-            .format(SPEC_FILE, version_in_changelog, global_version)
+    assert (
+        version_in_changelog is not None and version_in_changelog == global_version
+    ), "version in {} is {}, does not match expected_version_release {}, you need to add changelog in the spec file".format(
+        SPEC_FILE, version_in_changelog, global_version
+    )
 
 
 def get_global_version():
-    return get_global_value('version')
+    return get_global_value("version")
 
 
 def get_global_release():
-    return get_global_value('release')
+    return get_global_value("release")
 
 
 def get_version_for_changelog(file_path):
@@ -62,10 +76,10 @@ def get_version_for_changelog(file_path):
     with open(file_to_check) as fp:
         lines = fp.readlines()
     for line in lines:
-        if line.startswith('%changelog'):
+        if line.startswith("%changelog"):
             has_changelog = True
-        if has_changelog and line.startswith('*'):
-            return line.split(' ')[-1].strip()
+        if has_changelog and line.startswith("*"):
+            return line.split(" ")[-1].strip()
     return None
 
 
@@ -75,10 +89,13 @@ def get_version_for_file(file_path):
     with open(file_to_check) as fp:
         lines = fp.readlines()
     for line in lines:
-        if line.startswith('VERSION'):
-            return line.split('=')[1].strip().replace("'", '')
-        if line.startswith('Version'):
-            return line.split(':')[1].strip()
+        if line.startswith("VERSION"):
+            return (
+                line.split("=")[1].strip().replace('"', "")
+            )  # Replacing the double quotes instead of single quotes as
+            # "black" reformates every single quotes to double quotes.
+        if line.startswith("Version"):
+            return line.split(":")[1].strip()
     return None
 
 
@@ -88,10 +105,10 @@ def get_release_for_file(file_path):
     with open(file_to_check) as fp:
         lines = fp.readlines()
     for line in lines:
-        if line.startswith('RELEASE'):
-            return line.split('=')[1].strip()
-        if line.startswith('Release'):
-            return line.split(':')[1].strip().split('%')[0]
+        if line.startswith("RELEASE"):
+            return line.split("=")[1].strip()
+        if line.startswith("Release"):
+            return line.split(":")[1].strip().split("%")[0]
     return None
 
 
@@ -99,7 +116,7 @@ def get_global_value(key):
     mount_helper_root_folder = uppath(os.path.abspath(__file__), 3)
     config_file = os.path.join(mount_helper_root_folder, GLOBAL_CONFIG)
     cp = read_config(config_file)
-    value = str(cp.get('global', key))
+    value = str(cp.get("global", key))
     return value
 
 
