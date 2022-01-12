@@ -60,22 +60,22 @@ Requires(preun)  : /sbin/service /sbin/chkconfig
 Requires(postun) : /sbin/service
 %endif
 
-Source    : %{name}.tar.gz
+Source    : %{name}-%{version}.tar.gz
 
 %description
 This package provides utilities for simplifying the use of EFS file systems
 
 %prep
-%setup -n %{name}
+%setup -n %{name}-%{version}
 
 %install
 mkdir -p %{buildroot}%{_sysconfdir}/amazon/efs
 %if %{with_systemd}
 mkdir -p %{buildroot}%{_unitdir}
-install -p -m 644 %{_builddir}/%{name}/dist/amazon-efs-mount-watchdog.service %{buildroot}%{_unitdir}
+install -p -m 644 dist/amazon-efs-mount-watchdog.service %{buildroot}%{_unitdir}
 %else
 mkdir -p %{buildroot}%{_sysconfdir}/init
-install -p -m 644 %{_builddir}/%{name}/dist/amazon-efs-mount-watchdog.conf %{buildroot}%{_sysconfdir}/init
+install -p -m 644 dist/amazon-efs-mount-watchdog.conf %{buildroot}%{_sysconfdir}/init
 %endif
 
 mkdir -p %{buildroot}/sbin
@@ -83,11 +83,11 @@ mkdir -p %{buildroot}%{_bindir}
 mkdir -p %{buildroot}%{_localstatedir}/log/amazon/efs
 mkdir -p  %{buildroot}%{_mandir}/man8
 
-install -p -m 644 %{_builddir}/%{name}/dist/efs-utils.conf %{buildroot}%{_sysconfdir}/amazon/efs
-install -p -m 444 %{_builddir}/%{name}/dist/efs-utils.crt %{buildroot}%{_sysconfdir}/amazon/efs
-install -p -m 755 %{_builddir}/%{name}/src/mount_efs/__init__.py %{buildroot}/sbin/mount.efs
-install -p -m 755 %{_builddir}/%{name}/src/watchdog/__init__.py %{buildroot}%{_bindir}/amazon-efs-mount-watchdog
-install -p -m 644 %{_builddir}/%{name}/man/mount.efs.8 %{buildroot}%{_mandir}/man8
+install -p -m 644 dist/efs-utils.conf %{buildroot}%{_sysconfdir}/amazon/efs
+install -p -m 444 dist/efs-utils.crt %{buildroot}%{_sysconfdir}/amazon/efs
+install -p -m 755 src/mount_efs/__init__.py %{buildroot}/sbin/mount.efs
+install -p -m 755 src/watchdog/__init__.py %{buildroot}%{_bindir}/amazon-efs-mount-watchdog
+install -p -m 644 man/mount.efs.8 %{buildroot}%{_mandir}/man8
 
 %files
 %defattr(-,root,root,-)
