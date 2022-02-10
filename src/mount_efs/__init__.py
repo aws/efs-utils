@@ -1282,10 +1282,12 @@ def test_tunnel_process(tunnel_proc, fs_id):
     tunnel_proc.poll()
     if tunnel_proc.returncode is not None:
         out, err = tunnel_proc.communicate()
+        stdstr = out.strip() if out is not None else '<none>'
+        errstr = err.strip() if err is not None else '<none>'
         fatal_error(
             "Failed to initialize TLS tunnel for %s" % fs_id,
             'Failed to start TLS tunnel (errno=%d). stdout="%s" stderr="%s"'
-            % (tunnel_proc.returncode, out.strip(), err.strip()),
+            % (tunnel_proc.returncode, stdstr, errstr)
         )
 
 
