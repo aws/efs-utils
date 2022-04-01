@@ -40,7 +40,8 @@ def setup_mocks(mocker, state_files, process_name_output):
 
 
 def create_state_file(tmpdir, content=json.dumps(STATE)):
-    state_file = tmpdir.join(tempfile.mktemp())
+    state_file = tmpdir.join(tempfile.mkstemp()[1])
+
     state_file.write(content, ensure=True)
 
     return state_file.dirname, state_file.basename

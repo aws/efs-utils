@@ -36,14 +36,24 @@ def _get_config(
     stunnel_check_cert_hostname=None,
     stunnel_check_cert_validity=False,
     stunnel_logs_file=None,
+    stunnel_libwrap_option_supported=True,
 ):
 
+    options = []
+    if stunnel_check_cert_hostname_supported:
+        options.append(b"checkHost              = peer certificate host name pattern")
+    if stunnel_check_cert_validity_supported:
+        options.append(
+            b"OCSPaia                = yes|no check the AIA responders from certificates"
+        )
+    if stunnel_libwrap_option_supported:
+        options.append(
+            b"libwrap                = yes|no use /etc/hosts.allow and /etc/hosts.deny"
+        )
+
     mocker.patch(
-        "mount_efs.get_version_specific_stunnel_options",
-        return_value=(
-            stunnel_check_cert_hostname_supported,
-            stunnel_check_cert_validity_supported,
-        ),
+        "mount_efs.get_stunnel_options",
+        return_value=options,
     )
 
     if stunnel_check_cert_hostname is None:
@@ -274,8 +284,11 @@ def test_write_stunnel_config_file_with_az_as_dns_name(mocker, tmpdir):
     )
 
 
-def _test_disable_libwrap(
-    mocker, tmpdir, system_release="unknown", disable_libwrap=True
+def _test_enable_disable_libwrap(
+    mocker,
+    tmpdir,
+    system_release="unknown",
+    libwrap_supported=True,
 ):
     mocker.patch("mount_efs.add_stunnel_ca_options")
     ver_mocker = mocker.patch(
@@ -283,7 +296,7 @@ def _test_disable_libwrap(
     )
 
     config_file = mount_efs.write_stunnel_config_file(
-        _get_config(mocker),
+        _get_config(mocker, stunnel_libwrap_option_supported=libwrap_supported),
         str(tmpdir),
         FS_ID,
         MOUNT_POINT,
@@ -299,7 +312,7 @@ def _test_disable_libwrap(
     _validate_config(
         config_file,
         mount_efs.STUNNEL_GLOBAL_CONFIG,
-        _get_expected_efs_config(disable_libwrap=disable_libwrap),
+        _get_expected_efs_config(disable_libwrap=libwrap_supported),
     )
 
 
@@ -539,28 +552,12 @@ def test_write_stunnel_config_with_verify_level(mocker, tmpdir):
     )
 
 
-def test_write_stunnel_config_for_rhel8_disable_libwrap(mocker, tmpdir):
-    _test_disable_libwrap(
-        mocker,
-        tmpdir,
-        system_release="Red Hat Enterprise Linux release 8.0 (Ootpa)",
-        disable_libwrap=False,
-    )
+def test_write_stunnel_config_libwrap_not_supported(mocker, tmpdir):
+    _test_enable_disable_libwrap(mocker, tmpdir, libwrap_supported=False)
 
 
-def test_write_stunnel_config_for_unknown_system_enable_libwrap(mocker, tmpdir):
-    _test_disable_libwrap(
-        mocker, tmpdir, system_release="unknown", disable_libwrap=True
-    )
-
-
-def test_write_stunnel_config_for_non_rhel8_enable_libwrap(mocker, tmpdir):
-    _test_disable_libwrap(
-        mocker,
-        tmpdir,
-        system_release="Amazon Linux release 2 (Karoo)",
-        disable_libwrap=True,
-    )
+def test_write_stunnel_config_libwrap_supported(mocker, tmpdir):
+    _test_enable_disable_libwrap(mocker, tmpdir, libwrap_supported=True)
 
 
 def test_write_stunnel_config_with_fall_back_ip_address(mocker, tmpdir):

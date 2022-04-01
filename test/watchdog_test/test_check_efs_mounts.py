@@ -45,6 +45,8 @@ def _get_config():
         config = ConfigParser()
     config.add_section(mount_efs.CONFIG_SECTION)
     config.set(mount_efs.CONFIG_SECTION, "state_file_dir_mode", "750")
+    config.add_section(watchdog.CONFIG_SECTION)
+    config.set(watchdog.CONFIG_SECTION, "stunnel_health_check_enabled", "false")
     return config
 
 
@@ -75,7 +77,7 @@ def setup_mocks(mocker, mounts, state_files, is_pid_running=True):
 
 
 def create_state_file(tmpdir, content=json.dumps(STATE)):
-    state_file = tmpdir.join(tempfile.mktemp())
+    state_file = tmpdir.join(tempfile.mkstemp()[1])
     state_file.write(content, ensure=True)
 
     return state_file.dirname, state_file.basename

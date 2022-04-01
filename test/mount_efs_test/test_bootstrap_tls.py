@@ -97,7 +97,7 @@ def test_bootstrap_tls_state_file_dir_exists(mocker, tmpdir):
 
 def test_bootstrap_tls_state_file_nonexistent_dir(mocker, tmpdir):
     popen_mock, _ = setup_mocks(mocker)
-    state_file_dir = str(tmpdir.join(tempfile.mktemp()))
+    state_file_dir = str(tmpdir.join(tempfile.mkdtemp()[1]))
 
     def config_get_side_effect(section, field):
         if section == mount_efs.CONFIG_SECTION and field == "state_file_dir_mode":

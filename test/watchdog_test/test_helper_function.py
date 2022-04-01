@@ -42,7 +42,7 @@ def get_config(
     if config_section:
         config.add_section(config_section)
         if config_item and config_item_value is not None:
-            config.set(config_section, config_item, config_item_value)
+            config.set(config_section, config_item, str(config_item_value))
     return config
 
 
@@ -297,3 +297,87 @@ def test_get_assumed_profile_credentials_via_botocore_botocore_present_profile_n
 
     boto_session_mock.set_config_variable.assert_called_once()
     boto_session_mock.get_credentials.assert_called_once()
+
+
+def test_get_int_value_from_config_file():
+    config_section = watchdog.CONFIG_SECTION
+    config_item = "stunnel_health_check_interval_min"
+    config_value = watchdog.DEFAULT_STUNNEL_HEALTH_CHECK_INTERVAL_MIN + 1
+    config = get_config(config_section, config_item, config_value)
+    assert config_value == watchdog.get_int_value_from_config_file(
+        config, config_item, watchdog.DEFAULT_STUNNEL_HEALTH_CHECK_INTERVAL_MIN
+    )
+
+
+def test_get_int_value_from_config_file_not_positive_value():
+    config_section = watchdog.CONFIG_SECTION
+    config_item = "stunnel_health_check_interval_min"
+    config_value = 0
+    config = get_config(config_section, config_item, config_value)
+    assert (
+        watchdog.DEFAULT_STUNNEL_HEALTH_CHECK_INTERVAL_MIN
+        == watchdog.get_int_value_from_config_file(
+            config, config_item, watchdog.DEFAULT_STUNNEL_HEALTH_CHECK_INTERVAL_MIN
+        )
+    )
+
+
+def test_get_int_value_from_config_file_no_config_value():
+    config_item = "stunnel_health_check_interval_min"
+    config = get_config()
+    assert (
+        watchdog.DEFAULT_STUNNEL_HEALTH_CHECK_INTERVAL_MIN
+        == watchdog.get_int_value_from_config_file(
+            config, config_item, watchdog.DEFAULT_STUNNEL_HEALTH_CHECK_INTERVAL_MIN
+        )
+    )
+
+
+def test_get_int_value_from_config_file_wrong_type_value():
+    config_section = watchdog.CONFIG_SECTION
+    config_item = "stunnel_health_check_interval_min"
+    config_value = "false"
+    config = get_config(config_section, config_item, config_value)
+    assert (
+        watchdog.DEFAULT_STUNNEL_HEALTH_CHECK_INTERVAL_MIN
+        == watchdog.get_int_value_from_config_file(
+            config, config_item, watchdog.DEFAULT_STUNNEL_HEALTH_CHECK_INTERVAL_MIN
+        )
+    )
+
+
+def test_get_mountpoint_from_state_file_name():
+    state_file_name = "/var/run/efs/fs-deadbeef.home.efs.12345"
+    nfs_mounts = {
+        "mnt": watchdog.Mount("127.0.0.1", "/mnt", "nfs4", "port=12343", "0", "0"),
+        "mnt1": watchdog.Mount("127.0.0.1", "/mnt1", "nfs4", "port=12342", "0", "0"),
+        "home.efs": watchdog.Mount(
+            "127.0.0.1", "/home/efs", "nfs4", "port=12345", "0", "0"
+        ),
+    }
+    assert "/home/efs" == watchdog.get_mountpoint_from_nfs_mounts(
+        state_file_name, nfs_mounts
+    )
+
+    state_file_name = (
+        "/var/run/efs/fs-deadbeef.var.lib.kubelet.pods.2cbe4183-2c36-4a37-9f72-7e3c1a67538c.volumes"
+        ".kubernetes.io~csi.pvc-008bf5dc-5859-482e-b8b9-0e5e6887e411.mount.12345"
+    )
+    nfs_mounts = {
+        "mnt": watchdog.Mount("127.0.0.1", "/mnt", "nfs4", "port=12343", "0", "0"),
+        "mnt1": watchdog.Mount("127.0.0.1", "/mnt1", "nfs4", "port=12342", "0", "0"),
+        "test": watchdog.Mount(
+            "127.0.0.1:/deadbeef/test-008bf5dc-5859-482e-b8b9-0e5e6887e411",
+            "/var/lib/kubelet/pods/1234583-2c36-4a37-9f72-7e3c1a67538c/volumes/"
+            "kubernetes.io~csi/pvc-008bf5dc-5859-482e-b8b9-0e5e6887e411/mount",
+            "nfs4",
+            "port=12345",
+            "0",
+            "0",
+        ),
+    }
+    assert (
+        "/var/lib/kubelet/pods/1234583-2c36-4a37-9f72-7e3c1a67538c/volumes/kubernetes.io~csi/pvc-008bf5dc-5859"
+        "-482e-b8b9-0e5e6887e411/mount"
+        == watchdog.get_mountpoint_from_nfs_mounts(state_file_name, nfs_mounts)
+    )

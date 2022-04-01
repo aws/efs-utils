@@ -12,7 +12,7 @@ import mount_efs
 
 
 def test_get_init_system_from_file(tmpdir):
-    temp_file = tmpdir.join(tempfile.mktemp())
+    temp_file = tmpdir.join(tempfile.mkstemp()[1])
     temp_file.write("systemd\n", ensure=True)
 
     init_system = mount_efs.get_init_system(str(temp_file))
@@ -21,7 +21,7 @@ def test_get_init_system_from_file(tmpdir):
 
 
 def test_get_init_system_nonexistent_file(tmpdir):
-    temp_file = tmpdir.join(tempfile.mktemp())
+    temp_file = tmpdir.join(tempfile.mkstemp()[1])
 
     init_system = mount_efs.get_init_system(str(temp_file))
 

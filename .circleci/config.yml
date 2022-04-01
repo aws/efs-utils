@@ -49,7 +49,7 @@ commands:
       - run:
           name: Install package
           command: |
-            apt-get -y install ./build/amazon-efs-utils*deb
+            DEBIAN_FRONTEND=noninteractive apt-get -y install ./build/amazon-efs-utils*deb
       - run:
           name: Check installed successfully
           command: |
@@ -105,6 +105,13 @@ commands:
           name: Check changelog
           command: |
             rpm -q --changelog amazon-efs-utils
+  build-centos-repo:
+    steps:
+    - run:
+        name: change the mirrors to vault.centos.org
+        command: |
+          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
 jobs:
   test:
     parameters:
@@ -142,6 +149,16 @@ jobs:
       image: << parameters.image >>
     steps:
       - build-suse-rpm
+  build-centos-rpm-package:
+    parameters:
+      image:
+        type: string
+    executor:
+      name: linux
+      image: << parameters.image >>
+    steps:
+      - build-centos-repo
+      - build-rpm
 workflows:
   workflow:
     jobs:
@@ -164,11 +181,23 @@ workflows:
           name: python34
           image: circleci/python:3.4.9
       - build-deb-package:
+          name: ubuntu-latest
+          image: ubuntu:latest
+      - build-deb-package:
           name: ubuntu16
           image: ubuntu:16.04
       - build-deb-package:
           name: ubuntu18
           image: ubuntu:18.04
+      - build-deb-package:
+          name: ubuntu20
+          image: ubuntu:20.04
+      - build-deb-package:
+          name: ubuntu21
+          image: ubuntu:21.04
+      - build-deb-package:
+          name: ubuntu22
+          image: ubuntu:22.04
       - build-deb-package:
           name: debian9
           image: debian:stretch
@@ -178,24 +207,30 @@ workflows:
       - build-deb-package:
           name: debian11
           image: debian:bullseye
+      - build-centos-rpm-package:
+          name: centos-latest
+          image: centos:latest
       - build-rpm-package:
           name: centos7
           image: centos:centos7
-      - build-rpm-package:
+      - build-centos-rpm-package:
           name: centos8
           image: centos:centos8
       - build-rpm-package:
           name: rocky8
           image: rockylinux/rockylinux:8
       - build-rpm-package:
-          name: almalinux8
-          image: almalinux:8
+          name: amazon-linux-latest
+          image: amazonlinux:latest
       - build-rpm-package:
           name: amazon-linux-2
           image: amazonlinux:2
       - build-rpm-package:
           name: amazon-linux
           image: amazonlinux:1
+      - build-rpm-package:
+          name: fedora-latest
+          image: fedora:latest
       - build-rpm-package:
           name: fedora28
           image: fedora:28
@@ -214,12 +249,27 @@ workflows:
       - build-rpm-package:
           name: fedora33
           image: fedora:33
+      - build-rpm-package:
+          name: fedora34
+          image: fedora:34
+      - build-rpm-package:
+          name: fedora35
+          image: fedora:35
+      - build-rpm-package:
+          name: fedora36
+          image: fedora:36
       - build-suse-rpm-package:
           name: opensuse-leap15.1
           image: opensuse/leap:15.1
       - build-suse-rpm-package:
           name: opensuse-leap15.2
           image: opensuse/leap:15.2
+      - build-suse-rpm-package:
+          name: opensuse-leap15.3
+          image: opensuse/leap:15.3
+      - build-suse-rpm-package:
+          name: opensuse-leap15.4
+          image: opensuse/leap:15.4
       - build-suse-rpm-package:
           name: opensuse-leap-latest
           image: opensuse/leap:latest

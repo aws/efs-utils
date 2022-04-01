@@ -27,7 +27,7 @@ from collections import namedtuple
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
-from signal import SIGTERM, SIGHUP
+from signal import SIGHUP, SIGKILL, SIGTERM
 
 try:
     from configparser import ConfigParser, NoOptionError, NoSectionError
@@ -49,7 +49,7 @@ except ImportError:
     from urllib import urlencode
 
 
-VERSION = "1.31.3"
+VERSION = "1.32.1"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -71,6 +71,8 @@ STATE_FILE_DIR = "/var/run/efs"
 DEFAULT_NFS_PORT = "2049"
 PRIVATE_KEY_FILE = "/etc/amazon/efs/privateKey.pem"
 DEFAULT_REFRESH_SELF_SIGNED_CERT_INTERVAL_MIN = 60
+DEFAULT_STUNNEL_HEALTH_CHECK_INTERVAL_MIN = 5
+DEFAULT_STUNNEL_HEALTH_CHECK_TIMEOUT_SEC = 30
 NOT_BEFORE_MINS = 15
 NOT_AFTER_HOURS = 3
 DATE_ONLY_FORMAT = "%Y%m%d"
@@ -585,7 +587,10 @@ def bootstrap_logging(config, log_dir=LOG_DIR):
         os.path.join(log_dir, LOG_FILE), maxBytes=max_bytes, backupCount=file_count
     )
     handler.setFormatter(
-        logging.Formatter(fmt="%(asctime)s - %(levelname)s - %(message)s")
+        logging.Formatter(
+            fmt="%(asctime)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S %Z",
+        )
     )
 
     logger = logging.getLogger()
@@ -937,9 +942,163 @@ def check_efs_mounts(
 
             if is_running:
                 logging.debug("TLS tunnel for %s is running", state_file)
+                # https://github.com/kubernetes-sigs/aws-efs-csi-driver/issues/616 We have seen EFS hanging issue caused
+                # by stuck stunnel (version: 4.56) process. Apart from checking whether stunnel is running or not, we
+                # need to check whether the stunnel connection established is healthy periodically.
+                #
+                # The way to check the stunnel health is by `df` the mountpoint, i.e. check the file system information,
+                # which will trigger a remote GETATTR on the root of the file system. Normally the command will finish
+                # in 10 milliseconds, thus if the command hang for certain period (defined as 30 sec as of now), the
+                # stunnel connection is likely to be unhealthy. Watchdog will kill the old stunnel process and restart
+                # a new one for the unhealthy mount. The health check will run every 5 min since mount.
+                #
+                # Both the command hang timeout and health check interval are configurable in efs-utils config file.
+                #
+                check_stunnel_health(
+                    config, state, state_file_dir, state_file, child_procs, nfs_mounts
+                )
             else:
                 logging.warning("TLS tunnel for %s is not running", state_file)
                 restart_tls_tunnel(child_procs, state, state_file_dir, state_file)
+
+
+def check_stunnel_health(
+    config, state, state_file_dir, state_file, child_procs, nfs_mounts
+):
+    if not get_boolean_config_item_value(
+        config, CONFIG_SECTION, "stunnel_health_check_enabled", default_value=True
+    ):
+        return
+
+    check_interval_min = get_int_value_from_config_file(
+        config,
+        "stunnel_health_check_interval_min",
+        DEFAULT_STUNNEL_HEALTH_CHECK_INTERVAL_MIN,
+    )
+
+    current_time = time.time()
+
+    # The mount_time info in the state file is added in version 1.31.3. It is possible for existing mounts, there are
+    # no mount_time in state file, which will cause watchdog to crash. If the information does not exist, we just take
+    # current time as the initial mount time of the mount.
+    #
+    if "mount_time" not in state:
+        state["mount_time"] = current_time
+        rewrite_state_file(state, state_file_dir, state_file)
+        return
+
+    # Only start to perform the stunnel health check after the check interval passed.
+    if current_time - state["mount_time"] < check_interval_min * 60:
+        return
+
+    last_stunnel_check_time = (
+        state["last_stunnel_check_time"] if "last_stunnel_check_time" in state else 0
+    )
+    if (
+        last_stunnel_check_time != 0
+        and current_time - last_stunnel_check_time < check_interval_min * 60
+    ):
+        return
+
+    # We add this mountpoint info in the state file along with this change. It is possible for existing mounts, there
+    # are no mountpoint in state file, which will cause watchdog to crash. To handle that case, we need to extract the
+    # mountpoint from the state file name, and write that information to state file.
+    #
+    if "mountpoint" in state:
+        mountpoint = state["mountpoint"]
+    else:
+        mountpoint = get_mountpoint_from_nfs_mounts(state_file, nfs_mounts)
+        state["mountpoint"] = mountpoint
+        rewrite_state_file(state, state_file_dir, state_file)
+
+    stunnel_pid = state["pid"]
+    process = subprocess.Popen(
+        ["df", mountpoint],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+    )
+
+    command_timeout_sec = get_int_value_from_config_file(
+        config,
+        "stunnel_health_check_command_timeout_sec",
+        DEFAULT_STUNNEL_HEALTH_CHECK_TIMEOUT_SEC,
+    )
+    try:
+        state["last_stunnel_check_time"] = current_time
+        process.communicate(timeout=command_timeout_sec)
+        logging.debug(
+            "Stunnel [PID: %d] running for tls mount on %s passed health check.",
+            stunnel_pid,
+            mountpoint,
+        )
+        rewrite_state_file(state, state_file_dir, state_file)
+    except subprocess.TimeoutExpired:
+        if is_pid_running(stunnel_pid):
+            process_group = os.getpgid(stunnel_pid)
+            logging.warning(
+                "Connection timeout for %s after %d, the stunnel could be unhealthy. Sending SIGKILL to kill the "
+                "stunnel(PID: %d, group ID: %s) and starting a new stunnel process.",
+                mountpoint,
+                command_timeout_sec,
+                stunnel_pid,
+                process_group,
+            )
+            os.killpg(process_group, SIGKILL)
+            restart_tls_tunnel(child_procs, state, state_file_dir, state_file)
+        else:
+            logging.warning(
+                "Stunnel health check timed out for %s, stunnel [PID: %d] is not running anymore.",
+                mountpoint,
+                stunnel_pid,
+            )
+        # The child process is not killed if the timeout expires, so in order to cleanup properly, kill the child
+        # process after the timeout.
+        #
+        process.kill()
+
+
+# Retrieve the nfs mountpoint with the port information in the mount option
+def get_mountpoint_from_nfs_mounts(state_file, nfs_mounts):
+    search_pattern = "port={port}".format(
+        port=os.path.basename(state_file).split(".")[-1]
+    )
+    for mount in nfs_mounts.values():
+        if search_pattern in mount[3]:
+            return mount[1]
+
+
+def get_int_value_from_config_file(config, config_name, default_config_value):
+    val = default_config_value
+    try:
+        value_from_config = config.get(CONFIG_SECTION, config_name)
+        try:
+            if int(value_from_config) > 0:
+                val = int(value_from_config)
+            else:
+                logging.warning(
+                    '%s value in config file "%s" is lower than 1. Defaulting to %d.',
+                    config_name,
+                    CONFIG_FILE,
+                    default_config_value,
+                )
+        except ValueError:
+            logging.warning(
+                'Bad %s, "%s", in config file "%s". Defaulting to %d.',
+                config_name,
+                value_from_config,
+                CONFIG_FILE,
+                default_config_value,
+            )
+    except NoOptionError:
+        logging.warning(
+            'No %s value in config file "%s". Defaulting to %d.',
+            config_name,
+            CONFIG_FILE,
+            default_config_value,
+        )
+
+    return val
 
 
 def check_child_procs(child_procs):
@@ -1177,8 +1336,7 @@ def check_and_create_private_key(base_path=STATE_FILE_DIR):
             os.write(f, lock_file_contents.encode("utf-8"))
             yield f
         finally:
-            os.close(f)
-            os.remove(lock_file)
+            check_and_remove_lock_file(lock_file, f)
 
     def do_with_lock(function):
         while True:
@@ -1193,7 +1351,15 @@ def check_and_create_private_key(base_path=STATE_FILE_DIR):
                     )
                     time.sleep(DEFAULT_TIMEOUT)
                 else:
-                    raise
+                    # errno.ENOENT: No such file or directory, errno.EBADF: Bad file descriptor
+                    if e.errno == errno.ENOENT or e.errno == errno.EBADF:
+                        logging.debug(
+                            "lock file does not exist or Bad file descriptor, The file is already removed nothing to do."
+                        )
+                    else:
+                        raise Exception(
+                            "Could not remove lock file unexpected exception: %s", e
+                        )
 
     def generate_key():
         if os.path.isfile(key):
@@ -1628,6 +1794,24 @@ def check_and_remove_file(path):
             logging.debug("Could not remove %s. Unexpected exception: %s", path, e)
         else:
             logging.debug("%s does not exist, nothing to do", path)
+
+
+def check_and_remove_lock_file(path, file):
+    """
+    There is a possibility of having a race condition as the lock file is getting deleted in both mount_efs and watchdog,
+    so creating a function in order to check whether the path exist or not before removing the lock file.
+    """
+    try:
+        os.close(file)
+        os.remove(path)
+        logging.debug("Removed %s successfully", path)
+    except OSError as e:
+        if not (e.errno == errno.ENOENT or e.errno == errno.EBADF):
+            raise Exception("Could not remove %s. Unexpected exception: %s", path, e)
+        else:
+            logging.debug(
+                "%s does not exist, The file is already removed nothing to do", path
+            )
 
 
 def clean_up_certificate_lock_file(state_file_dir=STATE_FILE_DIR):

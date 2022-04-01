@@ -21,7 +21,7 @@ def test_restart_tls_tunnel_without_certificate_path(mocker, tmpdir):
 
     state = {"pid": 9999, "cmd": ""}
 
-    state_file = tmpdir.join(tempfile.mktemp())
+    state_file = tmpdir.join(tempfile.mkstemp()[1])
     state_file.write(json.dumps(state), ensure=True)
 
     watchdog.restart_tls_tunnel([], state, state_file.dirname, state_file.basename)
@@ -39,7 +39,7 @@ def test_restart_tls_tunnel_with_certificate_path(mocker, tmpdir):
 
     state = {"pid": 9999, "cmd": "", "certificate": "foo/bar/certificate.pem"}
 
-    state_file = tmpdir.join(tempfile.mktemp())
+    state_file = tmpdir.join(tempfile.mkstemp()[1])
     state_file.write(json.dumps(state), ensure=True)
 
     watchdog.restart_tls_tunnel([], state, state_file.dirname, state_file.basename)

@@ -31,9 +31,10 @@ The `efs-utils` package has been verified against the following Linux distributi
 
 The `efs-utils` package has been verified against the following MacOS distributions:
 
-| Distribution | `init` System |
-| ------------ | ------------- |
-| MacOS Big Sur | `launchd` |
+| Distribution   | `init` System |
+| -------------- | ------------- |
+| MacOS Big Sur  | `launchd` |
+| MacOS Monterey | `launchd` |
 
 ## Prerequisites
 
@@ -116,16 +117,16 @@ $ ./build-deb.sh
 $ sudo apt-get -y install ./build/amazon-efs-utils*deb
 ```
 
-### On MacOS Big Sur distribution
+### On MacOS Big Sur and macOS Monterey distribution
 
-For EC2 Mac instances running macOS Big Sur, you can install amazon-efs-utils from the 
+For EC2 Mac instances running macOS Big Sur and macOS Monterey, you can install amazon-efs-utils from the 
 [homebrew-aws](https://github.com/aws/homebrew-aws) respository. **Note that this will ONLY work on EC2 instances
-running macOS Big Sur, not local Mac computers.**
+running macOS Big Sur and macOS Monterey, not local Mac computers.**
 ```
 brew install amazon-efs-utils
 ```
 
-This will install amazon-efs-utils on your EC2 Mac Instance running macOS Big Sur in the directory `/usr/local/Cellar/amazon-efs-utils`. At the end of the installation, it will print a set of commands that must be executed in order to start using efs-utils. The instructions that are printed after amazon-efs-utils and must be executed are:
+This will install amazon-efs-utils on your EC2 Mac Instance running macOS Big Sur and macOS Monterey in the directory `/usr/local/Cellar/amazon-efs-utils`. At the end of the installation, it will print a set of commands that must be executed in order to start using efs-utils. The instructions that are printed after amazon-efs-utils and must be executed are:
 
 ```
 Perform below actions to start using efs:
@@ -280,7 +281,9 @@ you can upgrade the botocore by following the [upgrade botocore section](#Upgrad
 sudo yum -y install wget
 ```
 ```bash
-if [[ "$(python3 -V 2>&1)" =~ ^(Python 3.5.*) ]]; then
+if [[ "$(python3 -V 2>&1)" =~ ^(Python 3.6.*) ]]; then
+    sudo wget https://bootstrap.pypa.io/3.6/get-pip.py -O /tmp/get-pip.py
+elif [[ "$(python3 -V 2>&1)" =~ ^(Python 3.5.*) ]]; then
     sudo wget https://bootstrap.pypa.io/3.5/get-pip.py -O /tmp/get-pip.py
 elif [[ "$(python3 -V 2>&1)" =~ ^(Python 3.4.*) ]]; then
     sudo wget https://bootstrap.pypa.io/3.4/get-pip.py -O /tmp/get-pip.py
@@ -294,7 +297,9 @@ sudo apt-get update
 sudo apt-get -y install wget
 ```
 ```bash
-if echo $(python3 -V 2>&1) | grep -e "Python 3.5"; then
+if echo $(python3 -V 2>&1) | grep -e "Python 3.6"; then
+    sudo wget https://bootstrap.pypa.io/3.6/get-pip.py -O /tmp/get-pip.py
+elif echo $(python3 -V 2>&1) | grep -e "Python 3.5"; then
     sudo wget https://bootstrap.pypa.io/3.5/get-pip.py -O /tmp/get-pip.py
 elif echo $(python3 -V 2>&1) | grep -e "Python 3.4"; then
     sudo wget https://bootstrap.pypa.io/3.4/get-pip.py -O /tmp/get-pip.py
@@ -348,7 +353,7 @@ sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/}' /etc
 
 - For MacOS:
 ```bash
-sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/;}' /usr/local/Cellar/amazon-efs-utils/<version>/etc/amazon/efs/efs-utils.conf
+sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/;}' /usr/local/Cellar/amazon-efs-utils/<version>/libexec/etc/amazon/efs/efs-utils.conf
 ```
 You can also configure CloudWatch log group name and log retention days in the config file.
 If you want to have separate log groups in Cloudwatch for every mounted file system, add `/{fs_id}` to the end of the `log_group_name` field in `efs-utils.conf` file. For example, the `log_group_name` in `efs-utils.conf` file would look something like:

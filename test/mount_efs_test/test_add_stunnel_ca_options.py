@@ -31,7 +31,7 @@ def _get_config():
 
 
 def _create_temp_file(tmpdir, content=""):
-    temp_file = tmpdir.join(tempfile.mktemp())
+    temp_file = tmpdir.join(tempfile.mkstemp()[1])
     temp_file.write(content, ensure=True)
     return temp_file
 

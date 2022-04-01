@@ -84,7 +84,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.31.3"
+VERSION = "1.32.1"
 SERVICE = "elasticfilesystem"
 
 CLONE_NEWNET = 0x40000000
@@ -258,29 +258,8 @@ WATCHDOG_SERVICE = "amazon-efs-mount-watchdog"
 WATCHDOG_SERVICE_PLIST_PATH = "/Library/LaunchAgents/amazon-efs-mount-watchdog.plist"
 SYSTEM_RELEASE_PATH = "/etc/system-release"
 OS_RELEASE_PATH = "/etc/os-release"
-RHEL8_RELEASE_NAME = "Red Hat Enterprise Linux release 8"
-CENTOS8_RELEASE_NAME = "CentOS Linux release 8"
-ORACLE_RELEASE_NAME = "Oracle Linux Server release 8"
-FEDORA_RELEASE_NAME = "Fedora release"
-OPEN_SUSE_LEAP_RELEASE_NAME = "openSUSE Leap"
-SUSE_RELEASE_NAME = "SUSE Linux Enterprise Server"
 MACOS_BIG_SUR_RELEASE = "macOS-11"
-ROCKY8_RELEASE_NAME = "Rocky Linux release 8"
-ALMALINUX8_RELEASE_NAME = "AlmaLinux release 8"
-AMAZON_LINUX_2022_RELEASE_NAME = "Amazon Linux release 2022"
-
-SKIP_NO_LIBWRAP_RELEASES = [
-    RHEL8_RELEASE_NAME,
-    CENTOS8_RELEASE_NAME,
-    FEDORA_RELEASE_NAME,
-    OPEN_SUSE_LEAP_RELEASE_NAME,
-    SUSE_RELEASE_NAME,
-    MACOS_BIG_SUR_RELEASE,
-    ORACLE_RELEASE_NAME,
-    ROCKY8_RELEASE_NAME,
-    AMAZON_LINUX_2022_RELEASE_NAME,
-    ALMALINUX8_RELEASE_NAME,
-]
+MACOS_MONTEREY_RELEASE = "macOS-12"
 
 # Multiplier for max read ahead buffer size
 # Set default as 15 aligning with prior linux kernel 5.4
@@ -289,11 +268,11 @@ NFS_READAHEAD_CONFIG_PATH_FORMAT = "/sys/class/bdi/0:%s/read_ahead_kb"
 NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION = [5, 4]
 
 # MacOS does not support the property of Socket SO_BINDTODEVICE in stunnel configuration
-SKIP_NO_SO_BINDTODEVICE_RELEASES = [MACOS_BIG_SUR_RELEASE]
+SKIP_NO_SO_BINDTODEVICE_RELEASES = [MACOS_BIG_SUR_RELEASE, MACOS_MONTEREY_RELEASE]
 
 MAC_OS_PLATFORM_LIST = ["darwin"]
-# MacOS Versions : Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
-MAC_OS_SUPPORTED_VERSION_LIST = ["20"]
+# MacOS Versions : Monterey - 21.*, Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
+MAC_OS_SUPPORTED_VERSION_LIST = ["20", "21"]
 
 
 def errcheck(ret, func, args):
@@ -1079,7 +1058,7 @@ def is_stunnel_option_supported(stunnel_output, stunnel_option_name):
     return supported
 
 
-def get_version_specific_stunnel_options():
+def get_stunnel_options():
     stunnel_command = [_stunnel_bin(), "-help"]
     proc = subprocess.Popen(
         stunnel_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True
@@ -1087,12 +1066,7 @@ def get_version_specific_stunnel_options():
     proc.wait()
     _, err = proc.communicate()
 
-    stunnel_output = err.splitlines()
-
-    check_host_supported = is_stunnel_option_supported(stunnel_output, b"checkHost")
-    ocsp_aia_supported = is_stunnel_option_supported(stunnel_output, b"OCSPaia")
-
-    return check_host_supported, ocsp_aia_supported
+    return err.splitlines()
 
 
 def _stunnel_bin():
@@ -1199,7 +1173,7 @@ def write_stunnel_config_file(
         efs_config["cert"] = cert_details["certificate"]
         efs_config["key"] = cert_details["privateKey"]
 
-    check_host_supported, ocsp_aia_supported = get_version_specific_stunnel_options()
+    stunnel_options = get_stunnel_options()
 
     tls_controls_message = (
         "WARNING: Your client lacks sufficient controls to properly enforce TLS. Please upgrade stunnel, "
@@ -1210,7 +1184,7 @@ def write_stunnel_config_file(
     if get_boolean_config_item_value(
         config, CONFIG_SECTION, "stunnel_check_cert_hostname", default_value=True
     ):
-        if check_host_supported:
+        if is_stunnel_option_supported(stunnel_options, b"checkHost"):
             # Stunnel checkHost option checks if the specified DNS host name or wildcard matches any of the provider in peer
             # certificate's CN fields, after introducing the AZ field in dns name, the host name in the stunnel config file
             # is not valid, remove the az info there
@@ -1220,14 +1194,14 @@ def write_stunnel_config_file(
 
     # Only use the config setting if the override is not set
     if ocsp_enabled:
-        if ocsp_aia_supported:
+        if is_stunnel_option_supported(stunnel_options, b"OCSPaia"):
             efs_config["OCSPaia"] = "yes"
         else:
             fatal_error(tls_controls_message % "stunnel_check_cert_validity")
 
-    if not any(
-        release in system_release_version for release in SKIP_NO_LIBWRAP_RELEASES
-    ):
+    # If the stunnel libwrap option is supported, we disable the usage of /etc/hosts.allow and /etc/hosts.deny by
+    # setting the option to no
+    if is_stunnel_option_supported(stunnel_options, b"libwrap"):
         efs_config["libwrap"] = "no"
 
     stunnel_config = "\n".join(
@@ -1267,6 +1241,7 @@ def write_tls_tunnel_state_file(
         "cmd": command,
         "files": files,
         "mount_time": time.time(),
+        "mountpoint": mountpoint,
     }
 
     if cert_details:
@@ -1568,8 +1543,8 @@ def test_tlsport(tlsport):
     while not verify_tlsport_can_be_connected(tlsport) and retry_times > 0:
         logging.debug(
             "The tlsport %s cannot be connected yet, sleep %s(s), %s retry time(s) left",
-            DEFAULT_TIMEOUT,
             tlsport,
+            DEFAULT_TIMEOUT,
             retry_times,
         )
         time.sleep(DEFAULT_TIMEOUT)
@@ -1837,8 +1812,7 @@ def check_and_create_private_key(base_path=STATE_FILE_DIR):
             os.write(f, lock_file_contents.encode("utf-8"))
             yield f
         finally:
-            os.close(f)
-            os.remove(lock_file)
+            check_and_remove_lock_file(lock_file, f)
 
     def do_with_lock(function):
         while True:
@@ -1853,7 +1827,15 @@ def check_and_create_private_key(base_path=STATE_FILE_DIR):
                     )
                     time.sleep(DEFAULT_TIMEOUT)
                 else:
-                    raise
+                    # errno.ENOENT: No such file or directory, errno.EBADF: Bad file descriptor
+                    if e.errno == errno.ENOENT or e.errno == errno.EBADF:
+                        logging.debug(
+                            "lock file does not exist or Bad file descriptor, The file is already removed nothing to do."
+                        )
+                    else:
+                        raise Exception(
+                            "Could not remove lock file unexpected exception: %s", e
+                        )
 
     def generate_key():
         if os.path.isfile(key):
@@ -2080,7 +2062,10 @@ def bootstrap_logging(config, log_dir=LOG_DIR):
         os.path.join(log_dir, LOG_FILE), maxBytes=max_bytes, backupCount=file_count
     )
     handler.setFormatter(
-        logging.Formatter(fmt="%(asctime)s - %(levelname)s - %(message)s")
+        logging.Formatter(
+            fmt="%(asctime)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S %Z",
+        )
     )
 
     logger = logging.getLogger()
@@ -2225,6 +2210,24 @@ def check_if_fall_back_to_mount_target_ip_address_is_enabled(config):
         FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM,
         default_value=DEFAULT_FALLBACK_ENABLED,
     )
+
+
+def check_and_remove_lock_file(path, file):
+    """
+    There is a possibility of having a race condition as the lock file is getting deleted in both mount_efs and watchdog,
+    so creating a function in order to check whether the path exist or not before removing the lock file.
+    """
+    try:
+        os.close(file)
+        os.remove(path)
+        logging.debug("Removed %s successfully", path)
+    except OSError as e:
+        if not (e.errno == errno.ENOENT or e.errno == errno.EBADF):
+            raise Exception("Could not remove %s. Unexpected exception: %s", path, e)
+        else:
+            logging.debug(
+                "%s does not exist, The file is already removed nothing to do", path
+            )
 
 
 def dns_name_can_be_resolved(dns_name):
@@ -3405,7 +3408,9 @@ def main():
     bootstrap_logging(config)
 
     if check_if_platform_is_mac() and not check_if_mac_version_is_supported():
-        fatal_error("We do not support EFS on MacOS " + platform.release())
+        fatal_error(
+            "We do not support EFS on MacOS Kernel version " + platform.release()
+        )
 
     fs_id, path, mountpoint, options = parse_arguments(config)
 

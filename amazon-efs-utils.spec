@@ -18,20 +18,24 @@
 %global with_systemd 1
 %endif
 
-%if 0%{?is_opensuse}
-%global platform .opensuse
+%if 0%{?dist:1}
+%global platform %{dist}
 %else
-
-%if 0%{?sle_version}
+%if 0%{?suse_version}
 %global platform .suse
 %else
-%global platform %{dist}
+%global platform .unknown
+%endif
 %endif
 
+%if 0%{?amzn} > 2
+%global efs_bindir %{_sbindir}
+%else
+%global efs_bindir /sbin
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.31.3
+Version   : 1.32.1
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -78,14 +82,14 @@ mkdir -p %{buildroot}%{_sysconfdir}/init
 install -p -m 644 %{_builddir}/%{name}/dist/amazon-efs-mount-watchdog.conf %{buildroot}%{_sysconfdir}/init
 %endif
 
-mkdir -p %{buildroot}/sbin
+mkdir -p %{buildroot}%{efs_bindir}
 mkdir -p %{buildroot}%{_bindir}
 mkdir -p %{buildroot}%{_localstatedir}/log/amazon/efs
 mkdir -p  %{buildroot}%{_mandir}/man8
 
 install -p -m 644 %{_builddir}/%{name}/dist/efs-utils.conf %{buildroot}%{_sysconfdir}/amazon/efs
 install -p -m 444 %{_builddir}/%{name}/dist/efs-utils.crt %{buildroot}%{_sysconfdir}/amazon/efs
-install -p -m 755 %{_builddir}/%{name}/src/mount_efs/__init__.py %{buildroot}/sbin/mount.efs
+install -p -m 755 %{_builddir}/%{name}/src/mount_efs/__init__.py %{buildroot}%{efs_bindir}/mount.efs
 install -p -m 755 %{_builddir}/%{name}/src/watchdog/__init__.py %{buildroot}%{_bindir}/amazon-efs-mount-watchdog
 install -p -m 644 %{_builddir}/%{name}/man/mount.efs.8 %{buildroot}%{_mandir}/man8
 
@@ -97,7 +101,7 @@ install -p -m 644 %{_builddir}/%{name}/man/mount.efs.8 %{buildroot}%{_mandir}/ma
 %config(noreplace) %{_sysconfdir}/init/amazon-efs-mount-watchdog.conf
 %endif
 %{_sysconfdir}/amazon/efs/efs-utils.crt
-/sbin/mount.efs
+%{efs_bindir}/mount.efs
 %{_bindir}/amazon-efs-mount-watchdog
 /var/log/amazon
 %{_mandir}/man8/mount.efs.8.gz
@@ -131,7 +135,12 @@ fi
 %clean
 
 %changelog
-* Thu Nov 23 2021 Jigar Dedhia <dedhiajd@amazon.com> - 1.31.3
+* Thu Mar 31 2022 Shivam Gupta <lshigupt@amazon.com> - 1.32.1
+- Enable watchdog to check stunnel health periodically and restart hanging stunnel process when necessary.
+- Fix potential race condition issue when removing lock files.
+- Add efs-utils Support for MacOS Monterey EC2 instances.
+
+* Tue Nov 23 2021 Jigar Dedhia <dedhiajd@amazon.com> - 1.31.3
 - Add unmount_time and unmount_count to handle inconsistent mount reads
 - Allow specifying fs_id in cloudwatch log group name
 
