@@ -939,7 +939,7 @@ def get_tls_port_range(config):
     return lower_bound, upper_bound
 
 
-def choose_tls_port(config, options):
+def choose_tls_port_and_bind_sock(state_file_dir, fs_id, mountpoint, config, options):
     if "tlsport" in options:
         ports_to_try = [int(options["tlsport"])]
     else:
@@ -954,13 +954,14 @@ def choose_tls_port(config, options):
         assert len(tls_ports) == len(ports_to_try)
 
     if "netns" not in options:
-        tls_port = find_tls_port_in_range(ports_to_try)
+        tls_port_sock = find_tls_port_in_range(state_file_dir, fs_id, mountpoint, ports_to_try)
     else:
         with NetNS(nspath=options["netns"]):
-            tls_port = find_tls_port_in_range(ports_to_try)
+            tls_port_sock = find_tls_port_in_range(state_file_dir, fs_id, mountpoint, ports_to_try)
 
-    if tls_port:
-        return tls_port
+    if tls_port_sock:
+        tls_port = tls_port_sock.getsockname()[1]
+        return tls_port_sock, tls_port
 
     if "tlsport" in options:
         fatal_error(
@@ -974,14 +975,18 @@ def choose_tls_port(config, options):
         )
 
 
-def find_tls_port_in_range(ports_to_try):
+def find_tls_port_in_range(state_file_dir, fs_id, mountpoint, ports_to_try):
     sock = socket.socket()
     for tls_port in ports_to_try:
+        mount_filename = get_mount_specific_filename(fs_id, mountpoint, tls_port)
+        config_file = get_stunnel_config_filename(state_file_dir, mount_filename)
+        if os.access(config_file, os.R_OK):
+            logging.info("confifguration for port %s already exists, trying another port", tls_port)
+            continue
         try:
             logging.info("binding %s", tls_port)
             sock.bind(("localhost", tls_port))
-            sock.close()
-            return tls_port
+            return sock
         except socket.error as e:
             logging.info(e)
             continue
@@ -1262,9 +1267,7 @@ def write_stunnel_config_file(
     )
     logging.debug("Writing stunnel configuration:\n%s", stunnel_config)
 
-    stunnel_config_file = os.path.join(
-        state_file_dir, "stunnel-config.%s" % mount_filename
-    )
+    stunnel_config_file = get_stunnel_config_filename(state_file_dir, mount_filename)
 
     with open(stunnel_config_file, "w") as f:
         f.write(stunnel_config)
@@ -1464,6 +1467,10 @@ def create_required_directory(config, directory):
             raise
 
 
+def get_stunnel_config_filename(state_file_dir, mount_filename):
+    return os.path.join(state_file_dir, "stunnel-config.%s" % mount_filename)
+
+
 @contextmanager
 def bootstrap_tls(
     config,
@@ -1475,82 +1482,88 @@ def bootstrap_tls(
     state_file_dir=STATE_FILE_DIR,
     fallback_ip_address=None,
 ):
-    tls_port = choose_tls_port(config, options)
-    # override the tlsport option so that we can later override the port the NFS client uses to connect to stunnel.
-    # if the user has specified tlsport=X at the command line this will just re-set tlsport to X.
-    options["tlsport"] = tls_port
+    sock, tls_port = choose_tls_port_and_bind_sock(state_file_dir, fs_id, mountpoint, config, options)
+    try:
+        # override the tlsport option so that we can later override the port the NFS client uses to connect to stunnel.
+        # if the user has specified tlsport=X at the command line this will just re-set tlsport to X.
+        options["tlsport"] = tls_port
 
-    use_iam = "iam" in options
-    ap_id = options.get("accesspoint")
-    cert_details = {}
-    security_credentials = None
-    client_info = get_client_info(config)
-    region = get_target_region(config)
+        use_iam = "iam" in options
+        ap_id = options.get("accesspoint")
+        cert_details = {}
+        security_credentials = None
+        client_info = get_client_info(config)
+        region = get_target_region(config)
 
-    if use_iam:
-        aws_creds_uri = options.get("awscredsuri")
-        if aws_creds_uri:
-            kwargs = {"aws_creds_uri": aws_creds_uri}
-        else:
-            kwargs = {"awsprofile": get_aws_profile(options, use_iam)}
+        if use_iam:
+            aws_creds_uri = options.get("awscredsuri")
+            if aws_creds_uri:
+                kwargs = {"aws_creds_uri": aws_creds_uri}
+            else:
+                kwargs = {"awsprofile": get_aws_profile(options, use_iam)}
 
-        security_credentials, credentials_source = get_aws_security_credentials(
-            config, use_iam, region, **kwargs
+            security_credentials, credentials_source = get_aws_security_credentials(
+                config, use_iam, region, **kwargs
+            )
+
+            if credentials_source:
+                cert_details["awsCredentialsMethod"] = credentials_source
+
+        if ap_id:
+            cert_details["accessPoint"] = ap_id
+
+        # additional symbol appended to avoid naming collisions
+        cert_details["mountStateDir"] = (
+            get_mount_specific_filename(fs_id, mountpoint, tls_port) + "+"
         )
+        # common name for certificate signing request is max 64 characters
+        cert_details["commonName"] = socket.gethostname()[0:64]
+        region = get_target_region(config)
+        cert_details["region"] = region
+        cert_details["certificateCreationTime"] = create_certificate(
+            config,
+            cert_details["mountStateDir"],
+            cert_details["commonName"],
+            cert_details["region"],
+            fs_id,
+            security_credentials,
+            ap_id,
+            client_info,
+            base_path=state_file_dir,
+        )
+        cert_details["certificate"] = os.path.join(
+            state_file_dir, cert_details["mountStateDir"], "certificate.pem"
+        )
+        cert_details["privateKey"] = get_private_key_path()
+        cert_details["fsId"] = fs_id
 
-        if credentials_source:
-            cert_details["awsCredentialsMethod"] = credentials_source
+        start_watchdog(init_system)
 
-    if ap_id:
-        cert_details["accessPoint"] = ap_id
+        if not os.path.exists(state_file_dir):
+            create_required_directory(config, state_file_dir)
 
-    # additional symbol appended to avoid naming collisions
-    cert_details["mountStateDir"] = (
-        get_mount_specific_filename(fs_id, mountpoint, tls_port) + "+"
-    )
-    # common name for certificate signing request is max 64 characters
-    cert_details["commonName"] = socket.gethostname()[0:64]
-    region = get_target_region(config)
-    cert_details["region"] = region
-    cert_details["certificateCreationTime"] = create_certificate(
-        config,
-        cert_details["mountStateDir"],
-        cert_details["commonName"],
-        cert_details["region"],
-        fs_id,
-        security_credentials,
-        ap_id,
-        client_info,
-        base_path=state_file_dir,
-    )
-    cert_details["certificate"] = os.path.join(
-        state_file_dir, cert_details["mountStateDir"], "certificate.pem"
-    )
-    cert_details["privateKey"] = get_private_key_path()
-    cert_details["fsId"] = fs_id
+        verify_level = int(options.get("verify", DEFAULT_STUNNEL_VERIFY_LEVEL))
+        ocsp_enabled = is_ocsp_enabled(config, options)
 
-    start_watchdog(init_system)
-
-    if not os.path.exists(state_file_dir):
-        create_required_directory(config, state_file_dir)
-
-    verify_level = int(options.get("verify", DEFAULT_STUNNEL_VERIFY_LEVEL))
-    ocsp_enabled = is_ocsp_enabled(config, options)
-
-    stunnel_config_file = write_stunnel_config_file(
-        config,
-        state_file_dir,
-        fs_id,
-        mountpoint,
-        tls_port,
-        dns_name,
-        verify_level,
-        ocsp_enabled,
-        options,
-        region,
-        cert_details=cert_details,
-        fallback_ip_address=fallback_ip_address,
-    )
+        stunnel_config_file = write_stunnel_config_file(
+            config,
+            state_file_dir,
+            fs_id,
+            mountpoint,
+            tls_port,
+            dns_name,
+            verify_level,
+            ocsp_enabled,
+            options,
+            region,
+            cert_details=cert_details,
+            fallback_ip_address=fallback_ip_address,
+        )
+    except Exception as e:
+        logging.error("Error while creating the configuration file: %s" % e)
+    finally:
+        # close the socket now, so the stunnel process can bind to the port
+        sock.close()
     tunnel_args = [_stunnel_bin(), stunnel_config_file]
     if "netns" in options:
         tunnel_args = ["nsenter", "--net=" + options["netns"]] + tunnel_args

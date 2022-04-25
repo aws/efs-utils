@@ -5,6 +5,7 @@
 # the License.
 
 import socket
+import random
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,6 +21,9 @@ except ImportError:
 
 DEFAULT_TLS_PORT_RANGE_LOW = 20049
 DEFAULT_TLS_PORT_RANGE_HIGH = 20449
+FS_ID = "fs-deadbeef"
+MOUNT_POINT = "/mnt"
+STATE_FILE_DIR = "/tmp"
 
 
 def _get_config():
@@ -42,10 +46,13 @@ def _get_config():
 
 
 def test_choose_tls_port_first_try(mocker):
-    mocker.patch("socket.socket", return_value=MagicMock())
+    fake_sock = MagicMock()
+    tls_port = random.randrange(DEFAULT_TLS_PORT_RANGE_LOW, DEFAULT_TLS_PORT_RANGE_HIGH)
+    fake_sock.getsockname.return_value = ("localhost", tls_port)
+    mocker.patch("socket.socket", return_value=fake_sock)
     options = {}
 
-    tls_port = mount_efs.choose_tls_port(_get_config(), options)
+    sock, tls_port = mount_efs.choose_tls_port_and_bind_sock(STATE_FILE_DIR, FS_ID, MOUNT_POINT, _get_config(), options)
 
     assert DEFAULT_TLS_PORT_RANGE_LOW <= tls_port <= DEFAULT_TLS_PORT_RANGE_HIGH
 
@@ -53,11 +60,13 @@ def test_choose_tls_port_first_try(mocker):
 def test_choose_tls_port_second_try(mocker):
     bad_sock = MagicMock()
     bad_sock.bind.side_effect = [socket.error, None]
+    tls_port = random.randrange(DEFAULT_TLS_PORT_RANGE_LOW, DEFAULT_TLS_PORT_RANGE_HIGH)
+    bad_sock.getsockname.return_value = ("localhost", tls_port)
     options = {}
 
     mocker.patch("socket.socket", return_value=bad_sock)
 
-    tls_port = mount_efs.choose_tls_port(_get_config(), options)
+    sock, tls_port = mount_efs.choose_tls_port_and_bind_sock(STATE_FILE_DIR, FS_ID, MOUNT_POINT, _get_config(), options)
 
     assert DEFAULT_TLS_PORT_RANGE_LOW <= tls_port <= DEFAULT_TLS_PORT_RANGE_HIGH
     assert 2 == bad_sock.bind.call_count
@@ -71,7 +80,7 @@ def test_choose_tls_port_never_succeeds(mocker, capsys):
     mocker.patch("socket.socket", return_value=bad_sock)
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.choose_tls_port(_get_config(), options)
+        mount_efs.choose_tls_port_and_bind_sock(STATE_FILE_DIR, FS_ID, MOUNT_POINT, _get_config(), options)
 
     assert 0 != ex.value.code
 
@@ -85,10 +94,12 @@ def test_choose_tls_port_never_succeeds(mocker, capsys):
 
 
 def test_choose_tls_port_option_specified(mocker):
-    mocker.patch("socket.socket", return_value=MagicMock())
+    fake_sock = MagicMock()
+    fake_sock.getsockname.return_value = ("localhost", 1000)
+    mocker.patch("socket.socket", return_value=fake_sock)
     options = {"tlsport": 1000}
 
-    tls_port = mount_efs.choose_tls_port(_get_config(), options)
+    sock, tls_port = mount_efs.choose_tls_port_and_bind_sock(STATE_FILE_DIR, FS_ID, MOUNT_POINT, _get_config(), options)
 
     assert 1000 == tls_port
 
@@ -101,7 +112,7 @@ def test_choose_tls_port_option_specified_unavailable(mocker, capsys):
     mocker.patch("socket.socket", return_value=bad_sock)
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.choose_tls_port(_get_config(), options)
+        mount_efs.choose_tls_port_and_bind_sock(STATE_FILE_DIR, FS_ID, MOUNT_POINT, _get_config(), options)
 
     assert 0 != ex.value.code
 
@@ -117,7 +128,7 @@ def test_choose_tls_port_under_netns(mocker, capsys):
     mocker.patch("socket.socket", return_value=MagicMock())
     options = {"netns": "/proc/1000/ns/net"}
 
-    mount_efs.choose_tls_port(_get_config(), options)
+    mount_efs.choose_tls_port_and_bind_sock(STATE_FILE_DIR, FS_ID, MOUNT_POINT, _get_config(), options)
     utils.assert_called(setns_mock)
 
 
@@ -130,3 +141,21 @@ def test_verify_tls_port(mocker):
     result = mount_efs.verify_tlsport_can_be_connected(1000)
     assert result is True
     assert 2 == sock.connect.call_count
+
+def test_choose_tls_port_already_configured(mocker, capsys):
+    fake_sock = MagicMock()
+    tls_port = random.randrange(DEFAULT_TLS_PORT_RANGE_LOW, DEFAULT_TLS_PORT_RANGE_HIGH)
+    fake_sock.getsockname.return_value = ("localhost", tls_port)
+    mocker.patch("socket.socket", return_value=fake_sock)
+    access_mock = mocker.patch("os.access", return_value=True)
+    options = {}
+
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.choose_tls_port_and_bind_sock(STATE_FILE_DIR, FS_ID, MOUNT_POINT, _get_config(), options)
+
+    assert 0 != ex.value.code
+
+    out, err = capsys.readouterr()
+    assert "Failed to locate an available port" in err
+
+    utils.assert_called_n_times(access_mock, DEFAULT_TLS_PORT_RANGE_HIGH - DEFAULT_TLS_PORT_RANGE_LOW)
