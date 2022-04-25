@@ -170,6 +170,9 @@ def test_bootstrap_tls_non_default_port(mocker, tmpdir):
     popen_mock, write_config_mock = setup_mocks(mocker)
     mocker.patch("os.rename")
     state_file_dir = str(tmpdir)
+    fake_sock = MagicMock()
+    fake_sock.getsockname.return_value = ("localhost", 1000)
+    mocker.patch("socket.socket", return_value=fake_sock)
 
     tls_port = 1000
     mocker.patch("mount_efs._stunnel_bin", return_value="/usr/bin/stunnel")
