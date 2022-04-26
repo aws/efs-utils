@@ -1582,7 +1582,11 @@ def check_and_create_private_key(base_path=STATE_FILE_DIR):
 
     def generate_key():
         if os.path.isfile(key):
-            return
+            if os.path.getsize(key) == 0:
+                logging.info("Purging empty private key file")
+                os.remove(key)
+            else:
+                return
 
         cmd = (
             "openssl genpkey -algorithm RSA -out %s -pkeyopt rsa_keygen_bits:3072" % key
