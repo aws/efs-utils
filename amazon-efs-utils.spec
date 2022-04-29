@@ -35,7 +35,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.32.1
+Version   : 1.32.2
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -135,6 +135,9 @@ fi
 %clean
 
 %changelog
+* Thu Apr 28 2022 Yuan Gao <ygaochn@amazon.com> - 1.32.2
+- Fix potential race condition issue when stunnel creating pid file.
+
 * Thu Mar 31 2022 Shivam Gupta <lshigupt@amazon.com> - 1.32.1
 - Enable watchdog to check stunnel health periodically and restart hanging stunnel process when necessary.
 - Fix potential race condition issue when removing lock files.

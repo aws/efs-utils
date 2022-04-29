@@ -84,7 +84,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.32.1"
+VERSION = "1.32.2"
 SERVICE = "elasticfilesystem"
 
 CLONE_NEWNET = 0x40000000
@@ -1156,6 +1156,9 @@ def write_stunnel_config_file(
             global_config["output"] = os.path.join(
                 log_dir, "%s.stunnel.log" % mount_filename
             )
+    global_config["pid"] = os.path.join(
+        state_file_dir, mount_filename + "+", "stunnel.pid"
+    )
 
     efs_config = dict(STUNNEL_EFS_CONFIG)
     efs_config["accept"] = efs_config["accept"] % tls_port

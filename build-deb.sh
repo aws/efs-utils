@@ -11,7 +11,7 @@ set -ex
 
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
-VERSION=1.32.1
+VERSION=1.32.2
 RELEASE=1
 DEB_SYSTEM_RELEASE_PATH=/etc/os-release
 
