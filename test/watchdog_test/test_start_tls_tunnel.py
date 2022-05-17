@@ -4,9 +4,11 @@
 # for the specific language governing permissions and limitations under
 # the License.
 
+from unittest.mock import MagicMock
+
 import pytest
+
 import watchdog
-from mock import MagicMock
 
 PID = 1234
 

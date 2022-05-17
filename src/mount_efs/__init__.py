@@ -46,7 +46,6 @@ import subprocess
 import sys
 import threading
 import time
-
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
@@ -63,19 +62,20 @@ except ImportError:
     from urllib import quote_plus
 
 try:
-    from urllib.request import urlopen, Request
-    from urllib.error import URLError, HTTPError
+    from urllib.error import HTTPError, URLError
     from urllib.parse import urlencode
+    from urllib.request import Request, urlopen
 except ImportError:
-    from urllib2 import URLError, HTTPError, build_opener, urlopen, Request, HTTPHandler
     from urllib import urlencode
+
+    from urllib2 import HTTPError, HTTPHandler, Request, URLError, build_opener, urlopen
 
 try:
     import botocore.session
     from botocore.exceptions import (
         ClientError,
-        NoCredentialsError,
         EndpointConnectionError,
+        NoCredentialsError,
         ProfileNotFound,
     )
 
@@ -84,7 +84,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.32.2"
+VERSION = "1.33.1"
 SERVICE = "elasticfilesystem"
 
 CLONE_NEWNET = 0x40000000
@@ -102,11 +102,14 @@ DEFAULT_UNKNOWN_VALUE = "unknown"
 # 50ms
 DEFAULT_TIMEOUT = 0.05
 DEFAULT_MACOS_VALUE = "macos"
+DEFAULT_NFS_MOUNT_COMMAND_RETRY_COUNT = 3
+DEFAULT_NFS_MOUNT_COMMAND_TIMEOUT_SEC = 15
 DISABLE_FETCH_EC2_METADATA_TOKEN_ITEM = "disable_fetch_ec2_metadata_token"
 FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM = (
     "fall_back_to_mount_target_ip_address_enabled"
 )
 INSTANCE_IDENTITY = None
+RETRYABLE_ERRORS = ["reset by peer"]
 OPTIMIZE_READAHEAD_ITEM = "optimize_readahead"
 
 LOG_DIR = "/var/log/amazon/efs"
@@ -871,6 +874,13 @@ def url_request_helper(config, url, unsuccessful_resp, url_error_msg, headers={}
 
 
 def get_resp_obj(request_resp, url, unsuccessful_resp):
+    """
+    Parse the response of an url request
+
+    :return: If the response result can be parsed into json object, return the json object parsed from the response.
+             Otherwise return the response body in string format.
+    """
+
     if request_resp.getcode() != 200:
         logging.debug(
             unsuccessful_resp + " %s: ResponseCode=%d", url, request_resp.getcode()
@@ -890,11 +900,7 @@ def get_resp_obj(request_resp, url, unsuccessful_resp):
             )
 
         return resp_dict
-    except ValueError as e:
-        logging.info(
-            'ValueError parsing "%s" into json: %s. Returning response body.'
-            % (str(resp_body), e)
-        )
+    except ValueError:
         return resp_body if resp_body_type is str else resp_body.decode("utf-8")
 
 
@@ -1633,6 +1639,11 @@ def mount_nfs(config, dns_name, path, mountpoint, options, fallback_ip_address=N
     if "netns" in options:
         command = ["nsenter", "--net=" + options["netns"]] + command
 
+    if call_nfs_mount_command_with_retry_succeed(
+        config, options, command, dns_name, mountpoint
+    ):
+        return
+
     logging.info('Executing: "%s"', " ".join(command))
 
     proc = subprocess.Popen(
@@ -1641,12 +1652,7 @@ def mount_nfs(config, dns_name, path, mountpoint, options, fallback_ip_address=N
     out, err = proc.communicate()
 
     if proc.returncode == 0:
-        message = "Successfully mounted %s at %s" % (dns_name, mountpoint)
-        logging.info(message)
-        publish_cloudwatch_log(CLOUDWATCHLOG_AGENT, message)
-
-        # only perform readahead optimize after mount succeed
-        optimize_readahead_window(mountpoint, options, config)
+        post_mount_nfs_success(config, options, dns_name, mountpoint)
     else:
         message = 'Failed to mount %s at %s: returncode=%d, stderr="%s"' % (
             dns_name,
@@ -1655,6 +1661,156 @@ def mount_nfs(config, dns_name, path, mountpoint, options, fallback_ip_address=N
             err.strip(),
         )
         fatal_error(err.strip(), message, proc.returncode)
+
+
+def post_mount_nfs_success(config, options, dns_name, mountpoint):
+    message = "Successfully mounted %s at %s" % (dns_name, mountpoint)
+    logging.info(message)
+    publish_cloudwatch_log(CLOUDWATCHLOG_AGENT, message)
+
+    # only perform readahead optimize after mount succeed
+    optimize_readahead_window(mountpoint, options, config)
+
+
+def call_nfs_mount_command_with_retry_succeed(
+    config, options, command, dns_name, mountpoint
+):
+    def backoff_function(i):
+        """Backoff exponentially and add a constant 0-1 second jitter"""
+        return (1.5 ** i) + random.random()
+
+    if not get_boolean_config_item_value(
+        config, CONFIG_SECTION, "retry_nfs_mount_command", default_value=True
+    ):
+        logging.debug(
+            "Configuration 'retry_nfs_mount_command' is not enabled, skip retrying mount.nfs command."
+        )
+        return
+
+    retry_nfs_mount_command_timeout_sec = get_int_value_from_config_file(
+        config,
+        "retry_nfs_mount_command_timeout_sec",
+        DEFAULT_NFS_MOUNT_COMMAND_TIMEOUT_SEC,
+    )
+    retry_count = get_int_value_from_config_file(
+        config,
+        "retry_nfs_mount_command_count",
+        DEFAULT_NFS_MOUNT_COMMAND_RETRY_COUNT,
+    )
+
+    for retry in range(retry_count - 1):
+        retry_sleep_time_sec = backoff_function(retry)
+        err = "unknown error"
+        logging.info(
+            'Executing: "%s" with %s sec time limit.'
+            % (" ".join(command), retry_nfs_mount_command_timeout_sec)
+        )
+        proc = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True
+        )
+
+        try:
+            out, err = proc.communicate(timeout=retry_nfs_mount_command_timeout_sec)
+            rc = proc.poll()
+            if rc != 0:
+                continue_retry = any(
+                    error_string in str(err) for error_string in RETRYABLE_ERRORS
+                )
+                if continue_retry:
+                    logging.error(
+                        'Mounting %s to %s failed, return code=%s, stdout="%s", stderr="%s", mount attempt %d/%d, '
+                        "wait %d sec before next attempt."
+                        % (
+                            dns_name,
+                            mountpoint,
+                            rc,
+                            out,
+                            err,
+                            retry + 1,
+                            retry_count,
+                            retry_sleep_time_sec,
+                        )
+                    )
+                else:
+                    message = 'Failed to mount %s at %s: returncode=%d, stderr="%s"' % (
+                        dns_name,
+                        mountpoint,
+                        proc.returncode,
+                        err.strip(),
+                    )
+                    fatal_error(err.strip(), message, proc.returncode)
+            else:
+                post_mount_nfs_success(config, options, dns_name, mountpoint)
+                return True
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                # Silently fail if the subprocess has exited already
+                pass
+            retry_sleep_time_sec = 0
+            err = "timeout after %s sec" % retry_nfs_mount_command_timeout_sec
+            logging.error(
+                "Mounting %s to %s failed due to %s, mount attempt %d/%d, wait %d sec before next attempt."
+                % (
+                    dns_name,
+                    mountpoint,
+                    err,
+                    retry + 1,
+                    retry_count,
+                    retry_sleep_time_sec,
+                )
+            )
+        except Exception as e:
+            message = 'Failed to mount %s at %s: returncode=%d, stderr="%s", %s' % (
+                dns_name,
+                mountpoint,
+                proc.returncode,
+                err.strip(),
+                e,
+            )
+            fatal_error(err.strip(), message, proc.returncode)
+
+        sys.stderr.write(
+            "Mount attempt %d/%d failed due to %s, wait %d sec before next attempt.\n"
+            % (retry + 1, retry_count, err, retry_sleep_time_sec)
+        )
+        time.sleep(retry_sleep_time_sec)
+
+    return False
+
+
+def get_int_value_from_config_file(config, config_name, default_config_value):
+    val = default_config_value
+    try:
+        value_from_config = config.get(CONFIG_SECTION, config_name)
+        try:
+            if int(value_from_config) > 0:
+                val = int(value_from_config)
+            else:
+                logging.debug(
+                    '%s value in config file "%s" is lower than 1. Defaulting to %d.',
+                    config_name,
+                    CONFIG_FILE,
+                    default_config_value,
+                )
+        except ValueError:
+            logging.debug(
+                'Bad %s, "%s", in config file "%s". Defaulting to %d.',
+                config_name,
+                value_from_config,
+                CONFIG_FILE,
+                default_config_value,
+            )
+    except NoOptionError:
+        logging.debug(
+            'No %s value in config file "%s". Defaulting to %d.',
+            config_name,
+            CONFIG_FILE,
+            default_config_value,
+        )
+
+    return val
 
 
 def usage(out, exit_code=1):

@@ -6,10 +6,11 @@
 
 import json
 import sys
+from unittest.mock import MagicMock
 
 import pytest
+
 import watchdog
-from mock import MagicMock
 
 NFSSTAT_DEFAULT_OUTPUT = {
     "127.0.0.1:/": {

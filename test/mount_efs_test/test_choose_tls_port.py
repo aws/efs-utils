@@ -5,10 +5,11 @@
 # the License.
 
 import socket
+from unittest.mock import MagicMock
+
+import pytest
 
 import mount_efs
-import pytest
-from mock import MagicMock
 
 from .. import utils
 

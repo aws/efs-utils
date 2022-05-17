@@ -6,11 +6,12 @@
 
 import logging
 from collections import namedtuple
+from unittest.mock import MagicMock
 
-import mount_efs
 import pytest
 from botocore.exceptions import ProfileNotFound
-from mock import MagicMock
+
+import mount_efs
 
 from .. import utils
 
@@ -20,9 +21,9 @@ except ImportError:
     from configparser import ConfigParser
 
 try:
-    from urllib2 import URLError, HTTPError
+    from urllib2 import HTTPError, URLError
 except ImportError:
-    from urllib.error import URLError, HTTPError
+    from urllib.error import HTTPError, URLError
 
 
 DEFAULT_REGION = "us-east-1"
@@ -256,10 +257,14 @@ def test_get_botocore_client_use_awsprofile(mocker):
     boto_session_mock.create_client.return_value = "fake-client"
     mocker.patch("botocore.session.get_session", return_value=boto_session_mock)
 
-    client = mount_efs.get_botocore_client(config, "efs", {"awsprofile": "test"})
+    client = mount_efs.get_botocore_client(
+        config, "efs", {"awsprofile": "test_profile"}
+    )
 
     assert client == "fake-client"
-    boto_session_mock.set_config_variable.assert_called_once()
+    boto_session_mock.set_config_variable.assert_called_once_with(
+        "profile", "test_profile"
+    )
     utils.assert_called(get_target_region_mock)
 
 
@@ -277,7 +282,7 @@ def test_get_botocore_client_use_awsprofile_profile_not_found(mocker, capsys):
     mocker.patch("botocore.session.get_session", return_value=boto_session_mock)
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.get_botocore_client(config, "efs", {"awsprofile": "test-profile"})
+        mount_efs.get_botocore_client(config, "efs", {"awsprofile": "test_profile"})
 
     assert 0 != ex.value.code
 
@@ -285,7 +290,9 @@ def test_get_botocore_client_use_awsprofile_profile_not_found(mocker, capsys):
 
     assert "could not be found" in err
 
-    boto_session_mock.set_config_variable.assert_called_once()
+    boto_session_mock.set_config_variable.assert_called_once_with(
+        "profile", "test_profile"
+    )
     utils.assert_called(get_target_region_mock)
 
 
@@ -320,7 +327,9 @@ def test_get_botocore_client_botocore_present(mocker):
 
     assert client == "fake-client"
     boto_session_mock.set_config_variable.assert_not_called()
-    boto_session_mock.create_client.assert_called_once()
+    boto_session_mock.create_client.assert_called_once_with(
+        "efs", region_name=DEFAULT_REGION
+    )
     utils.assert_called(get_target_region_mock)
 
 
@@ -365,9 +374,11 @@ def test_get_assumed_profile_credentials_via_botocore_botocore_present(mocker):
     credentials = mount_efs.botocore_credentials_helper("test_profile")
     assert credentials == expected_credentials
 
-    boto_session_mock.set_config_variable.assert_called_once()
-    boto_session_mock.get_credentials.assert_called_once()
-    get_credential_session_mock.get_frozen_credentials.assert_called_once()
+    boto_session_mock.set_config_variable.assert_called_once_with(
+        "profile", "test_profile"
+    )
+    boto_session_mock.get_credentials.assert_called_once_with()
+    get_credential_session_mock.get_frozen_credentials.assert_called_once_with()
 
 
 def test_get_assumed_profile_credentials_via_botocore_botocore_present_profile_not_found(
@@ -393,5 +404,7 @@ def test_get_assumed_profile_credentials_via_botocore_botocore_present_profile_n
 
     assert "could not be found" in err
 
-    boto_session_mock.set_config_variable.assert_called_once()
-    boto_session_mock.get_credentials.assert_called_once()
+    boto_session_mock.set_config_variable.assert_called_once_with(
+        "profile", "test_profile"
+    )
+    boto_session_mock.get_credentials.assert_called_once_with()

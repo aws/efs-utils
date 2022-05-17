@@ -6,9 +6,9 @@
 
 import os
 import tempfile
+from unittest.mock import MagicMock
 
 import mount_efs
-from mock import MagicMock
 
 AP_ID = "fsap-beefdead"
 FS_ID = "fs-deadbeef"

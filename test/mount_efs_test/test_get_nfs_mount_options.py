@@ -4,9 +4,11 @@
 # for the specific language governing permissions and limitations under
 # the License.
 
-import mount_efs
+from unittest.mock import MagicMock
+
 import pytest
-from mock import MagicMock, patch
+
+import mount_efs
 
 
 def _mock_popen(mocker, returncode=0, stdout="stdout", stderr="stderr"):

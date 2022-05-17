@@ -5,6 +5,7 @@
 # the License.
 
 import pytest
+
 import watchdog
 
 

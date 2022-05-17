@@ -6,8 +6,9 @@
 
 import socket
 
-import mount_efs
 import pytest
+
+import mount_efs
 
 from .. import utils
 

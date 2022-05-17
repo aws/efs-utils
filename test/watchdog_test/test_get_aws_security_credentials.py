@@ -10,6 +10,7 @@ import os
 import socket
 
 import pytest
+
 import watchdog
 
 try:

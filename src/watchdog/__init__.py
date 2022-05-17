@@ -22,7 +22,6 @@ import socket
 import subprocess
 import sys
 import time
-
 from collections import namedtuple
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -41,15 +40,16 @@ except ImportError:
     from urllib import quote_plus
 
 try:
-    from urllib.request import urlopen, Request
-    from urllib.error import URLError, HTTPError
+    from urllib.error import HTTPError, URLError
     from urllib.parse import urlencode
+    from urllib.request import Request, urlopen
 except ImportError:
-    from urllib2 import URLError, HTTPError, build_opener, urlopen, Request, HTTPHandler
     from urllib import urlencode
 
+    from urllib2 import HTTPError, HTTPHandler, Request, URLError, build_opener, urlopen
 
-VERSION = "1.32.2"
+
+VERSION = "1.33.1"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -209,7 +209,7 @@ def get_aws_security_credentials(config, credentials_source, region):
 
 
 def get_boolean_config_item_value(
-    config, config_section, config_item, default_value, emit_warning_message=True
+    config, config_section, config_item, default_value, emit_warning_message=False
 ):
     warning_message = None
     if not config.has_section(config_section):
@@ -1076,14 +1076,14 @@ def get_int_value_from_config_file(config, config_name, default_config_value):
             if int(value_from_config) > 0:
                 val = int(value_from_config)
             else:
-                logging.warning(
+                logging.debug(
                     '%s value in config file "%s" is lower than 1. Defaulting to %d.',
                     config_name,
                     CONFIG_FILE,
                     default_config_value,
                 )
         except ValueError:
-            logging.warning(
+            logging.debug(
                 'Bad %s, "%s", in config file "%s". Defaulting to %d.',
                 config_name,
                 value_from_config,
@@ -1091,7 +1091,7 @@ def get_int_value_from_config_file(config, config_name, default_config_value):
                 default_config_value,
             )
     except NoOptionError:
-        logging.warning(
+        logging.debug(
             'No %s value in config file "%s". Defaulting to %d.',
             config_name,
             CONFIG_FILE,
@@ -1877,7 +1877,7 @@ def main():
     child_procs = []
 
     if get_boolean_config_item_value(
-        config, CONFIG_SECTION, "enabled", default_value=True
+        config, CONFIG_SECTION, "enabled", default_value=True, emit_warning_message=True
     ):
         logging.info(
             "amazon-efs-mount-watchdog, version %s, is enabled and started", VERSION

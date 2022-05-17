@@ -6,8 +6,9 @@
 
 import tempfile
 
-import mount_efs
 import pytest
+
+import mount_efs
 
 try:
     import ConfigParser

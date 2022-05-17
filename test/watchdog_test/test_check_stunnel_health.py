@@ -9,9 +9,9 @@
 import json
 import subprocess
 import tempfile
+from unittest.mock import MagicMock
 
 import watchdog
-from mock import MagicMock
 
 from .. import utils
 

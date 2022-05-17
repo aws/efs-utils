@@ -4,13 +4,21 @@
 # for the specific language governing permissions and limitations under
 # the License.
 
-import mount_efs
+import subprocess
+from unittest.mock import MagicMock
+
 import pytest
-from mock import MagicMock, patch
 
-from .. import utils
+import mount_efs
 
-CONFIG = MagicMock()
+from .. import common, utils
+
+try:
+    import ConfigParser
+except ImportError:
+    from configparser import ConfigParser
+
+
 DNS_NAME = "fs-deadbeef.efs.us-east-1.amazonaws.com"
 FS_ID = "fs-deadbeef"
 INIT_SYSTEM = "upstart"
@@ -47,6 +55,32 @@ NFS_MOUNT_POINT_IDX_MACOS = -1
 NETNS = "/proc/1/net/ns"
 
 
+def _get_config(
+    mount_nfs_command_retry="true",
+    mount_nfs_command_retry_count=4,
+    mount_nfs_command_retry_timeout=10,
+):
+    try:
+        config = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        config = ConfigParser()
+    config.add_section(mount_efs.CONFIG_SECTION)
+    config.set(
+        mount_efs.CONFIG_SECTION, "retry_nfs_mount_command", mount_nfs_command_retry
+    )
+    config.set(
+        mount_efs.CONFIG_SECTION,
+        "retry_nfs_mount_command_count",
+        str(mount_nfs_command_retry_count),
+    )
+    config.set(
+        mount_efs.CONFIG_SECTION,
+        "retry_nfs_mount_command_timeout_sec",
+        str(mount_nfs_command_retry_timeout),
+    )
+    return config
+
+
 def _mock_popen(mocker, returncode=0, stdout="stdout", stderr="stderr"):
     popen_mock = MagicMock()
     popen_mock.communicate.return_value = (
@@ -62,7 +96,13 @@ def test_mount_nfs(mocker):
     mock = _mock_popen(mocker)
     optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
 
-    mount_efs.mount_nfs(CONFIG, DNS_NAME, "/", "/mnt", DEFAULT_OPTIONS)
+    mount_efs.mount_nfs(
+        _get_config(mount_nfs_command_retry="false"),
+        DNS_NAME,
+        "/",
+        "/mnt",
+        DEFAULT_OPTIONS,
+    )
 
     args, _ = mock.call_args
     args = args[0]
@@ -79,7 +119,7 @@ def test_mount_nfs_with_fallback_ip_address(mocker):
     optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
 
     mount_efs.mount_nfs(
-        CONFIG,
+        _get_config(mount_nfs_command_retry="false"),
         DNS_NAME,
         "/",
         "/mnt",
@@ -105,7 +145,9 @@ def test_mount_nfs_tls(mocker):
     options = dict(DEFAULT_OPTIONS)
     options["tls"] = None
 
-    mount_efs.mount_nfs(CONFIG, DNS_NAME, "/", "/mnt", options)
+    mount_efs.mount_nfs(
+        _get_config(mount_nfs_command_retry="false"), DNS_NAME, "/", "/mnt", options
+    )
 
     args, _ = mock.call_args
     args = args[0]
@@ -121,7 +163,13 @@ def test_mount_nfs_failure(mocker):
     optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.mount_nfs(CONFIG, DNS_NAME, "/", "/mnt", DEFAULT_OPTIONS)
+        mount_efs.mount_nfs(
+            _get_config(mount_nfs_command_retry="false"),
+            DNS_NAME,
+            "/",
+            "/mnt",
+            DEFAULT_OPTIONS,
+        )
 
     assert 0 != ex.value.code
 
@@ -136,7 +184,9 @@ def test_mount_nfs_tls_netns(mocker):
     options["tls"] = None
     options["netns"] = NETNS
 
-    mount_efs.mount_nfs(CONFIG, DNS_NAME, "/", "/mnt", options)
+    mount_efs.mount_nfs(
+        _get_config(mount_nfs_command_retry="false"), DNS_NAME, "/", "/mnt", options
+    )
 
     args, _ = mock.call_args
     args = args[0]
@@ -160,7 +210,13 @@ def test_mount_tls_mountpoint_mounted_with_nfs(mocker, capsys):
     mocker.patch("os.path.ismount", return_value=True)
     _mock_popen(mocker, stdout="nfs")
     mount_efs.mount_tls(
-        CONFIG, INIT_SYSTEM, DNS_NAME, PATH, FS_ID, MOUNT_POINT, options
+        _get_config(mount_nfs_command_retry="false"),
+        INIT_SYSTEM,
+        DNS_NAME,
+        PATH,
+        FS_ID,
+        MOUNT_POINT,
+        options,
     )
     out, err = capsys.readouterr()
     assert "is already mounted" in out
@@ -174,7 +230,13 @@ def test_mount_nfs_macos(mocker):
     mocker.patch("mount_efs.check_if_platform_is_mac", return_value=True)
     optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
     DEFAULT_OPTIONS["nfsvers"] = 4.0
-    mount_efs.mount_nfs(CONFIG, DNS_NAME, "/", "/mnt", DEFAULT_OPTIONS)
+    mount_efs.mount_nfs(
+        _get_config(mount_nfs_command_retry="false"),
+        DNS_NAME,
+        "/",
+        "/mnt",
+        DEFAULT_OPTIONS,
+    )
 
     args, _ = mock.call_args
     args = args[0]
@@ -194,7 +256,9 @@ def test_mount_nfs_tls_macos(mocker):
     options = dict(DEFAULT_OPTIONS)
     options["tls"] = None
 
-    mount_efs.mount_nfs(CONFIG, DNS_NAME, "/", "/mnt", options)
+    mount_efs.mount_nfs(
+        _get_config(mount_nfs_command_retry="false"), DNS_NAME, "/", "/mnt", options
+    )
 
     args, _ = mock.call_args
     args = args[0]
@@ -203,3 +267,120 @@ def test_mount_nfs_tls_macos(mocker):
     assert "127.0.0.1" in args[NFS_MOUNT_PATH_IDX_MACOS]
 
     utils.assert_called_once(optimize_readahead_window_mock)
+
+
+def test_mount_nfs_retry_succeed_after_one_retryable_failure(mocker):
+    optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
+    mocker.patch(
+        "subprocess.Popen",
+        side_effect=[
+            common.DEFAULT_RETRYABLE_FAILURE_POPEN.mock,
+            common.DEFAULT_SUCCESS_POPEN.mock,
+        ],
+    )
+    mount_efs.mount_nfs(_get_config(), DNS_NAME, "/", "/mnt", DEFAULT_OPTIONS)
+    utils.assert_called(optimize_readahead_window_mock)
+
+
+def test_mount_nfs_not_retry_on_non_retryable_failure(mocker):
+    optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
+    mocker.patch(
+        "subprocess.Popen",
+        side_effect=[common.DEFAULT_NON_RETRYABLE_FAILURE_POPEN.mock],
+    )
+
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.mount_nfs(
+            _get_config(),
+            DNS_NAME,
+            "/",
+            "/mnt",
+            DEFAULT_OPTIONS,
+        )
+
+    assert 0 != ex.value.code
+    utils.assert_not_called(optimize_readahead_window_mock)
+
+
+def test_mount_nfs_failure_after_all_attempts_fail(mocker):
+    optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
+    mocker.patch(
+        "subprocess.Popen",
+        side_effect=[
+            common.DEFAULT_RETRYABLE_FAILURE_POPEN.mock,
+            common.DEFAULT_RETRYABLE_FAILURE_POPEN.mock,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.mount_nfs(
+            _get_config(mount_nfs_command_retry_count=2),
+            DNS_NAME,
+            "/",
+            "/mnt",
+            DEFAULT_OPTIONS,
+        )
+
+    assert 0 != ex.value.code
+    utils.assert_not_called(optimize_readahead_window_mock)
+
+
+def test_mount_nfs_retry_succeed_after_one_timeout(mocker):
+    optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
+    mocker.patch(
+        "subprocess.Popen",
+        side_effect=[
+            common.DEFAULT_TIMEOUT_POPEN.mock,
+            common.DEFAULT_SUCCESS_POPEN.mock,
+        ],
+    )
+    mount_efs.mount_nfs(
+        _get_config(mount_nfs_command_retry_timeout=1),
+        DNS_NAME,
+        "/",
+        "/mnt",
+        DEFAULT_OPTIONS,
+    )
+    utils.assert_called(optimize_readahead_window_mock)
+
+
+def test_mount_nfs_retry_succeed_after_one_timeout_proc_kill_error(mocker):
+    optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
+    kill_failure_process = common.PopenMock(
+        return_code=1,
+        poll_result=1,
+        communicate_side_effect=subprocess.TimeoutExpired("cmd", timeout=1),
+        kill_side_effect=OSError("Process does not exist"),
+    )
+    mocker.patch(
+        "subprocess.Popen",
+        side_effect=[kill_failure_process.mock, common.DEFAULT_SUCCESS_POPEN.mock],
+    )
+    mount_efs.mount_nfs(
+        _get_config(mount_nfs_command_retry_timeout=1),
+        DNS_NAME,
+        "/",
+        "/mnt",
+        DEFAULT_OPTIONS,
+    )
+    utils.assert_called(optimize_readahead_window_mock)
+
+
+def test_mount_nfs_not_retry_after_one_unknown_exception(mocker):
+    optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
+    mocker.patch(
+        "subprocess.Popen",
+        side_effect=[common.DEFAULT_UNKNOWN_EXCEPTION_POPEN.mock],
+    )
+
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.mount_nfs(
+            _get_config(),
+            DNS_NAME,
+            "/",
+            "/mnt",
+            DEFAULT_OPTIONS,
+        )
+
+    assert 0 != ex.value.code
+    utils.assert_not_called(optimize_readahead_window_mock)

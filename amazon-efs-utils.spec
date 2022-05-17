@@ -35,7 +35,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.32.2
+Version   : 1.33.1
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -135,6 +135,9 @@ fi
 %clean
 
 %changelog
+* Fri May 6 2022 Yuan Gao <ygaochn@amazon.com> - 1.33.1
+- Enable mount process to retry on failed or timed out mount.nfs command.
+
 * Thu Apr 28 2022 Yuan Gao <ygaochn@amazon.com> - 1.32.2
 - Fix potential race condition issue when stunnel creating pid file.
 

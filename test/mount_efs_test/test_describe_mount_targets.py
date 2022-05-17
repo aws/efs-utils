@@ -4,9 +4,10 @@
 # for the specific language governing permissions and limitations under
 # the License.
 
-import mount_efs
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError, NoCredentialsError
+
+import mount_efs
 
 from .. import utils
 

@@ -5,10 +5,11 @@
 # the License.
 
 from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 import mount_efs
-import pytest
-from mock import MagicMock, patch
 
 from .. import utils
 

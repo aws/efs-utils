@@ -4,9 +4,11 @@
 # for the specific language governing permissions and limitations under
 # the License.
 
-import mount_efs
+from unittest.mock import MagicMock
+
 from botocore.exceptions import ClientError, NoCredentialsError
-from mock import MagicMock
+
+import mount_efs
 
 from .. import utils
 

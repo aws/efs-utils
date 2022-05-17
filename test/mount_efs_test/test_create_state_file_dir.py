@@ -7,8 +7,9 @@
 import errno
 import os
 
-import mount_efs
 import pytest
+
+import mount_efs
 
 try:
     import ConfigParser

@@ -7,8 +7,9 @@
 import json
 import socket
 
-import mount_efs
 import pytest
+
+import mount_efs
 
 from .. import utils
 
@@ -18,9 +19,9 @@ except ImportError:
     from configparser import ConfigParser
 
 try:
-    from urllib2 import URLError, HTTPError
+    from urllib2 import HTTPError, URLError
 except ImportError:
-    from urllib.error import URLError, HTTPError
+    from urllib.error import HTTPError, URLError
 
 INSTANCE_ID = "i-deadbeefdeadbeef0"
 INSTANCE_DATA = {

@@ -9,8 +9,9 @@ import logging
 import os
 from datetime import datetime, timedelta
 
-import mount_efs
 import pytest
+
+import mount_efs
 import watchdog
 
 try:

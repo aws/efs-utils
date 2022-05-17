@@ -4,8 +4,9 @@
 # for the specific language governing permissions and limitations under
 # the License.
 
-import mount_efs
 import pytest
+
+import mount_efs
 
 
 def _test_parse_arguments_help(capsys, help):

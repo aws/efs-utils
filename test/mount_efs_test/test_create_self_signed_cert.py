@@ -6,10 +6,11 @@
 
 import os
 from datetime import datetime
+from unittest.mock import MagicMock
+
+import pytest
 
 import mount_efs
-import pytest
-from mock import MagicMock
 
 try:
     import ConfigParser

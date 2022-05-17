@@ -6,12 +6,12 @@
 
 import logging
 from collections import namedtuple
+from unittest.mock import MagicMock
+
+from botocore.exceptions import ProfileNotFound
 
 import mount_efs
-import pytest
 import watchdog
-from botocore.exceptions import ProfileNotFound
-from mock import MagicMock
 
 from .. import utils
 
@@ -21,9 +21,9 @@ except ImportError:
     from configparser import ConfigParser
 
 try:
-    from urllib2 import URLError, HTTPError
+    from urllib2 import HTTPError, URLError
 except ImportError:
-    from urllib.error import URLError, HTTPError
+    from urllib.error import HTTPError, URLError
 
 
 DEFAULT_REGION = "us-east-1"
@@ -95,26 +95,32 @@ def test_get_default_true_boolean_config_item_not_in_config_file(capsys):
     config = get_config()
 
     assert True == watchdog.get_boolean_config_item_value(
-        config, config_section, config_item, True
+        config, config_section, config_item, True, emit_warning_message=True
     )
     out, _ = capsys.readouterr()
     assert "does not have" in out
 
     assert False == watchdog.get_boolean_config_item_value(
-        config, config_section, config_item, False
+        config, config_section, config_item, False, emit_warning_message=True
     )
     out, _ = capsys.readouterr()
     assert "does not have" in out
 
     assert True == watchdog.get_boolean_config_item_value(
-        config, config_section, config_item, True, emit_warning_message=False
+        config,
+        config_section,
+        config_item,
+        True,
     )
     out, _ = capsys.readouterr()
     assert "does not have" not in out
     assert "item in section" not in out
 
     assert False == watchdog.get_boolean_config_item_value(
-        config, config_section, config_item, False, emit_warning_message=False
+        config,
+        config_section,
+        config_item,
+        False,
     )
     out, _ = capsys.readouterr()
     assert "does not have" not in out
@@ -127,25 +133,31 @@ def test_get_default_boolean_config_section_not_in_config_file(capsys):
     config = get_config()
 
     assert True == watchdog.get_boolean_config_item_value(
-        config, config_section, config_item, True
+        config, config_section, config_item, True, emit_warning_message=True
     )
     out, _ = capsys.readouterr()
     assert "does not have section" in out
 
     assert False == watchdog.get_boolean_config_item_value(
-        config, config_section, config_item, False
+        config, config_section, config_item, False, emit_warning_message=True
     )
     out, _ = capsys.readouterr()
     assert "does not have section" in out
 
     assert True == watchdog.get_boolean_config_item_value(
-        config, config_section, config_item, True, emit_warning_message=False
+        config,
+        config_section,
+        config_item,
+        True,
     )
     out, _ = capsys.readouterr()
     assert "does not have section" not in out
 
     assert False == watchdog.get_boolean_config_item_value(
-        config, config_section, config_item, False, emit_warning_message=False
+        config,
+        config_section,
+        config_item,
+        False,
     )
     out, _ = capsys.readouterr()
     assert "does not have section" not in out
@@ -272,9 +284,11 @@ def test_get_assumed_profile_credentials_via_botocore_botocore_present(mocker):
     credentials = watchdog.botocore_credentials_helper("test_profile")
     assert credentials == expected_credentials
 
-    boto_session_mock.set_config_variable.assert_called_once()
-    boto_session_mock.get_credentials.assert_called_once()
-    get_credential_session_mock.get_frozen_credentials.assert_called_once()
+    boto_session_mock.set_config_variable.assert_called_once_with(
+        "profile", "test_profile"
+    )
+    boto_session_mock.get_credentials.assert_called_once_with()
+    get_credential_session_mock.get_frozen_credentials.assert_called_once_with()
 
 
 def test_get_assumed_profile_credentials_via_botocore_botocore_present_profile_not_found(
@@ -295,8 +309,10 @@ def test_get_assumed_profile_credentials_via_botocore_botocore_present_profile_n
 
     assert credentials == expected_credentials
 
-    boto_session_mock.set_config_variable.assert_called_once()
-    boto_session_mock.get_credentials.assert_called_once()
+    boto_session_mock.set_config_variable.assert_called_once_with(
+        "profile", "test_profile"
+    )
+    boto_session_mock.get_credentials.assert_called_once_with()
 
 
 def test_get_int_value_from_config_file():
