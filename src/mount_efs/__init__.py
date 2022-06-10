@@ -84,7 +84,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.33.1"
+VERSION = "1.33.2"
 SERVICE = "elasticfilesystem"
 
 CLONE_NEWNET = 0x40000000
@@ -267,7 +267,7 @@ MACOS_MONTEREY_RELEASE = "macOS-12"
 # Multiplier for max read ahead buffer size
 # Set default as 15 aligning with prior linux kernel 5.4
 DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER = 15
-NFS_READAHEAD_CONFIG_PATH_FORMAT = "/sys/class/bdi/0:%s/read_ahead_kb"
+NFS_READAHEAD_CONFIG_PATH_FORMAT = "/sys/class/bdi/%s:%s/read_ahead_kb"
 NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION = [5, 4]
 
 # MacOS does not support the property of Socket SO_BINDTODEVICE in stunnel configuration
@@ -3495,25 +3495,43 @@ def optimize_readahead_window(mountpoint, options, config):
     fixed_readahead_kb = int(
         DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER * int(options["rsize"]) / 1024
     )
+
     try:
-        # use "stat -c '%d' mountpoint" to get Device number in decimal
-        mountpoint_dev_num = subprocess.check_output(
-            ["stat", "-c", '"%d"', mountpoint], universal_newlines=True
+        major, minor = decode_device_number(os.stat(mountpoint).st_dev)
+        # modify read_ahead_kb in /sys/class/bdi/<bdi>/read_ahead_kb
+        # The bdi identifier is in the form of MAJOR:MINOR, which can be derived from device number
+        #
+        read_ahead_kb_config_file = NFS_READAHEAD_CONFIG_PATH_FORMAT % (major, minor)
+
+        logging.debug(
+            "Modifying value in %s to %s.",
+            read_ahead_kb_config_file,
+            str(fixed_readahead_kb),
         )
-        # modify read_ahead_kb in /sys/class/bdi/0:[Device Number]/read_ahead_kb
-        subprocess.check_call(
-            "echo %s > %s"
-            % (
-                fixed_readahead_kb,
-                NFS_READAHEAD_CONFIG_PATH_FORMAT
-                % mountpoint_dev_num.strip().strip('"'),
-            ),
+        p = subprocess.Popen(
+            "echo %s > %s" % (fixed_readahead_kb, read_ahead_kb_config_file),
             shell=True,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
         )
-    except subprocess.CalledProcessError as e:
+        _, error = p.communicate()
+        if p.returncode != 0:
+            logging.warning(
+                'Failed to modify read_ahead_kb: %s with returncode: %d, error: "%s".'
+                % (fixed_readahead_kb, p.returncode, error.strip())
+            )
+    except Exception as e:
         logging.warning(
-            "failed to modify read_ahead_kb: %s with error %s" % (fixed_readahead_kb, e)
+            'Failed to modify read_ahead_kb: %s with error: "%s".'
+            % (fixed_readahead_kb, e)
         )
+
+
+# https://github.com/torvalds/linux/blob/master/include/linux/kdev_t.h#L48-L49
+def decode_device_number(device_number):
+    major = (device_number & 0xFFF00) >> 8
+    minor = (device_number & 0xFF) | ((device_number >> 12) & 0xFFF00)
+    return major, minor
 
 
 # Only modify read_ahead_kb iff

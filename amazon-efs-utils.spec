@@ -35,7 +35,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.33.1
+Version   : 1.33.2
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -135,6 +135,10 @@ fi
 %clean
 
 %changelog
+* Mon Jun 6 2022 Yuan Gao <ygaochn@amazon.com> - 1.33.2
+- Fix the incorrect path to generate read_ahead_kb config file.
+- Bump the default tls port range from 400 to 1000.
+
 * Fri May 6 2022 Yuan Gao <ygaochn@amazon.com> - 1.33.1
 - Enable mount process to retry on failed or timed out mount.nfs command.
 
