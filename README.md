@@ -282,11 +282,11 @@ sudo yum -y install wget
 ```
 ```bash
 if [[ "$(python3 -V 2>&1)" =~ ^(Python 3.6.*) ]]; then
-    sudo wget https://bootstrap.pypa.io/3.6/get-pip.py -O /tmp/get-pip.py
+    sudo wget https://bootstrap.pypa.io/pip/3.6/get-pip.py -O /tmp/get-pip.py
 elif [[ "$(python3 -V 2>&1)" =~ ^(Python 3.5.*) ]]; then
-    sudo wget https://bootstrap.pypa.io/3.5/get-pip.py -O /tmp/get-pip.py
+    sudo wget https://bootstrap.pypa.io/pip/3.5/get-pip.py -O /tmp/get-pip.py
 elif [[ "$(python3 -V 2>&1)" =~ ^(Python 3.4.*) ]]; then
-    sudo wget https://bootstrap.pypa.io/3.4/get-pip.py -O /tmp/get-pip.py
+    sudo wget https://bootstrap.pypa.io/pip/3.4/get-pip.py -O /tmp/get-pip.py
 else
     sudo wget https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py
 fi
@@ -298,11 +298,11 @@ sudo apt-get -y install wget
 ```
 ```bash
 if echo $(python3 -V 2>&1) | grep -e "Python 3.6"; then
-    sudo wget https://bootstrap.pypa.io/3.6/get-pip.py -O /tmp/get-pip.py
+    sudo wget https://bootstrap.pypa.io/pip/3.6/get-pip.py -O /tmp/get-pip.py
 elif echo $(python3 -V 2>&1) | grep -e "Python 3.5"; then
-    sudo wget https://bootstrap.pypa.io/3.5/get-pip.py -O /tmp/get-pip.py
+    sudo wget https://bootstrap.pypa.io/pip/3.5/get-pip.py -O /tmp/get-pip.py
 elif echo $(python3 -V 2>&1) | grep -e "Python 3.4"; then
-    sudo wget https://bootstrap.pypa.io/3.4/get-pip.py -O /tmp/get-pip.py
+    sudo wget https://bootstrap.pypa.io/pip/3.4/get-pip.py -O /tmp/get-pip.py
 else
     sudo apt-get -y install python3-distutils
     sudo wget https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py
