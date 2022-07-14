@@ -1085,9 +1085,17 @@ def _stunnel_bin():
 
 def find_command_path(command, install_method):
     try:
-        env_path = (
-            "/sbin:/usr/sbin:/usr/local/sbin:/root/bin:/usr/local/bin:/usr/bin:/bin"
-        )
+        # If not running on macOS, use linux paths
+        if not check_if_platform_is_mac():
+            env_path = (
+                "/sbin:/usr/sbin:/usr/local/sbin:/root/bin:/usr/local/bin:/usr/bin:/bin"
+            )
+        # Homebrew on x86 macOS uses /usr/local/bin; Homebrew on Apple Silicon macOS uses /opt/homebrew/bin since v3.0.0
+        # For more information, see https://brew.sh/2021/02/05/homebrew-3.0.0/
+        else:
+            env_path = (
+                "/opt/homebrew/bin:/usr/local/bin"
+            )
         os.putenv("PATH", env_path)
         path = subprocess.check_output(["which", command])
     except subprocess.CalledProcessError as e:
