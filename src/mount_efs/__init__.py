@@ -1173,6 +1173,10 @@ def write_stunnel_config_file(
     global_config["pid"] = os.path.join(
         state_file_dir, mount_filename + "+", "stunnel.pid"
     )
+    if get_boolean_config_item_value(
+        config, CONFIG_SECTION, "stunnel_fips_enabled", default_value=False
+    ):
+        global_config["fips"] = "yes"
 
     efs_config = dict(STUNNEL_EFS_CONFIG)
     efs_config["accept"] = efs_config["accept"] % tls_port
