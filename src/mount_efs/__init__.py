@@ -84,7 +84,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.33.2"
+VERSION = "1.33.3"
 SERVICE = "elasticfilesystem"
 
 CLONE_NEWNET = 0x40000000
@@ -1051,15 +1051,31 @@ def get_config_section(config, region):
     return config_section
 
 
-def is_stunnel_option_supported(stunnel_output, stunnel_option_name):
+def is_stunnel_option_supported(
+    stunnel_output,
+    stunnel_option_name,
+    stunnel_option_value=None,
+    emit_warning_log=True,
+):
     supported = False
     for line in stunnel_output:
         if line.startswith(stunnel_option_name):
-            supported = True
-            break
+            if not stunnel_option_value:
+                supported = True
+                break
+            elif stunnel_option_value and stunnel_option_value in line:
+                supported = True
+                break
 
-    if not supported:
-        logging.warning('stunnel does not support "%s"', stunnel_option_name)
+    if not supported and emit_warning_log:
+        if not stunnel_option_value:
+            logging.warning('stunnel does not support "%s"', stunnel_option_name)
+        else:
+            logging.warning(
+                'stunnel does not support "%s" as value of "%s"',
+                stunnel_option_value,
+                stunnel_option_name,
+            )
 
     return supported
 
@@ -1093,9 +1109,7 @@ def find_command_path(command, install_method):
         # Homebrew on x86 macOS uses /usr/local/bin; Homebrew on Apple Silicon macOS uses /opt/homebrew/bin since v3.0.0
         # For more information, see https://brew.sh/2021/02/05/homebrew-3.0.0/
         else:
-            env_path = (
-                "/opt/homebrew/bin:/usr/local/bin"
-            )
+            env_path = "/opt/homebrew/bin:/usr/local/bin"
         os.putenv("PATH", env_path)
         path = subprocess.check_output(["which", command])
     except subprocess.CalledProcessError as e:
@@ -1147,10 +1161,18 @@ def write_stunnel_config_file(
     hand-serialize it.
     """
 
+    stunnel_options = get_stunnel_options()
     mount_filename = get_mount_specific_filename(fs_id, mountpoint, tls_port)
 
     system_release_version = get_system_release_version()
     global_config = dict(STUNNEL_GLOBAL_CONFIG)
+
+    if is_stunnel_option_supported(
+        stunnel_options, b"foreground", b"quiet", emit_warning_log=False
+    ):
+        # Do not log to stderr of subprocess in addition to the destinations specified with syslog and output.
+        # Only support in stunnel version 5.25+.
+        global_config["foreground"] = "quiet"
     if any(
         release in system_release_version
         for release in SKIP_NO_SO_BINDTODEVICE_RELEASES
@@ -1161,7 +1183,9 @@ def write_stunnel_config_file(
         config, CONFIG_SECTION, "stunnel_debug_enabled", default_value=False
     ):
         global_config["debug"] = "debug"
-
+        # If the stunnel debug is enabled, we also redirect stunnel log to stderr to capture any error while launching
+        # the stunnel.
+        global_config["foreground"] = "yes"
         if config.has_option(CONFIG_SECTION, "stunnel_logs_file"):
             global_config["output"] = config.get(
                 CONFIG_SECTION, "stunnel_logs_file"
@@ -1193,8 +1217,6 @@ def write_stunnel_config_file(
     if cert_details:
         efs_config["cert"] = cert_details["certificate"]
         efs_config["key"] = cert_details["privateKey"]
-
-    stunnel_options = get_stunnel_options()
 
     tls_controls_message = (
         "WARNING: Your client lacks sufficient controls to properly enforce TLS. Please upgrade stunnel, "
@@ -1277,11 +1299,13 @@ def write_tls_tunnel_state_file(
 def test_tunnel_process(tunnel_proc, fs_id):
     tunnel_proc.poll()
     if tunnel_proc.returncode is not None:
-        out, err = tunnel_proc.communicate()
+        _, err = tunnel_proc.communicate()
         fatal_error(
-            "Failed to initialize TLS tunnel for %s" % fs_id,
-            'Failed to start TLS tunnel (errno=%d). stdout="%s" stderr="%s"'
-            % (tunnel_proc.returncode, out.strip(), err.strip()),
+            "Failed to initialize TLS tunnel for %s, please check mount.log for the failure reason."
+            % fs_id,
+            'Failed to start TLS tunnel (errno=%d), stderr="%s". If the stderr is lacking enough details, please '
+            "enable stunnel debug log in efs-utils config file and retry the mount to capture more info."
+            % (tunnel_proc.returncode, err.strip()),
         )
 
 
@@ -1526,7 +1550,7 @@ def bootstrap_tls(
     logging.info('Starting TLS tunnel: "%s"', " ".join(tunnel_args))
     tunnel_proc = subprocess.Popen(
         tunnel_args,
-        stdout=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         preexec_fn=os.setsid,
         close_fds=True,

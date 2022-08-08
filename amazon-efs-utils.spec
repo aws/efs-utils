@@ -35,7 +35,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.33.2
+Version   : 1.33.3
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -135,6 +135,9 @@ fi
 %clean
 
 %changelog
+* Wed Jul 13 2022 Yuan Gao <ygaochn@amazon.com> - 1.33.3
+- Fix potential stunnel hanging issue caused by full subprocess PIPE filled by stunnel log.
+
 * Mon Jun 6 2022 Yuan Gao <ygaochn@amazon.com> - 1.33.2
 - Fix the incorrect path to generate read_ahead_kb config file.
 - Bump the default tls port range from 400 to 1000.

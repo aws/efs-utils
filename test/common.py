@@ -11,6 +11,7 @@ import subprocess
 from mock import MagicMock
 
 
+# The process mock can be retrieved by calling PopenMock(<init params>).mock
 class PopenMock:
     def __init__(
         self,

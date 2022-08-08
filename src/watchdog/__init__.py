@@ -49,7 +49,7 @@ except ImportError:
     from urllib2 import HTTPError, HTTPHandler, Request, URLError, build_opener, urlopen
 
 
-VERSION = "1.33.2"
+VERSION = "1.33.3"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -778,8 +778,8 @@ def start_tls_tunnel(child_procs, state_file, command):
     logging.info('Starting TLS tunnel: "%s"', " ".join(command))
     tunnel = subprocess.Popen(
         command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         preexec_fn=os.setsid,
         close_fds=True,
     )
@@ -1037,7 +1037,7 @@ def check_stunnel_health(
         if is_pid_running(stunnel_pid):
             process_group = os.getpgid(stunnel_pid)
             logging.warning(
-                "Connection timeout for %s after %d, the stunnel could be unhealthy. Sending SIGKILL to kill the "
+                "Connection timeout for %s after %d sec, the stunnel could be unhealthy. Sending SIGKILL to kill the "
                 "stunnel(PID: %d, group ID: %s) and starting a new stunnel process.",
                 mountpoint,
                 command_timeout_sec,

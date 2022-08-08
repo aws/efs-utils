@@ -193,9 +193,6 @@ workflows:
           name: ubuntu20
           image: ubuntu:20.04
       - build-deb-package:
-          name: ubuntu21
-          image: ubuntu:21.04
-      - build-deb-package:
           name: ubuntu22
           image: ubuntu:22.04
       - build-deb-package:

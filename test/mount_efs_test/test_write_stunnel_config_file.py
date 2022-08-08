@@ -34,10 +34,12 @@ def _get_config(
     stunnel_debug_enabled=False,
     stunnel_check_cert_hostname_supported=True,
     stunnel_check_cert_validity_supported=True,
+    stunnel_foreground_quiet_supported=False,
     stunnel_check_cert_hostname=None,
     stunnel_check_cert_validity=False,
     stunnel_logs_file=None,
     stunnel_libwrap_option_supported=True,
+    stunnel_fips_enabled=False,
 ):
 
     options = []
@@ -50,6 +52,10 @@ def _get_config(
     if stunnel_libwrap_option_supported:
         options.append(
             b"libwrap                = yes|no use /etc/hosts.allow and /etc/hosts.deny"
+        )
+    if stunnel_foreground_quiet_supported:
+        options.append(
+            b"foreground             = yes|quiet|no foreground mode (don't fork, log to stderr)"
         )
 
     mocker.patch(
@@ -87,6 +93,10 @@ def _get_config(
         config.set(
             mount_efs.CONFIG_SECTION, "stunnel_logs_file", str(stunnel_logs_file)
         )
+
+    config.set(
+        mount_efs.CONFIG_SECTION, "stunnel_fips_enabled", str(stunnel_fips_enabled)
+    )
 
     return config
 
@@ -606,4 +616,92 @@ def test_write_stunnel_config_with_fall_back_ip_address(mocker, tmpdir):
         config_file,
         _get_expected_global_config(FS_ID, MOUNT_POINT, PORT, state_file_dir),
         _get_expected_efs_config(fallback_ip_address=FALLBACK_IP_ADDRESS),
+    )
+
+
+def test_write_stunnel_config_foreground_quiet_not_supported(mocker, tmpdir):
+    _test_stunnel_config_foreground_quiet_helper(
+        mocker, tmpdir, foreground_quiet_supported=False, stunnel_debug_enabled=False
+    )
+
+
+def test_write_stunnel_config_foreground_quiet_supported(mocker, tmpdir):
+    _test_stunnel_config_foreground_quiet_helper(
+        mocker, tmpdir, foreground_quiet_supported=True, stunnel_debug_enabled=False
+    )
+
+
+def test_write_stunnel_config_foreground_quiet_supported_debug_enabled(mocker, tmpdir):
+    _test_stunnel_config_foreground_quiet_helper(
+        mocker, tmpdir, foreground_quiet_supported=True, stunnel_debug_enabled=True
+    )
+
+
+def _test_stunnel_config_foreground_quiet_helper(
+    mocker, tmpdir, foreground_quiet_supported, stunnel_debug_enabled
+):
+    ca_mocker = mocker.patch("mount_efs.add_stunnel_ca_options")
+    state_file_dir = str(tmpdir)
+
+    config_file = mount_efs.write_stunnel_config_file(
+        _get_config(
+            mocker,
+            stunnel_debug_enabled=stunnel_debug_enabled,
+            stunnel_foreground_quiet_supported=foreground_quiet_supported,
+        ),
+        state_file_dir,
+        FS_ID,
+        MOUNT_POINT,
+        PORT,
+        DNS_NAME,
+        VERIFY_LEVEL,
+        OCSP_ENABLED,
+        _get_mount_options(),
+        DEFAULT_REGION,
+    )
+    utils.assert_called_once(ca_mocker)
+
+    expected_global_config = dict(
+        _get_expected_global_config(FS_ID, MOUNT_POINT, PORT, state_file_dir)
+    )
+    expected_global_config["foreground"] = (
+        "quiet" if foreground_quiet_supported and not stunnel_debug_enabled else "yes"
+    )
+    if stunnel_debug_enabled:
+        expected_global_config["debug"] = "debug"
+        expected_global_config["output"] = os.path.join(
+            mount_efs.LOG_DIR,
+            "%s.stunnel.log"
+            % mount_efs.get_mount_specific_filename(FS_ID, MOUNT_POINT, PORT),
+        )
+    _validate_config(config_file, expected_global_config, _get_expected_efs_config())
+
+
+def test_write_stunnel_config_fips_enabled(mocker, tmpdir):
+    ca_mocker = mocker.patch("mount_efs.add_stunnel_ca_options")
+    state_file_dir = str(tmpdir)
+
+    config_file = mount_efs.write_stunnel_config_file(
+        _get_config(mocker, stunnel_fips_enabled=True),
+        state_file_dir,
+        FS_ID,
+        MOUNT_POINT,
+        PORT,
+        DNS_NAME,
+        VERIFY_LEVEL,
+        OCSP_ENABLED,
+        _get_mount_options(),
+        DEFAULT_REGION,
+    )
+    utils.assert_called_once(ca_mocker)
+
+    expected_global_config = dict(
+        _get_expected_global_config(FS_ID, MOUNT_POINT, PORT, state_file_dir)
+    )
+    expected_global_config["fips"] = "yes"
+
+    _validate_config(
+        config_file,
+        expected_global_config,
+        _get_expected_efs_config(),
     )
