@@ -64,7 +64,7 @@ def _test_main(
     if tlsport is not None:
         options["tlsport"] = tlsport
     if awscredsuri is not None:
-        options["awscredsuri"] = AWSCREDSURI
+        options["awscredsuri"] = awscredsuri
 
     if root:
         mocker.patch("os.geteuid", return_value=0)
@@ -239,6 +239,13 @@ def test_main_aws_creds_uri_with_aws_profile(mocker, capsys):
         awscredsuri=AWSCREDSURI,
         awsprofile=AWSPROFILE,
         tlsport=TLS_PORT,
+    )
+
+
+def test_main_aws_creds_uri_malformed(mocker, capsys):
+    expected_err = "is malformed"
+    _test_main_assert_error(
+        mocker, capsys, expected_err, tls=True, iam=True, awscredsuri=".random"
     )
 
 

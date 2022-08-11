@@ -2885,11 +2885,16 @@ def check_options_validity(options):
             'The "iam" option is required when mounting with named profile option, "awsprofile"'
         )
 
-    if "awscredsuri" in options and "iam" not in options:
-        fatal_error('The "iam" option is required when mounting with "awscredsuri"')
-
-    if "awscredsuri" in options and "awsprofile" in options:
-        fatal_error('The "awscredsuri" and "awsprofile" options are mutually exclusive')
+    if "awscredsuri" in options:
+        if "iam" not in options:
+            fatal_error('The "iam" option is required when mounting with "awscredsuri"')
+        if "awsprofile" in options:
+            fatal_error(
+                'The "awscredsuri" and "awsprofile" options are mutually exclusive'
+            )
+        # The URI must start with slash symbol as it will be appended to the ECS task metadata endpoint
+        if not options["awscredsuri"].startswith("/"):
+            fatal_error("awscredsuri %s is malformed" % options["awscredsuri"])
 
 
 def bootstrap_cloudwatch_logging(config, options, fs_id=None):
