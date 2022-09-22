@@ -14,6 +14,7 @@ import watchdog
 
 from .. import utils
 
+FAKE_MOUNT_STATE_DIR = "/fake/path"
 PID = 99999999999999999
 
 
@@ -34,29 +35,44 @@ def create_state_file(tmpdir, extra_files=list(), mount_state_dir=None):
     return state_file.dirname, state_file.basename, str(state_file)
 
 
-def setup_mock(mocker, is_pid_running):
+def setup_mock(
+    mocker,
+    is_stunnel_proc_running_first_check=True,
+    is_stunnel_proc_running_second_check=False,
+):
     mocker.patch("os.getpgid")
-    mocker.patch("watchdog.is_pid_running", return_value=is_pid_running)
-
-    killpg_mock = mocker.patch("os.killpg")
-    return killpg_mock
+    # The watchdog clean_up_mount_state function has two procedures:
+    # 1. Kill the stunnel process if it is still running
+    # 2. Check whether the stunnel process is still running, if not, cleanup the state file of the mount
+    # Each procedure will check whether the mount stunnel process is running, so we have two mock here.
+    mocker.patch(
+        "watchdog.is_mount_stunnel_proc_running",
+        side_effect=[
+            is_stunnel_proc_running_first_check,
+            is_stunnel_proc_running_second_check,
+        ],
+    )
+    return mocker.patch("os.killpg")
 
 
 def test_clean_up_on_first_try(mocker, tmpdir):
-    killpg_mock = setup_mock(mocker, False)
+    """
+    This test verifies when the stunnel is running at first then got killed, watchdog will cleanup the mount state file
+    """
+    killpg_mock = setup_mock(mocker)
 
     state_dir, state_file, abs_state_file = create_state_file(tmpdir)
 
     assert os.path.exists(abs_state_file)
 
-    watchdog.clean_up_mount_state(state_dir, state_file, PID, is_running=True)
+    watchdog.clean_up_mount_state(state_dir, state_file, PID)
 
     utils.assert_called_once(killpg_mock)
     assert not os.path.exists(abs_state_file)
 
 
 def _test_clean_up_files(mocker, tmpdir, files_should_exist):
-    killpg_mock = setup_mock(mocker, False)
+    killpg_mock = setup_mock(mocker)
 
     extra_files = [
         str(create_temp_file(tmpdir)),
@@ -71,7 +87,7 @@ def _test_clean_up_files(mocker, tmpdir, files_should_exist):
             os.remove(f)
         assert os.path.exists(f) or not files_should_exist
 
-    watchdog.clean_up_mount_state(state_dir, state_file, PID, is_running=True)
+    watchdog.clean_up_mount_state(state_dir, state_file, PID)
 
     utils.assert_called_once(killpg_mock)
     assert not os.path.exists(abs_state_file)
@@ -84,79 +100,124 @@ def test_clean_up_nonexistent_files(mocker, tmpdir):
 
 
 def test_clean_up_multiple_files(mocker, tmpdir):
+    """
+    This test verifies when there are extra files created in the mount state dir, watchdog can clean up the state file
+    """
     _test_clean_up_files(mocker, tmpdir, files_should_exist=True)
 
 
 def test_clean_up_pid_still_lives(mocker, tmpdir):
-    killpg_mock = setup_mock(mocker, True)
+    """
+    This test verifies when the stunnel process is still running after killing event, watchdog won't clean up the state
+    file
+    """
+    killpg_mock = setup_mock(
+        mocker,
+        is_stunnel_proc_running_first_check=True,
+        is_stunnel_proc_running_second_check=True,
+    )
 
     state_dir, state_file, abs_state_file = create_state_file(tmpdir)
 
     assert os.path.exists(abs_state_file)
 
-    watchdog.clean_up_mount_state(state_dir, state_file, PID, is_running=True)
+    watchdog.clean_up_mount_state(state_dir, state_file, PID)
 
     utils.assert_called_once(killpg_mock)
     assert os.path.exists(abs_state_file)
 
 
 def test_clean_up_pid_already_killed(mocker, tmpdir):
-    pid = None
-    is_running = watchdog.is_pid_running(pid)
-    killpg_mock = setup_mock(mocker, is_running)
-
+    """
+    This test verifies when the stunnel process is already killed, the kill signal won't be sent, and watchdog will
+    clean up the state file
+    """
     state_dir, state_file, abs_state_file = create_state_file(tmpdir)
+    pid = None
+    is_running = watchdog.is_mount_stunnel_proc_running(pid, state_file, state_dir)
+    killpg_mock = setup_mock(
+        mocker,
+        is_stunnel_proc_running_first_check=is_running,
+        is_stunnel_proc_running_second_check=False,
+    )
 
     assert os.path.exists(abs_state_file)
 
-    watchdog.clean_up_mount_state(state_dir, state_file, pid, is_running=is_running)
+    watchdog.clean_up_mount_state(state_dir, state_file, pid)
 
     utils.assert_not_called(killpg_mock)
     assert not os.path.exists(abs_state_file)
 
 
 def test_pid_not_running(mocker, tmpdir):
-    killpg_mock = setup_mock(mocker, False)
+    """
+    This test verifies when the stunnel process is already not running, the kill signal won't be sent, and watchdog will
+    clean up the state file
+    """
+    killpg_mock = setup_mock(
+        mocker,
+        is_stunnel_proc_running_first_check=False,
+        is_stunnel_proc_running_second_check=False,
+    )
 
     state_dir, state_file, abs_state_file = create_state_file(tmpdir)
 
     assert os.path.exists(abs_state_file)
 
-    watchdog.clean_up_mount_state(state_dir, state_file, PID, is_running=False)
+    watchdog.clean_up_mount_state(state_dir, state_file, PID)
 
     utils.assert_not_called(killpg_mock)
     assert not os.path.exists(abs_state_file)
 
 
 def test_clean_up_mount_state_dir_success(mocker, tmpdir):
-    setup_mock(mocker, False)
+    """
+    This test verifies when the stunnel process is already not running, watchdog will clean up the mount state dir
+    """
+    setup_mock(
+        mocker,
+        is_stunnel_proc_running_first_check=False,
+        is_stunnel_proc_running_second_check=False,
+    )
     mocker.patch("os.path.isdir", return_value=True)
     rm_tree = mocker.patch("shutil.rmtree")
 
     state_dir, state_file, abs_state_file = create_state_file(
-        tmpdir, mount_state_dir="/fake/path"
+        tmpdir, mount_state_dir=FAKE_MOUNT_STATE_DIR
     )
 
     assert os.path.exists(abs_state_file)
 
     watchdog.clean_up_mount_state(
-        state_dir, state_file, PID, is_running=False, mount_state_dir="/fake/path"
+        state_dir, state_file, PID, mount_state_dir=FAKE_MOUNT_STATE_DIR
     )
 
     utils.assert_called_once(rm_tree)
+    assert not os.path.exists(abs_state_file)
 
 
 def test_clean_up_mount_state_dir_fail(mocker, tmpdir):
-    setup_mock(mocker, False)
+    """
+    This test verifies when the stunnel process is already not running, watchdog will not clean up the mount state dir
+    if the mount state dir path is not a directory
+    """
+    setup_mock(
+        mocker,
+        is_stunnel_proc_running_first_check=False,
+        is_stunnel_proc_running_second_check=False,
+    )
     mocker.patch("os.path.isdir", return_value=False)
     rm_tree = mocker.patch("shutil.rmtree")
 
-    state_dir, state_file, abs_state_file = create_state_file(tmpdir)
+    state_dir, state_file, abs_state_file = create_state_file(
+        tmpdir, mount_state_dir=FAKE_MOUNT_STATE_DIR
+    )
 
     assert os.path.exists(abs_state_file)
 
     watchdog.clean_up_mount_state(
-        state_dir, state_file, PID, is_running=False, mount_state_dir="/fake/path"
+        state_dir, state_file, PID, mount_state_dir=FAKE_MOUNT_STATE_DIR
     )
 
     utils.assert_not_called(rm_tree)
+    assert not os.path.exists(abs_state_file)

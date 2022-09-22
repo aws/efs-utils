@@ -39,7 +39,7 @@ def _get_config(
     stunnel_check_cert_validity=False,
     stunnel_logs_file=None,
     stunnel_libwrap_option_supported=True,
-    stunnel_fips_enabled=False,
+    fips_mode_enabled=False,
 ):
 
     options = []
@@ -94,9 +94,7 @@ def _get_config(
             mount_efs.CONFIG_SECTION, "stunnel_logs_file", str(stunnel_logs_file)
         )
 
-    config.set(
-        mount_efs.CONFIG_SECTION, "stunnel_fips_enabled", str(stunnel_fips_enabled)
-    )
+    config.set(mount_efs.CONFIG_SECTION, "fips_mode_enabled", str(fips_mode_enabled))
 
     return config
 
@@ -682,7 +680,7 @@ def test_write_stunnel_config_fips_enabled(mocker, tmpdir):
     state_file_dir = str(tmpdir)
 
     config_file = mount_efs.write_stunnel_config_file(
-        _get_config(mocker, stunnel_fips_enabled=True),
+        _get_config(mocker, fips_mode_enabled=True),
         state_file_dir,
         FS_ID,
         MOUNT_POINT,

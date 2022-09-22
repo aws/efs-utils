@@ -53,7 +53,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
 
 For those using Amazon Linux or Amazon Linux 2, the easiest way to install `efs-utils` is from Amazon's repositories:
 
-```
+```bash
 $ sudo yum -y install amazon-efs-utils
 ```
 
@@ -78,7 +78,7 @@ Other distributions require building the package from source and installing it.
 
 If the distribution is not OpenSUSE or SLES
 
-```
+```bash
 $ sudo yum -y install git rpm-build make
 $ git clone https://github.com/aws/efs-utils
 $ cd efs-utils
@@ -88,7 +88,7 @@ $ sudo yum -y install build/amazon-efs-utils*rpm
 
 Otherwise
 
-```
+```bash
 $ sudo zypper refresh
 $ sudo zypper install -y git rpm-build make
 $ git clone https://github.com/aws/efs-utils
@@ -100,7 +100,7 @@ $ sudo zypper --no-gpg-checks install -y build/amazon-efs-utils*rpm
 On OpenSUSE, if you see error like `File './suse/noarch/bash-completion-2.11-2.1.noarch.rpm' not found on medium 'http://download.opensuse.org/tumbleweed/repo/oss/'`
 during installation of `git`, run the following commands to re-add repo OSS and NON-OSS, then run the install script above again.
 
-```
+```bash
 sudo zypper ar -f -n OSS http://download.opensuse.org/tumbleweed/repo/oss/ OSS
 sudo zypper ar -f -n NON-OSS http://download.opensuse.org/tumbleweed/repo/non-oss/ NON-OSS
 sudo zypper refresh
@@ -108,7 +108,7 @@ sudo zypper refresh
 
 - To build and install a Debian package:
 
-```
+```bash
 $ sudo apt-get update
 $ sudo apt-get -y install git binutils
 $ git clone https://github.com/aws/efs-utils
@@ -122,25 +122,25 @@ $ sudo apt-get -y install ./build/amazon-efs-utils*deb
 For EC2 Mac instances running macOS Big Sur and macOS Monterey, you can install amazon-efs-utils from the 
 [homebrew-aws](https://github.com/aws/homebrew-aws) respository. **Note that this will ONLY work on EC2 instances
 running macOS Big Sur and macOS Monterey, not local Mac computers.**
-```
+```bash
 brew install amazon-efs-utils
 ```
 
 This will install amazon-efs-utils on your EC2 Mac Instance running macOS Big Sur and macOS Monterey in the directory `/usr/local/Cellar/amazon-efs-utils`. At the end of the installation, it will print a set of commands that must be executed in order to start using efs-utils. The instructions that are printed after amazon-efs-utils and must be executed are:
 
-```
-Perform below actions to start using efs:
+```bash
+# Perform below actions to start using efs:
     sudo mkdir -p /Library/Filesystems/efs.fs/Contents/Resources
     sudo ln -s /usr/local/bin/mount.efs /Library/Filesystems/efs.fs/Contents/Resources/mount_efs
 
-Perform below actions to stop using efs:
+# Perform below actions to stop using efs:
     sudo rm /Library/Filesystems/efs.fs/Contents/Resources/mount_efs
 
-To enable watchdog for using TLS mounts:
+# To enable watchdog for using TLS mounts:
     sudo cp /usr/local/Cellar/amazon-efs-utils/<version>/libexec/amazon-efs-mount-watchdog.plist /Library/LaunchAgents
     sudo launchctl load /Library/LaunchAgents/amazon-efs-mount-watchdog.plist
 
-To disable watchdog for using TLS mounts:
+# To disable watchdog for using TLS mounts:
     sudo launchctl unload /Library/LaunchAgents/amazon-efs-mount-watchdog.plist
 ```
 
@@ -148,7 +148,7 @@ To disable watchdog for using TLS mounts:
 
 - [Set up a virtualenv](http://libzx.so/main/learning/2016/03/13/best-practice-for-virtualenv-and-git-repos.html) for efs-utils
 
-```
+```bash
 $ virtualenv ~/.envs/efs-utils
 $ source ~/.envs/efs-utils/bin/activate
 $ pip install -r requirements.txt
@@ -156,7 +156,7 @@ $ pip install -r requirements.txt
 
 - Run tests
 
-```
+```bash
 $ make test
 ```
 
@@ -168,56 +168,56 @@ $ make test
 
 To mount with the recommended default options, simply run:
 
-```
+```bash
 $ sudo mount -t efs file-system-id efs-mount-point/
 ```
 
 To mount file system to a specific mount target of the file system, run:
 
-```
+```bash
 $ sudo mount -t efs -o mounttargetip=mount-target-ip-address file-system-id efs-mount-point/
 ```
 
 To mount file system within a given network namespace, run:
 
-```
+```bash
 $ sudo mount -t efs -o netns=netns-path file-system-id efs-mount-point/
 ```
 
 To mount file system to the mount target in specific availability zone (e.g. us-east-1a), run:
 
-```
+```bash
 $ sudo mount -t efs -o az=az-name file-system-id efs-mount-point/
 ```
 
 To mount over TLS, simply add the `tls` option:
 
-```
+```bash
 $ sudo mount -t efs -o tls file-system-id efs-mount-point/
 ```
 
 To authenticate with EFS using the system’s IAM identity, add the `iam` option. This option requires the `tls` option.
 
-```
+```bash
 $ sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
 ```
 
 To mount using an access point, use the `accesspoint=` option. This option requires the `tls` option.
 The access point must be in the "available" state before it can be used to mount EFS.
 
-```
+```bash
 $ sudo mount -t efs -o tls,accesspoint=access-point-id file-system-id efs-mount-point/
 ```
 
 To mount your file system automatically with any of the options above, you can add entries to `/efs/fstab` like:
 
-```
+```bash
 file-system-id efs-mount-point efs _netdev,tls,iam,accesspoint=access-point-id 0 0
 ```
 
 For more information on mounting with the mount helper, see the manual page:
 
-```
+```bash
 man mount.efs
 ```
 
@@ -227,17 +227,17 @@ or refer to the [documentation](https://docs.aws.amazon.com/efs/latest/ug/using-
 
 For EC2 instances using Mac distribution, the recommended default options will perform a tls mount:
 
-```
+```bash
 $ sudo mount -t efs file-system-id efs-mount-point/
 ```
  or
-```
+```bash
 $ sudo mount -t efs -o tls file-system-id efs-mount-point/
 ```
 
 To mount without TLS, simply add the `notls` option:
 
-```
+```bash
 $ sudo mount -t efs -o notls file-system-id efs-mount-point/
 ```
 
@@ -265,7 +265,7 @@ sudo zypper install -y stunnel
 ## Upgrading stunnel for MacOS
 
 The installation installs latest stunnel available in brew repository. You can also upgrade the version of stunnel on your instance using the command below:
-```
+```bash
 brew upgrade stunnel
 ```
 
@@ -433,7 +433,7 @@ sed -i "s/disable_fetch_ec2_metadata_token = false/disable_fetch_ec2_metadata_to
 To authenticate with EFS using the system’s IAM identity of an awsprofile, add the `iam` option and pass the profile name to 
 `awsprofile` option. These options require the `tls` option.
 
-```
+```bash
 $ sudo mount -t efs -o tls,iam,awsprofile=test-profile file-system-id efs-mount-point/
 ```
 
@@ -478,7 +478,24 @@ role_arn = <role-arn-in-account-A>
 credential_source = Ec2InstanceMetadata
 ```
 
+## Enabling FIPS Mode
+Efs-Utils is able to enter FIPS mode when mounting your file system. To enable FIPS you need to modify the EFS-Utils config file:
+```bash
+sed -i "s/fips_mode_enabled = false/fips_mode_enabled = true/" /etc/amazon/efs/efs-utils.conf
+```
+This will enable any potential API call from EFS-Utils to use FIPS endpoints and cause stunnel to enter FIPS mode 
 
+Note: FIPS mode requires that the installed version of OpenSSL is compiled with FIPS.
+
+To verify that the installed version is compiled with FIPS, look for `OpenSSL X.X.Xx-fips` in the `stunnel -version` command output e.g.
+```bash
+$ stunnel -version
+stunnel 4.56 on x86_64-koji-linux-gnu platform
+Compiled/running with OpenSSL 1.0.2k-fips  26 Jan 2017
+Threading:PTHREAD Sockets:POLL,IPv6 SSL:ENGINE,OCSP,FIPS Auth:LIBWRAP
+```
+
+For more information on how to configure OpenSSL with FIPS see the [OpenSSL FIPS README](https://github.com/openssl/openssl/blob/master/README-FIPS.md).
 ## License Summary
 
 This code is made available under the MIT license.

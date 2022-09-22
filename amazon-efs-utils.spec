@@ -35,7 +35,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.33.3
+Version   : 1.33.4
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -135,6 +135,10 @@ fi
 %clean
 
 %changelog
+* Thu Sep 1 2022 Yuan Gao <ygaochn@amazon.com> - 1.33.4
+- Fix potential issue where watchdog sending signal to incorrect processes.
+- Add support for enabling FIPS mode for both stunnel and AWS API calls.
+
 * Wed Jul 13 2022 Yuan Gao <ygaochn@amazon.com> - 1.33.3
 - Fix potential stunnel hanging issue caused by full subprocess PIPE filled by stunnel log.
 

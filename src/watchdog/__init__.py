@@ -49,7 +49,7 @@ except ImportError:
     from urllib2 import HTTPError, HTTPHandler, Request, URLError, build_opener, urlopen
 
 
-VERSION = "1.33.3"
+VERSION = "1.33.4"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -67,6 +67,7 @@ LOG_DIR = "/var/log/amazon/efs"
 LOG_FILE = "mount-watchdog.log"
 
 STATE_FILE_DIR = "/var/run/efs"
+STUNNEL_PID_FILE = "stunnel.pid"
 
 DEFAULT_NFS_PORT = "2049"
 PRIVATE_KEY_FILE = "/etc/amazon/efs/privateKey.pem"
@@ -763,6 +764,79 @@ def get_state_files(state_file_dir):
     return state_files
 
 
+def get_pid_in_state_dir(state_file, state_file_dir):
+    """
+    :param state_file: The state file path, e.g. fs-deadbeef.mnt.20560.
+    :param state_file_dir: The state file dir path, e.g. /var/run/efs.
+    """
+    state_dir_pid_path = os.path.join(
+        state_file_dir, state_file + "+", STUNNEL_PID_FILE
+    )
+    if os.path.exists(state_dir_pid_path):
+        with open(state_dir_pid_path) as f:
+            return f.read()
+    return None
+
+
+def is_mount_stunnel_proc_running(state_pid, state_file, state_file_dir):
+    """
+    Check whether a given stunnel process id in state file is running for the mount. To avoid we incorrectly checking
+    processes running by other applications and send signal further, the stunnel process in state file is counted as
+    running iff:
+    1. The pid in state file is not None.
+    2. The process running with the pid is a stunnel process. This is validated through process command name.
+    3. The process can be reached via os.kill(pid, 0).
+    4. Every launched stunnel process will write its process id to the pid file in the mount state_file_dir, and only
+       when the stunnel is terminated this pid file can be removed. Check whether the stunnel pid file exists and its
+       value is equal to the pid documented in state file. This step is to make sure we don't send signal later to any
+       stunnel process that is not owned by the mount.
+
+    :param state_pid: The pid in state file.
+    :param state_file: The state file path, e.g. fs-deadbeef.mnt.20560.
+    :param state_file_dir: The state file dir path, e.g. /var/run/efs.
+    """
+    if not state_pid:
+        logging.debug("State pid is None for %s", state_file)
+        return False
+
+    process_name = check_process_name(state_pid)
+    if not process_name or "stunnel" not in str(process_name):
+        logging.debug(
+            "Process running on %s is not a stunnel process, full command: %s.",
+            state_pid,
+            str(process_name) if process_name else "",
+        )
+        return False
+
+    if not is_pid_running(state_pid):
+        logging.debug(
+            "Stunnel process with pid %s is not running anymore for %s.",
+            state_pid,
+            state_file,
+        )
+        return False
+
+    pid_in_stunnel_pid_file = get_pid_in_state_dir(state_file, state_file_dir)
+    if not pid_in_stunnel_pid_file:
+        logging.debug(
+            "Pid file of stunnel is already removed for %s, assuming the stunnel with pid %s is no longer running.",
+            state_file,
+            state_pid,
+        )
+        return False
+    elif int(state_pid) != int(pid_in_stunnel_pid_file):
+        logging.warning(
+            "Stunnel pid mismatch in state file (pid = %s) and stunnel pid file (pid = %s). Assuming the "
+            "stunnel is not running.",
+            int(state_pid),
+            int(pid_in_stunnel_pid_file),
+        )
+        return False
+
+    logging.debug("TLS tunnel for %s is running with pid %s", state_file, state_pid)
+    return True
+
+
 def is_pid_running(pid):
     if not pid:
         return False
@@ -796,17 +870,19 @@ def start_tls_tunnel(child_procs, state_file, command):
     return tunnel.pid
 
 
-def clean_up_mount_state(
-    state_file_dir, state_file, pid, is_running, mount_state_dir=None
-):
-    if is_running:
-        process_group = os.getpgid(pid)
-        logging.info(
-            "Terminating running TLS tunnel - PID: %d, group ID: %s", pid, process_group
-        )
-        os.killpg(process_group, SIGTERM)
+def clean_up_mount_state(state_file_dir, state_file, pid, mount_state_dir=None):
+    send_signal_to_running_stunnel_process_group(
+        pid, state_file, state_file_dir, SIGTERM
+    )
+    cleanup_mount_state_if_stunnel_not_running(
+        pid, state_file, state_file_dir, mount_state_dir
+    )
 
-    if is_pid_running(pid):
+
+def cleanup_mount_state_if_stunnel_not_running(
+    pid, state_file, state_file_dir, mount_state_dir
+):
+    if is_mount_stunnel_proc_running(pid, state_file, state_file_dir):
         logging.info("TLS tunnel: %d is still running, will retry termination", pid)
     else:
         if not pid:
@@ -895,15 +971,6 @@ def check_efs_mounts(
                 logging.exception("Unable to parse json in %s", state_file_path)
                 continue
 
-        try:
-            pid = state["pid"]
-            is_running = is_pid_running(pid)
-        except KeyError:
-            logging.debug(
-                "Did not find PID in state file. Assuming stunnel is not running"
-            )
-            is_running = False
-
         current_time = time.time()
         if "unmount_time" in state:
             if state["unmount_time"] + unmount_grace_period_sec < current_time:
@@ -912,7 +979,6 @@ def check_efs_mounts(
                     state_file_dir,
                     state_file,
                     state.get("pid"),
-                    is_running,
                     state.get("mountStateDir"),
                 )
         # For MacOS, if we don't have port from previous system call (nfsstat -F JSON -m mount_point), we ignore the port
@@ -940,8 +1006,9 @@ def check_efs_mounts(
             if "certificate" in state:
                 check_certificate(config, state, state_file_dir, state_file)
 
-            if is_running:
-                logging.debug("TLS tunnel for %s is running", state_file)
+            if is_mount_stunnel_proc_running(
+                state.get("pid"), state_file, state_file_dir
+            ):
                 # https://github.com/kubernetes-sigs/aws-efs-csi-driver/issues/616 We have seen EFS hanging issue caused
                 # by stuck stunnel (version: 4.56) process. Apart from checking whether stunnel is running or not, we
                 # need to check whether the stunnel connection established is healthy periodically.
@@ -1034,17 +1101,16 @@ def check_stunnel_health(
         )
         rewrite_state_file(state, state_file_dir, state_file)
     except subprocess.TimeoutExpired:
-        if is_pid_running(stunnel_pid):
-            process_group = os.getpgid(stunnel_pid)
+        if send_signal_to_running_stunnel_process_group(
+            stunnel_pid, state_file, state_file_dir, SIGKILL
+        ):
             logging.warning(
-                "Connection timeout for %s after %d sec, the stunnel could be unhealthy. Sending SIGKILL to kill the "
-                "stunnel(PID: %d, group ID: %s) and starting a new stunnel process.",
+                "Connection timeout for %s after %d sec, SIGKILL has been sent to the potential unhealthy stunnel %s, "
+                "restarting a new stunnel process.",
                 mountpoint,
                 command_timeout_sec,
                 stunnel_pid,
-                process_group,
             )
-            os.killpg(process_group, SIGKILL)
             restart_tls_tunnel(child_procs, state, state_file_dir, state_file)
         else:
             logging.warning(
@@ -1193,15 +1259,45 @@ def check_certificate(
         rewrite_state_file(state, state_file_dir, state_file)
 
         # send SIGHUP to force a reload of the configuration file to trigger the stunnel process to notice the new certificate
-        pid = state.get("pid")
-        if is_pid_running(pid):
-            process_group = os.getpgid(pid)
+        send_signal_to_running_stunnel_process_group(
+            state.get("pid"), state_file, state_file_dir, SIGHUP
+        )
+
+
+def send_signal_to_running_stunnel_process_group(
+    stunnel_pid, state_file, state_file_dir, signal
+):
+    """
+    Send a signal to the given stunnel_pid if the process running with the pid is the mount stunnel process.
+
+    :param stunnel_pid: The pid in state file.
+    :param state_file: The state file path, e.g. fs-deadbeef.mnt.20560.
+    :param state_file_dir: The state file dir path, e.g. /var/run/efs.
+    :param signal: OS signal send to stunnel process group, e.g. SIGHUP, SIGKILL, SIGTERM.
+    """
+    if is_mount_stunnel_proc_running(stunnel_pid, state_file, state_file_dir):
+        process_group = os.getpgid(stunnel_pid)
+        try:
             logging.info(
-                "SIGHUP signal to stunnel. PID: %d, group ID: %s", pid, process_group
+                "Sending signal %s(%d) to stunnel. PID: %d, group ID: %s",
+                signal.name,
+                signal.value,
+                stunnel_pid,
+                process_group,
             )
-            os.killpg(process_group, SIGHUP)
-        else:
-            logging.warning("TLS tunnel is not running for %s", state_file)
+        except AttributeError:
+            # In python3.4, the signal is a int object, so it does not have name and value property
+            logging.info(
+                "Sending signal(%s) to stunnel. PID: %d, group ID: %s",
+                signal,
+                stunnel_pid,
+                process_group,
+            )
+        os.killpg(process_group, signal)
+        return True
+    else:
+        logging.warning("TLS tunnel is not running for %s", state_file)
+        return False
 
 
 def create_required_directory(config, directory):

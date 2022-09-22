@@ -19,7 +19,7 @@ commands:
       - run:
           name: Install Python dependencies in a virtual env
           command: |
-            sudo pip install --upgrade pip
+            pip install --upgrade pip
             pip install virtualenv
             virtualenv -p $(which python) ~/efs-utils-virtualenv
             source ~/efs-utils-virtualenv/bin/activate
@@ -163,23 +163,23 @@ workflows:
   workflow:
     jobs:
       - test:
-          name: python39
-          image: circleci/python:3.9.1
+          name: python3_9
+          image: python:3.9.13
       - test:
-          name: python38
-          image: circleci/python:3.8.1
+          name: python3_8
+          image: python:3.8.13
       - test:
-          name: python37
-          image: circleci/python:3.7.3
+          name: python3_7
+          image: python:3.7.13
       - test:
-          name: python36
-          image: circleci/python:3.6.9
+          name: python3_6
+          image: python:3.6.15
       - test:
-          name: python35
-          image: circleci/python:3.5.9
+          name: python3_5
+          image: python:3.5.10
       - test:
-          name: python34
-          image: circleci/python:3.4.9
+          name: python3_4
+          image: python:3.4.10
       - build-deb-package:
           name: ubuntu-latest
           image: ubuntu:latest

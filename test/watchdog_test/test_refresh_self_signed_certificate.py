@@ -466,7 +466,7 @@ def test_refresh_self_signed_certificate_send_sighup(mocker, tmpdir, caplog):
     caplog.set_level(logging.INFO)
     process_group = "fake_pg"
 
-    mocker.patch("watchdog.is_pid_running", return_value=True)
+    mocker.patch("watchdog.is_mount_stunnel_proc_running", return_value=True)
     mocker.patch("os.getpgid", return_value=process_group)
     mocker.patch("os.killpg")
 
@@ -482,16 +482,15 @@ def test_refresh_self_signed_certificate_send_sighup(mocker, tmpdir, caplog):
         config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir)
     )
 
-    assert (
-        "SIGHUP signal to stunnel. PID: %d, group ID: %s" % (PID, process_group)
-        in caplog.text
-    )
+    # SIGHUP signal is 1
+    assert "1" in caplog.text
+    assert "PID: %d, group ID: %s" % (PID, process_group) in caplog.text
 
 
 def test_refresh_self_signed_certificate_pid_not_running(mocker, tmpdir, caplog):
     caplog.set_level(logging.WARN)
 
-    mocker.patch("watchdog.is_pid_running", return_value=False)
+    mocker.patch("watchdog.is_mount_stunnel_proc_running", return_value=False)
 
     config = _get_config()
     pk_path = _get_mock_private_key_path(mocker, tmpdir)

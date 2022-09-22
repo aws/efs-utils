@@ -210,7 +210,7 @@ def test_stunnel_health_failed_due_to_timeout_not_kill_stunnel(mocker, tmpdir):
     state_file = tmpdir.join(tempfile.mkstemp()[1])
     state_file.write(json.dumps(state), ensure=True)
 
-    mocker.patch("watchdog.is_pid_running", return_value=False)
+    mocker.patch("watchdog.is_mount_stunnel_proc_running", return_value=False)
     watchdog.check_stunnel_health(
         config, state, state_file.dirname, state_file.basename, [], DEFAULT_MOUNTS
     )
@@ -233,7 +233,7 @@ def test_stunnel_health_failed_due_to_timeout_kill_stunnel(mocker, tmpdir):
     state_file = tmpdir.join(tempfile.mkstemp()[1])
     state_file.write(json.dumps(state), ensure=True)
 
-    mocker.patch("watchdog.is_pid_running", return_value=True)
+    mocker.patch("watchdog.is_mount_stunnel_proc_running", return_value=True)
     mocker.patch("os.getpgid", return_value="fakepg")
     kill_mock = mocker.patch("os.killpg")
     restart_tls_tunnel_mock = mocker.patch("watchdog.restart_tls_tunnel")

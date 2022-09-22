@@ -71,6 +71,7 @@ except ImportError:
     from urllib2 import HTTPError, HTTPHandler, Request, URLError, build_opener, urlopen
 
 try:
+    import botocore.config
     import botocore.session
     from botocore.exceptions import (
         ClientError,
@@ -84,7 +85,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.33.3"
+VERSION = "1.33.4"
 SERVICE = "elasticfilesystem"
 
 CLONE_NEWNET = 0x40000000
@@ -184,10 +185,7 @@ EFS_FQDN_RE = re.compile(
 AP_ID_RE = re.compile("^fsap-[0-9a-f]{17}$")
 
 CREDENTIALS_KEYS = ["AccessKeyId", "SecretAccessKey", "Token"]
-ECS_URI_ENV = "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
 ECS_TASK_METADATA_API = "http://169.254.170.2"
-WEB_IDENTITY_ROLE_ARN_ENV = "AWS_ROLE_ARN"
-WEB_IDENTITY_TOKEN_FILE_ENV = "AWS_WEB_IDENTITY_TOKEN_FILE"
 STS_ENDPOINT_URL_FORMAT = "https://sts.{}.amazonaws.com/"
 INSTANCE_METADATA_TOKEN_URL = "http://169.254.169.254/latest/api/token"
 INSTANCE_METADATA_SERVICE_URL = (
@@ -276,6 +274,11 @@ SKIP_NO_SO_BINDTODEVICE_RELEASES = [MACOS_BIG_SUR_RELEASE, MACOS_MONTEREY_RELEAS
 MAC_OS_PLATFORM_LIST = ["darwin"]
 # MacOS Versions : Monterey - 21.*, Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
 MAC_OS_SUPPORTED_VERSION_LIST = ["20", "21"]
+
+AWS_FIPS_ENDPOINT_CONFIG_ENV = "AWS_USE_FIPS_ENDPOINT"
+ECS_URI_ENV = "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
+WEB_IDENTITY_ROLE_ARN_ENV = "AWS_ROLE_ARN"
+WEB_IDENTITY_TOKEN_FILE_ENV = "AWS_WEB_IDENTITY_TOKEN_FILE"
 
 
 def errcheck(ret, func, args):
@@ -1197,9 +1200,7 @@ def write_stunnel_config_file(
     global_config["pid"] = os.path.join(
         state_file_dir, mount_filename + "+", "stunnel.pid"
     )
-    if get_boolean_config_item_value(
-        config, CONFIG_SECTION, "stunnel_fips_enabled", default_value=False
-    ):
+    if get_fips_config(config):
         global_config["fips"] = "yes"
 
     efs_config = dict(STUNNEL_EFS_CONFIG)
@@ -2948,10 +2949,30 @@ def create_default_cloudwatchlog_agent_if_not_exist(config, options):
         CLOUDWATCHLOG_AGENT = bootstrap_cloudwatch_logging(config, options)
 
 
+def get_fips_config(config):
+    """
+    Check whether FIPS is enabled either by setting the `AWS_USE_FIPS_ENDPOINT`
+    environmental variable, or through the efs-utils config file.
+
+    Enabling FIPS means that both the Botocore client and stunnel will be configured
+    to use FIPS.
+    """
+
+    return os.getenv(
+        AWS_FIPS_ENDPOINT_CONFIG_ENV, "False"
+    ).lower() == "true" or get_boolean_config_item_value(
+        config, CONFIG_SECTION, "fips_mode_enabled", default_value=False
+    )
+
+
 def get_botocore_client(config, service, options):
     if not BOTOCORE_PRESENT:
         logging.error("Failed to import botocore, please install botocore first.")
         return None
+
+    botocore_config = None
+    if get_fips_config(config):
+        botocore_config = botocore.config.Config(use_fips_endpoint=True)
 
     session = botocore.session.get_session()
     region = get_target_region(config)
@@ -2960,14 +2981,16 @@ def get_botocore_client(config, service, options):
         profile = options.get("awsprofile")
         session.set_config_variable("profile", profile)
         try:
-            return session.create_client(service, region_name=region)
+            return session.create_client(
+                service, region_name=region, config=botocore_config
+            )
         except ProfileNotFound as e:
             fatal_error(
                 "%s, please add the [profile %s] section in the aws config file following %s and %s."
                 % (e, profile, NAMED_PROFILE_HELP_URL, CONFIG_FILE_SETTINGS_HELP_URL)
             )
 
-    return session.create_client(service, region_name=region)
+    return session.create_client(service, region_name=region, config=botocore_config)
 
 
 def get_cloudwatchlog_config(config, fs_id=None):
