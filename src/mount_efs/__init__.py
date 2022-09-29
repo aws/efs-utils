@@ -2344,7 +2344,7 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
                 ip_address=ip_address, fallback_message=fallback_message
             )
 
-    if not "forceuseip" in options:
+    if "forceuseip" not in options:
         if dns_name_can_be_resolved(dns_name):
             return dns_name, None
 
@@ -2353,9 +2353,9 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
             dns_name,
         )
     else:
-       logging.info(
-           "Forcing the use of IP address in the mount. Attempting to lookup mount target ip address using botocore."
-       )
+        logging.info(
+            "Forcing the use of IP address in the mount. Attempting to lookup mount target ip address using botocore."
+        )
 
     try:
         fallback_mount_target_ip_address = get_fallback_mount_target_ip_address(
