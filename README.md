@@ -209,6 +209,12 @@ The access point must be in the "available" state before it can be used to mount
 $ sudo mount -t efs -o tls,accesspoint=access-point-id file-system-id efs-mount-point/
 ```
 
+To not use the DNS name in the mount command, and force the use of the resolved IP instead.  This option requires that `fall_back_to_mount_target_ip_address_enabled = true` is set in efs-utils.conf under the `[mount]` section.
+
+```bash
+$ sudo mount -t efs -o forceuseip file-system-id efs-mount-point/
+```
+
 To mount your file system automatically with any of the options above, you can add entries to `/efs/fstab` like:
 
 ```bash
