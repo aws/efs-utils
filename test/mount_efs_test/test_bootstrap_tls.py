@@ -17,6 +17,8 @@ DNS_NAME = "%s.efs.us-east-1.amazonaws.com" % FS_ID
 MOUNT_POINT = "/mnt"
 REGION = "us-east-1"
 
+NON_AL2_RELEASE_ID_VAL = "FAKE_NON_AL2_RELEASE_ID_VAL"
+
 DEFAULT_TLS_PORT = 20049
 
 EXPECTED_STUNNEL_CONFIG_FILE_BASE = "stunnel-config.fs-deadbeef.mnt."
@@ -93,6 +95,35 @@ def test_bootstrap_tls_state_file_dir_exists(mocker, tmpdir):
 
     assert "/usr/bin/stunnel" in args
     assert EXPECTED_STUNNEL_CONFIG_FILE in args
+
+
+def test_stunnel5_al2(mocker):
+    process_mock = MagicMock()
+    check_output_mock = mocker.patch(
+        "subprocess.check_output", return_value=process_mock
+    )
+    mocker.patch(
+        "mount_efs.get_system_release_version",
+        return_value=mount_efs.AMAZON_LINUX_2_RELEASE_ID,
+    )
+    mount_efs._stunnel_bin()
+    args, _ = check_output_mock.call_args
+    args = args[0]
+    assert "stunnel5" in args[1]
+
+
+def test_stunnel5_non_al2(mocker):
+    process_mock = MagicMock()
+    check_output_mock = mocker.patch(
+        "subprocess.check_output", return_value=process_mock
+    )
+    mocker.patch(
+        "mount_efs.get_system_release_version", return_value=NON_AL2_RELEASE_ID_VAL
+    )
+    mount_efs._stunnel_bin()
+    args, _ = check_output_mock.call_args
+    args = args[0]
+    assert "stunnel" in args[1]
 
 
 def test_bootstrap_tls_state_file_nonexistent_dir(mocker, tmpdir):

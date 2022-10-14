@@ -49,7 +49,7 @@ except ImportError:
     from urllib2 import HTTPError, HTTPHandler, Request, URLError, build_opener, urlopen
 
 
-VERSION = "1.33.4"
+VERSION = "1.34.1"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"

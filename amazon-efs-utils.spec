@@ -35,7 +35,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.33.4
+Version   : 1.34.1
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -43,13 +43,15 @@ Group     : Amazon/Tools
 License   : MIT
 URL       : https://aws.amazon.com/efs
 
-Packager  : Amazon.com, Inc. <http://aws.amazon.com>
-Vendor    : Amazon.com
 
 BuildArch : noarch
 
 Requires  : nfs-utils
+%if 0%{?amzn2}
+Requires  : stunnel5
+%else
 Requires  : stunnel >= 4.56
+%endif
 Requires  : %{python_requires}
 Requires  : openssl >= 1.0.2
 Requires  : util-linux
@@ -135,6 +137,9 @@ fi
 %clean
 
 %changelog
+* Thu Sep 29 2022 Preetham Puneeth Munipalli <tmunipre@amazon.com> - 1.34.1
+- Update Amazon Linux 2 platform to use namespaced stunnel5
+
 * Thu Sep 1 2022 Yuan Gao <ygaochn@amazon.com> - 1.33.4
 - Fix potential issue where watchdog sending signal to incorrect processes.
 - Add support for enabling FIPS mode for both stunnel and AWS API calls.

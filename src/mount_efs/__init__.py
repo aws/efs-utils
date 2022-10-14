@@ -85,9 +85,10 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.33.4"
+VERSION = "1.34.1"
 SERVICE = "elasticfilesystem"
 
+AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
 CLONE_NEWNET = 0x40000000
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
 CONFIG_SECTION = "mount"
@@ -1095,11 +1096,11 @@ def get_stunnel_options():
 
 
 def _stunnel_bin():
-    return find_command_path(
-        "stunnel",
-        "Please install it following the instructions at "
-        "https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html#upgrading-stunnel",
-    )
+    installation_message = "Please install it following the instructions at: https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html#upgrading-stunnel"
+    if get_system_release_version() == AMAZON_LINUX_2_RELEASE_ID:
+        return find_command_path("stunnel5", installation_message)
+    else:
+        return find_command_path("stunnel", installation_message)
 
 
 def find_command_path(command, install_method):
