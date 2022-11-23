@@ -15,6 +15,7 @@ import json
 import logging
 import logging.handlers
 import os
+import platform
 import pwd
 import re
 import shutil
@@ -49,7 +50,13 @@ except ImportError:
     from urllib2 import HTTPError, HTTPHandler, Request, URLError, build_opener, urlopen
 
 
-VERSION = "1.34.1"
+AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
+AMAZON_LINUX_2_PRETTY_NAME = "Amazon Linux 2"
+AMAZON_LINUX_2_RELEASE_VERSIONS = [
+    AMAZON_LINUX_2_RELEASE_ID,
+    AMAZON_LINUX_2_PRETTY_NAME,
+]
+VERSION = "1.34.2"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -168,6 +175,11 @@ UNMOUNT_DIFF_TIME = 30
 
 # Default unmount count for consistency
 DEFAULT_UNMOUNT_COUNT_FOR_CONSISTENCY = 5
+
+MAC_OS_PLATFORM_LIST = ["darwin"]
+SYSTEM_RELEASE_PATH = "/etc/system-release"
+OS_RELEASE_PATH = "/etc/os-release"
+STUNNEL_INSTALLATION_MESSAGE = "Please install it following the instructions at: https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html#upgrading-stunnel"
 
 
 def fatal_error(user_message, log_message=None):
@@ -556,11 +568,7 @@ def get_resp_obj(request_resp, url, unsuccessful_resp):
             )
 
         return resp_dict
-    except ValueError as e:
-        logging.info(
-            'ValueError parsing "%s" into json: %s. Returning response body.'
-            % (str(resp_body), e)
-        )
+    except ValueError:
         return resp_body if resp_body_type is str else resp_body.decode("utf-8")
 
 
@@ -847,18 +855,130 @@ def is_pid_running(pid):
         return False
 
 
-def start_tls_tunnel(child_procs, state_file, command):
-    # launch the tunnel in a process group so if it has any child processes, they can be killed easily
-    logging.info('Starting TLS tunnel: "%s"', " ".join(command))
-    tunnel = subprocess.Popen(
-        command,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        preexec_fn=os.setsid,
-        close_fds=True,
-    )
+def check_if_platform_is_mac():
+    return sys.platform in MAC_OS_PLATFORM_LIST
 
-    if not is_pid_running(tunnel.pid):
+
+def get_system_release_version():
+    # MacOS does not maintain paths /etc/os-release and /etc/sys-release
+    if check_if_platform_is_mac():
+        return platform.platform()
+
+    try:
+        with open(SYSTEM_RELEASE_PATH) as f:
+            return f.read().strip()
+    except IOError:
+        logging.debug("Unable to read %s", SYSTEM_RELEASE_PATH)
+
+    try:
+        with open(OS_RELEASE_PATH) as f:
+            for line in f:
+                if "PRETTY_NAME" in line:
+                    return line.split("=")[1].strip()
+    except IOError:
+        logging.debug("Unable to read %s", OS_RELEASE_PATH)
+
+    return DEFAULT_UNKNOWN_VALUE
+
+
+def find_command_path(command, install_method):
+    # If not running on macOS, use linux paths
+    if not check_if_platform_is_mac():
+        env_path = (
+            "/sbin:/usr/sbin:/usr/local/sbin:/root/bin:/usr/local/bin:/usr/bin:/bin"
+        )
+    # Homebrew on x86 macOS uses /usr/local/bin; Homebrew on Apple Silicon macOS uses /opt/homebrew/bin since v3.0.0
+    # For more information, see https://brew.sh/2021/02/05/homebrew-3.0.0/
+    else:
+        env_path = "/opt/homebrew/bin:/usr/local/bin"
+    os.putenv("PATH", env_path)
+
+    try:
+        path = subprocess.check_output(["which", command])
+        return path.strip().decode()
+    except subprocess.CalledProcessError as e:
+        fatal_error(
+            "Failed to locate %s in %s - %s" % (command, env_path, install_method), e
+        )
+
+
+# In ECS amazon linux 2, we start stunnel using `nsenter` which will run as a subprocess of bash, utilizes the `setns`
+# system call to join an existing namespace and then executes the specified program using `exec`. Any exception won't
+# be caught properly by subprocess.
+# As a precaution on ECS AL2 that stunnel bin is removed after installing new efs-utils, and watchdog cannot launch
+# stunnel for previous old mount, we do a replacement of stunnel path in the command to the stunnel5 path.
+#
+def update_stunnel_command_for_ecs_amazon_linux_2(
+    command, state, state_file_dir, state_file
+):
+    if (
+        "nsenter" in command
+        and "stunnel5" not in " ".join(command)
+        and get_system_release_version() in AMAZON_LINUX_2_RELEASE_VERSIONS
+    ):
+        for i in range(len(command)):
+            if "stunnel" in command[i] and "stunnel-config" not in command[i]:
+                command[i] = find_command_path("stunnel5", STUNNEL_INSTALLATION_MESSAGE)
+                break
+        logging.info(
+            "Rewriting %s with new stunnel cmd: %s for ECS Amazon Linux 2 platform.",
+            state_file,
+            " ".join(state["cmd"]),
+        )
+        rewrite_state_file(state, state_file_dir, state_file)
+    return command
+
+
+def start_tls_tunnel(child_procs, state, state_file_dir, state_file):
+    # launch the tunnel in a process group so if it has any child processes, they can be killed easily
+    command = state["cmd"]
+    logging.info('Starting TLS tunnel: "%s"', " ".join(command))
+
+    command = update_stunnel_command_for_ecs_amazon_linux_2(
+        command, state, state_file_dir, state_file
+    )
+    tunnel = None
+    try:
+        tunnel = subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid,
+            close_fds=True,
+        )
+    except FileNotFoundError as e:
+        logging.warning("Watchdog failed to start stunnel due to %s", e)
+
+        # https://github.com/kubernetes-sigs/aws-efs-csi-driver/issues/812 It is possible that the stunnel is not
+        # present anymore and replaced by stunnel5 on AL2, meanwhile watchdog is attempting to restart stunnel for
+        # mount using old efs-utils based on old state file generated during previous mount, which has stale command
+        # using stunnel bin. Update the state file if the stunnel does not exist anymore, and use stunnel5 on Al2.
+        #
+        if get_system_release_version() in AMAZON_LINUX_2_RELEASE_VERSIONS:
+            for i in range(len(command)):
+                if "stunnel" in command[i] and "stunnel-config" not in command[i]:
+                    command[i] = find_command_path(
+                        "stunnel5", STUNNEL_INSTALLATION_MESSAGE
+                    )
+                    break
+
+            tunnel = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid,
+                close_fds=True,
+            )
+
+            state["cmd"] = command
+            logging.info(
+                "Rewriting %s with new stunnel cmd: %s for Amazon Linux 2 platform.",
+                state_file,
+                " ".join(state["cmd"]),
+            )
+            rewrite_state_file(state, state_file_dir, state_file)
+
+    if tunnel is None or not is_pid_running(tunnel.pid):
         fatal_error(
             "Failed to initialize TLS tunnel for %s" % state_file,
             "Failed to start TLS tunnel.",
@@ -940,7 +1060,7 @@ def restart_tls_tunnel(child_procs, state, state_file_dir, state_file):
         )
         return
 
-    new_tunnel_pid = start_tls_tunnel(child_procs, state_file, state["cmd"])
+    new_tunnel_pid = start_tls_tunnel(child_procs, state, state_file_dir, state_file)
     state["pid"] = new_tunnel_pid
 
     logging.debug("Rewriting %s with new pid: %d", state_file, new_tunnel_pid)

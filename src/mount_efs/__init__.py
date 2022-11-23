@@ -85,10 +85,16 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.34.1"
+VERSION = "1.34.2"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
+AMAZON_LINUX_2_PRETTY_NAME = "Amazon Linux 2"
+AMAZON_LINUX_2_RELEASE_VERSIONS = [
+    AMAZON_LINUX_2_RELEASE_ID,
+    AMAZON_LINUX_2_PRETTY_NAME,
+]
+
 CLONE_NEWNET = 0x40000000
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
 CONFIG_SECTION = "mount"
@@ -1097,30 +1103,31 @@ def get_stunnel_options():
 
 def _stunnel_bin():
     installation_message = "Please install it following the instructions at: https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html#upgrading-stunnel"
-    if get_system_release_version() == AMAZON_LINUX_2_RELEASE_ID:
+    if get_system_release_version() in AMAZON_LINUX_2_RELEASE_VERSIONS:
         return find_command_path("stunnel5", installation_message)
     else:
         return find_command_path("stunnel", installation_message)
 
 
 def find_command_path(command, install_method):
+    # If not running on macOS, use linux paths
+    if not check_if_platform_is_mac():
+        env_path = (
+            "/sbin:/usr/sbin:/usr/local/sbin:/root/bin:/usr/local/bin:/usr/bin:/bin"
+        )
+    # Homebrew on x86 macOS uses /usr/local/bin; Homebrew on Apple Silicon macOS uses /opt/homebrew/bin since v3.0.0
+    # For more information, see https://brew.sh/2021/02/05/homebrew-3.0.0/
+    else:
+        env_path = "/opt/homebrew/bin:/usr/local/bin"
+    os.putenv("PATH", env_path)
+
     try:
-        # If not running on macOS, use linux paths
-        if not check_if_platform_is_mac():
-            env_path = (
-                "/sbin:/usr/sbin:/usr/local/sbin:/root/bin:/usr/local/bin:/usr/bin:/bin"
-            )
-        # Homebrew on x86 macOS uses /usr/local/bin; Homebrew on Apple Silicon macOS uses /opt/homebrew/bin since v3.0.0
-        # For more information, see https://brew.sh/2021/02/05/homebrew-3.0.0/
-        else:
-            env_path = "/opt/homebrew/bin:/usr/local/bin"
-        os.putenv("PATH", env_path)
         path = subprocess.check_output(["which", command])
+        return path.strip().decode()
     except subprocess.CalledProcessError as e:
         fatal_error(
             "Failed to locate %s in %s - %s" % (command, env_path, install_method), e
         )
-    return path.strip().decode()
 
 
 def get_system_release_version():

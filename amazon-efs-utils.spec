@@ -35,7 +35,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.34.1
+Version   : 1.34.2
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -137,6 +137,9 @@ fi
 %clean
 
 %changelog
+* Tue Nov 22 2022 Preetham Puneeth Munipalli <tmunipre@amazon.com> - 1.34.2
+- Fix potential issue on AL2 when watchdog trying to restart stunnel for the TLS mounts that existing before upgrade
+
 * Thu Sep 29 2022 Preetham Puneeth Munipalli <tmunipre@amazon.com> - 1.34.1
 - Update Amazon Linux 2 platform to use namespaced stunnel5
 

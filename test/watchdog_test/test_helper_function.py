@@ -5,8 +5,10 @@
 # the License.
 
 import logging
+import sys
+import unittest
 from collections import namedtuple
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, mock_open
 
 from botocore.exceptions import ProfileNotFound
 
@@ -30,6 +32,8 @@ DEFAULT_REGION = "us-east-1"
 ACCESS_KEY_ID_VAL = "FAKE_AWS_ACCESS_KEY_ID"
 SECRET_ACCESS_KEY_VAL = "FAKE_AWS_SECRET_ACCESS_KEY"
 SESSION_TOKEN_VAL = "FAKE_SESSION_TOKEN"
+MACOS = "macOS"
+AL2 = "Amazon Linux release 2"
 
 
 def get_config(
@@ -397,3 +401,43 @@ def test_get_mountpoint_from_state_file_name():
         "-482e-b8b9-0e5e6887e411/mount"
         == watchdog.get_mountpoint_from_nfs_mounts(state_file_name, nfs_mounts)
     )
+
+
+def test_get_system_release_version_macos(mocker):
+    mocker.patch("watchdog.check_if_platform_is_mac", return_value=True)
+    platform_mock = mocker.patch("platform.platform", return_value=MACOS)
+    assert MACOS == watchdog.get_system_release_version()
+    utils.assert_called_once(platform_mock)
+
+
+def test_get_system_release_version_linux_read_from_sys_release_path(mocker):
+    mocker.patch("watchdog.check_if_platform_is_mac", return_value=False)
+    open_mock = mocker.patch("builtins.open", mock_open(read_data=AL2))
+    platform_mock = mocker.patch("platform.platform")
+    assert AL2 == watchdog.get_system_release_version()
+    utils.assert_not_called(platform_mock)
+    utils.assert_called_once(open_mock)
+
+
+@unittest.skipIf(sys.version_info[1] < 7, "Not supported in python3.6 and below.")
+def test_get_system_release_version_linux_read_from_os_release_path(mocker):
+    mocker.patch("watchdog.check_if_platform_is_mac", return_value=False)
+    mock = mock_open()
+    mock.side_effect = [
+        FileNotFoundError,
+        mock_open(read_data="PRETTY_NAME=Amazon Linux release 2").return_value,
+    ]
+    open_mock = mocker.patch("builtins.open", mock)
+    platform_mock = mocker.patch("platform.platform")
+    assert AL2 == watchdog.get_system_release_version()
+    utils.assert_not_called(platform_mock)
+    utils.assert_called_n_times(open_mock, 2)
+
+
+def test_get_system_release_version_linux_unknown(mocker):
+    mocker.patch("watchdog.check_if_platform_is_mac", return_value=False)
+    open_mock = mocker.patch("builtins.open", side_effect=FileNotFoundError)
+    platform_mock = mocker.patch("platform.platform")
+    assert watchdog.DEFAULT_UNKNOWN_VALUE == watchdog.get_system_release_version()
+    utils.assert_not_called(platform_mock)
+    utils.assert_called_n_times(open_mock, 2)
