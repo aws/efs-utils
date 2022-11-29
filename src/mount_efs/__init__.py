@@ -1350,7 +1350,7 @@ def check_network_target(fs_id):
     with open(os.devnull, "w") as devnull:
         if not check_if_platform_is_mac():
             rc = subprocess.call(
-                ["systemctl", "status", "network.target"],
+                ["systemctl", "is-active", "network.target"],
                 stdout=devnull,
                 stderr=devnull,
                 close_fds=True,
