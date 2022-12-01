@@ -658,7 +658,10 @@ def get_current_local_nfs_mounts(mount_file="/proc/mounts"):
     if not check_if_running_on_macos():
         with open(mount_file) as f:
             for mount in f:
-                mounts.append(Mount._make(mount.strip().split()))
+                try:
+                    mounts.append(Mount._make(mount.strip().split()))
+                except Exception as e:
+                    logging.warning('Watchdog ignoring malformed mount "%s": %s', mount, e)
     else:
         # stat command on MacOS does not have '--file-system' option to verify the filesystem type of a mount point,
         # traverse all the mounts, and find if current mount point is already mounted
