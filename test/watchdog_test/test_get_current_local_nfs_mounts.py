@@ -43,6 +43,17 @@ def test_no_local_mounts(tmpdir):
 
     assert {} == mounts
 
+def test_invalid_mounts(tmpdir):
+    mount_file = _create_mount_file(
+        tmpdir,
+        [
+            " / overlay rw,relatime,data=ordered 0 0"
+        ],
+    )
+
+    mounts = watchdog.get_current_local_nfs_mounts(mount_file)
+
+    assert {} == mounts
 
 def test_no_local_nfs_mounts(tmpdir):
     mount_file = _create_mount_file(
