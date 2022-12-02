@@ -85,7 +85,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.34.2"
+VERSION = "1.34.3"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -939,29 +939,25 @@ def get_tls_port_range(config):
     return lower_bound, upper_bound
 
 
-def choose_tls_port_and_bind_sock(state_file_dir, fs_id, mountpoint, config, options):
+def choose_tls_port_and_get_bind_sock(config, options):
     if "tlsport" in options:
         ports_to_try = [int(options["tlsport"])]
     else:
         lower_bound, upper_bound = get_tls_port_range(config)
 
-        tls_ports = list(range(lower_bound, upper_bound))
+        ports_to_try = list(range(lower_bound, upper_bound))
 
-        # Choose a random midpoint, and then try ports in-order from there
-        mid = random.randrange(len(tls_ports))
-
-        ports_to_try = tls_ports[mid:] + tls_ports[:mid]
-        assert len(tls_ports) == len(ports_to_try)
+        # shuffle the ports_to_try to reduce possibility of multiple mounts starting from same port range
+        random.shuffle(ports_to_try)
 
     if "netns" not in options:
-        tls_port_sock = find_tls_port_in_range(state_file_dir, fs_id, mountpoint, ports_to_try)
+        tls_port_sock = find_tls_port_in_range_and_get_bind_sock(ports_to_try)
     else:
         with NetNS(nspath=options["netns"]):
-            tls_port_sock = find_tls_port_in_range(state_file_dir, fs_id, mountpoint, ports_to_try)
+            tls_port_sock = find_tls_port_in_range_and_get_bind_sock(ports_to_try)
 
     if tls_port_sock:
-        tls_port = tls_port_sock.getsockname()[1]
-        return tls_port_sock, tls_port
+        return tls_port_sock
 
     if "tlsport" in options:
         fatal_error(
@@ -975,14 +971,9 @@ def choose_tls_port_and_bind_sock(state_file_dir, fs_id, mountpoint, config, opt
         )
 
 
-def find_tls_port_in_range(state_file_dir, fs_id, mountpoint, ports_to_try):
+def find_tls_port_in_range_and_get_bind_sock(ports_to_try):
     sock = socket.socket()
     for tls_port in ports_to_try:
-        mount_filename = get_mount_specific_filename(fs_id, mountpoint, tls_port)
-        config_file = get_stunnel_config_filename(state_file_dir, mount_filename)
-        if os.access(config_file, os.R_OK):
-            logging.info("confifguration for port %s already exists, trying another port", tls_port)
-            continue
         try:
             logging.info("binding %s", tls_port)
             sock.bind(("localhost", tls_port))
@@ -1267,7 +1258,9 @@ def write_stunnel_config_file(
     )
     logging.debug("Writing stunnel configuration:\n%s", stunnel_config)
 
-    stunnel_config_file = get_stunnel_config_filename(state_file_dir, mount_filename)
+    stunnel_config_file = os.path.join(
+        state_file_dir, "stunnel-config.%s" % mount_filename
+    )
 
     with open(stunnel_config_file, "w") as f:
         f.write(stunnel_config)
@@ -1467,8 +1460,11 @@ def create_required_directory(config, directory):
             raise
 
 
-def get_stunnel_config_filename(state_file_dir, mount_filename):
-    return os.path.join(state_file_dir, "stunnel-config.%s" % mount_filename)
+# Example of a localhost bind sock: sock.bind(('localhost',12345))
+# sock.getsockname() -> ('127.0.0.1', 12345)
+# This function returns the port of the bind socket, in the example is 12345
+def get_tls_port_from_sock(tls_port_sock):
+    return tls_port_sock.getsockname()[1]
 
 
 @contextmanager
@@ -1482,7 +1478,9 @@ def bootstrap_tls(
     state_file_dir=STATE_FILE_DIR,
     fallback_ip_address=None,
 ):
-    sock, tls_port = choose_tls_port_and_bind_sock(state_file_dir, fs_id, mountpoint, config, options)
+    tls_port_sock = choose_tls_port_and_get_bind_sock(config, options)
+    tls_port = get_tls_port_from_sock(tls_port_sock)
+
     try:
         # override the tlsport option so that we can later override the port the NFS client uses to connect to stunnel.
         # if the user has specified tlsport=X at the command line this will just re-set tlsport to X.
@@ -1559,14 +1557,14 @@ def bootstrap_tls(
             cert_details=cert_details,
             fallback_ip_address=fallback_ip_address,
         )
-    except Exception as e:
-        logging.error("Error while creating the configuration file: %s" % e)
+        tunnel_args = [_stunnel_bin(), stunnel_config_file]
+        if "netns" in options:
+            tunnel_args = ["nsenter", "--net=" + options["netns"]] + tunnel_args
     finally:
-        # close the socket now, so the stunnel process can bind to the port
-        sock.close()
-    tunnel_args = [_stunnel_bin(), stunnel_config_file]
-    if "netns" in options:
-        tunnel_args = ["nsenter", "--net=" + options["netns"]] + tunnel_args
+        # Always close the socket we created when choosing TLS port only until now to
+        # 1. avoid concurrent TLS mount port collision 2. enable stunnel process to bind the port
+        logging.debug("Closing socket used to choose TLS port %s.", tls_port)
+        tls_port_sock.close()
 
     # launch the tunnel in a process group so if it has any child processes, they can be killed easily by the mount watchdog
     logging.info('Starting TLS tunnel: "%s"', " ".join(tunnel_args))

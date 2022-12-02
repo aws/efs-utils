@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "1.34.2"
+VERSION = "1.34.3"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -825,13 +825,16 @@ def is_mount_stunnel_proc_running(state_pid, state_file, state_file_dir):
         return False
 
     pid_in_stunnel_pid_file = get_pid_in_state_dir(state_file, state_file_dir)
+    # efs-utils versions older than 1.32.2 does not create a pid file in state dir
+    # To avoid the healthy stunnel established by those version to be treated as not running due to the missing pid file, which can result in stunnel being constantly restarted,
+    # assuming the stunnel is still running even if the stunnel pid file does not exist.
     if not pid_in_stunnel_pid_file:
         logging.debug(
-            "Pid file of stunnel is already removed for %s, assuming the stunnel with pid %s is no longer running.",
+            "Pid file of stunnel does not exist for %s. It is possible that the stunnel is no longer running or the mount was mounted using an older version efs-utils (<1.32.2). Assuming the stunnel with pid %s is still running.",
             state_file,
             state_pid,
         )
-        return False
+
     elif int(state_pid) != int(pid_in_stunnel_pid_file):
         logging.warning(
             "Stunnel pid mismatch in state file (pid = %s) and stunnel pid file (pid = %s). Assuming the "

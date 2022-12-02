@@ -170,11 +170,13 @@ def test_bootstrap_tls_non_default_port(mocker, tmpdir):
     popen_mock, write_config_mock = setup_mocks(mocker)
     mocker.patch("os.rename")
     state_file_dir = str(tmpdir)
-    fake_sock = MagicMock()
-    fake_sock.getsockname.return_value = ("localhost", 1000)
-    mocker.patch("socket.socket", return_value=fake_sock)
 
     tls_port = 1000
+    tls_port_sock_mock = MagicMock()
+    tls_port_sock_mock.getsockname.return_value = ("local_host", tls_port)
+    tls_port_sock_mock.close.side_effect = None
+    mocker.patch("socket.socket", return_value=tls_port_sock_mock)
+
     mocker.patch("mount_efs._stunnel_bin", return_value="/usr/bin/stunnel")
     with mount_efs.bootstrap_tls(
         MOCK_CONFIG,
@@ -193,7 +195,11 @@ def test_bootstrap_tls_non_default_port(mocker, tmpdir):
 
     assert "/usr/bin/stunnel" in popen_args
     assert EXPECTED_STUNNEL_CONFIG_FILE in popen_args
-    assert 1000 == write_config_args[4]  # positional argument for tls_port
+    assert tls_port == write_config_args[4]  # positional argument for tls_port
+    # Ensure tls port socket is closed in bootstrap_tls
+    # The number is two here, the first one is the actual socket when choosing tls port, the second one is a socket to
+    # verify tls port can be connected after establishing TLS stunnel. They share the same mock.
+    assert 2 == tls_port_sock_mock.close.call_count
 
 
 def test_bootstrap_tls_non_default_verify_level(mocker, tmpdir):
