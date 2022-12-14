@@ -44,6 +44,10 @@ def setup_mocks(mocker):
     mocker.patch("mount_efs.create_certificate")
     mocker.patch("os.rename")
     mocker.patch("os.kill")
+    mocker.patch(
+        "mount_efs.update_tls_tunnel_temp_state_file_with_tunnel_pid",
+        return_value="~mocktempfile",
+    )
 
     process_mock = MagicMock()
     process_mock.communicate.return_value = (
@@ -72,6 +76,10 @@ def setup_mocks_without_popen(mocker):
     )
     mocker.patch("mount_efs.write_tls_tunnel_state_file", return_value="~mocktempfile")
     mocker.patch("os.kill")
+    mocker.patch(
+        "mount_efs.update_tls_tunnel_temp_state_file_with_tunnel_pid",
+        return_value="~mocktempfile",
+    )
 
     write_config_mock = mocker.patch(
         "mount_efs.write_stunnel_config_file", return_value=EXPECTED_STUNNEL_CONFIG_FILE
@@ -115,6 +123,7 @@ def test_bootstrap_tls_state_file_nonexistent_dir(mocker, tmpdir):
     assert not os.path.exists(state_file_dir)
 
     mocker.patch("mount_efs._stunnel_bin", return_value="/usr/bin/stunnel")
+    mocker.patch("mount_efs.find_existing_mount_using_tls_port", return_value=None)
     with mount_efs.bootstrap_tls(
         MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {}, state_file_dir
     ):

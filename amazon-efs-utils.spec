@@ -35,7 +35,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.34.3
+Version   : 1.34.4
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -137,6 +137,9 @@ fi
 %clean
 
 %changelog
+* Tue Dec 13 2022 Ryan Stankiewicz <rjstank@amazon.com> - 1.34.4
+- Fix potential tlsport selection collision by using state file as tlsport lock file.
+
 * Thu Dec 1 2022 Preetham Puneeth Munipalli <tmunipre@amazon.com> - 1.34.3
 - Fix potential tlsport selection race condition by closing socket right before establishing stunnel
 - Fix stunnel constantly restart issue when upgrading from 1.32.1 and before version to latest version
