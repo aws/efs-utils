@@ -529,6 +529,22 @@ role_arn = <role-arn-in-account-A>
 credential_source = Ec2InstanceMetadata
 ```
 
+## Use AssumeRoleWithWebIdentity
+
+You can use [web identity to assume a role](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html) which has the permission to attach to the EFS filesystem. You need to have a valid JWT token and a role arn to assume. There are two ways you can leverage them:
+
+1) By setting environment variable the path to the file containing the JWT token in `AWS_WEB_IDENTITY_TOKEN_FILE` and by setting `ROLE_ARN` environment variable. The command below shows an example of to leverage it.
+
+```bash
+$ sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
+```
+
+2) By passing the JWT token file path and the role arn as parameters to the mount command. The command below shows an example of to leverage it.
+
+```bash
+$ sudo mount -t efs -o tls,iam,rolearn="ROLE_ARN",jwtpath="PATH/JWT_TOKEN_FILE" file-system-id efs-mount-point/
+```
+
 ## Enabling FIPS Mode
 Efs-Utils is able to enter FIPS mode when mounting your file system. To enable FIPS you need to modify the EFS-Utils config file:
 ```bash
