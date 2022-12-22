@@ -236,6 +236,8 @@ EFS_ONLY_OPTIONS = [
     "tls",
     "tlsport",
     "verify",
+    "rolearn",
+    "jwtpath",
 ]
 
 UNSUPPORTED_OPTIONS = ["capath"]
@@ -546,7 +548,7 @@ def get_aws_ec2_metadata_token(timeout=DEFAULT_TIMEOUT):
 
 
 def get_aws_security_credentials(
-    config, use_iam, region, awsprofile=None, aws_creds_uri=None
+    config, use_iam, region, awsprofile=None, aws_creds_uri=None, jwt_path=None, role_arn=None
 ):
     """
     Lookup AWS security credentials (access key ID and secret access key). Adapted credentials provider chain from:
@@ -570,6 +572,19 @@ def get_aws_security_credentials(
     if ECS_URI_ENV in os.environ:
         credentials, credentials_source = get_aws_security_credentials_from_ecs(
             config, os.environ[ECS_URI_ENV], False
+        )
+        if credentials and credentials_source:
+            return credentials, credentials_source
+    
+    # attempt to lookup AWS security credentials through AssumeRoleWithWebIdentity
+    # this is used for Pod impersonation feature.
+    if jwt_path and role_arn:
+        credentials, credentials_source = get_aws_security_credentials_from_webidentity(
+            config,
+            role_arn,
+            jwt_path,
+            region,
+            False,
         )
         if credentials and credentials_source:
             return credentials, credentials_source
@@ -1497,8 +1512,12 @@ def bootstrap_tls(
 
         if use_iam:
             aws_creds_uri = options.get("awscredsuri")
+            role_arn = options.get("rolearn")
+            jwt_path = options.get("jwtpath")
             if aws_creds_uri:
                 kwargs = {"aws_creds_uri": aws_creds_uri}
+            elif role_arn and jwt_path:
+                kwargs = {"role_arn": role_arn, "jwt_path" : jwt_path}
             else:
                 kwargs = {"awsprofile": get_aws_profile(options, use_iam)}
 
