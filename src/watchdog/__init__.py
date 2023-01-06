@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "1.34.4"
+VERSION = "1.34.5"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -661,7 +661,15 @@ def get_current_local_nfs_mounts(mount_file="/proc/mounts"):
                 try:
                     mounts.append(Mount._make(mount.strip().split()))
                 except Exception as e:
-                    logging.warning('Watchdog ignoring malformed mount "%s": %s', mount, e)
+                    # Make sure nfs mounts being skipped are made apparent
+                    if " nfs4 " in mount:
+                        logging.warning(
+                            'Watchdog ignoring malformed nfs4 mount "%s": %s', mount, e
+                        )
+                    else:
+                        logging.debug(
+                            'Watchdog ignoring malformed mount "%s": %s', mount, e
+                        )
     else:
         # stat command on MacOS does not have '--file-system' option to verify the filesystem type of a mount point,
         # traverse all the mounts, and find if current mount point is already mounted

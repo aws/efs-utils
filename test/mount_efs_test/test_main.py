@@ -5,7 +5,7 @@
 # the License.
 
 from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -72,6 +72,7 @@ def _test_main(
         mocker.patch("os.geteuid", return_value=100)
 
     bootstrap_logging_mock = mocker.patch("mount_efs.bootstrap_logging")
+    network_status_check_mock = mocker.patch("mount_efs.check_network_status")
     get_dns_mock = mocker.patch(
         "mount_efs.get_dns_name_and_fallback_mount_target_ip_address",
         return_value=("fs-deadbeef.efs.us-west-1.amazonaws.com", None),
@@ -90,6 +91,7 @@ def _test_main(
     mount_efs.main()
 
     utils.assert_called_once(bootstrap_logging_mock)
+    utils.assert_called_once(network_status_check_mock)
     utils.assert_called_once(get_dns_mock)
     utils.assert_called_once(parse_arguments_mock)
     utils.assert_called_once(mount_mock)
@@ -110,13 +112,31 @@ def _test_main_assert_error(mocker, capsys, expected_err, **kwargs):
     assert expected_err in err
 
 
-@patch("mount_efs.check_network_target")
-def test_main_tls(check_network, mocker):
+def _test_main_macos(mocker, is_supported_macos_version, **kwargs):
+    mocker.patch("mount_efs.check_if_platform_is_mac", return_value=True)
+    mocker.patch(
+        "mount_efs.check_if_mac_version_is_supported",
+        return_value=is_supported_macos_version,
+    )
+    _test_main(mocker, **kwargs)
+
+
+def _test_main_macos_assert_error(
+    mocker, capsys, expected_err, is_supported_macos_version, **kwargs
+):
+    mocker.patch("mount_efs.check_if_platform_is_mac", return_value=True)
+    mocker.patch(
+        "mount_efs.check_if_mac_version_is_supported",
+        return_value=is_supported_macos_version,
+    )
+    _test_main_assert_error(mocker, capsys, expected_err, **kwargs)
+
+
+def test_main_tls(mocker):
     _test_main(mocker, tls=True, tlsport=TLS_PORT)
 
 
-@patch("mount_efs.check_network_target")
-def test_main_no_tls(check_network, mocker):
+def test_main_no_tls(mocker):
     _test_main(mocker, tls=False)
 
 
@@ -278,24 +298,21 @@ def _mock_popen(mocker, returncode=0, stdout="stdout", stderr="stderr"):
 
 
 def test_main_unsupported_macos(mocker, capsys):
-    mocker.patch("mount_efs.check_if_platform_is_mac", return_value=True)
     # Test for Catalina Client
-    mocker.patch("mount_efs.check_if_mac_version_is_supported", return_value=False)
-
     expected_err = "We do not support EFS on MacOS"
-    _test_main_assert_error(mocker, capsys, expected_err, root=True)
+    _test_main_macos_assert_error(
+        mocker, capsys, expected_err, root=True, is_supported_macos_version=False
+    )
 
 
 def test_main_supported_macos(mocker):
-    mocker.patch("mount_efs.check_if_platform_is_mac", return_value=True)
-    mocker.patch("mount_efs.check_if_mac_version_is_supported", return_value=True)
-    _test_main(mocker, tls=True, tlsport=TLS_PORT)
+    _test_main_macos(
+        mocker, is_supported_macos_version=True, tls=True, tlsport=TLS_PORT
+    )
 
 
-def test_main_tls_notls_option(mocker):
-    mocker.patch("mount_efs.check_if_platform_is_mac", return_value=True)
-    mocker.patch("mount_efs.check_if_mac_version_is_supported", return_value=True)
-    _test_main(mocker, notls=True)
+def test_main_tls_notls_option_macos(mocker):
+    _test_main_macos(mocker, is_supported_macos_version=True, notls=True)
 
 
 def test_main_tls_ocsp_and_noocsp_option(mocker, capsys):

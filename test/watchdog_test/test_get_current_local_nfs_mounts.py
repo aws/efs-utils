@@ -6,6 +6,8 @@
 # the License.
 #
 
+import logging
+
 import watchdog
 
 MOUNT_FMT_LINE = "{address}:/ {mountpoint} {fs_type} {options} 0 0"
@@ -43,17 +45,6 @@ def test_no_local_mounts(tmpdir):
 
     assert {} == mounts
 
-def test_invalid_mounts(tmpdir):
-    mount_file = _create_mount_file(
-        tmpdir,
-        [
-            " / overlay rw,relatime,data=ordered 0 0"
-        ],
-    )
-
-    mounts = watchdog.get_current_local_nfs_mounts(mount_file)
-
-    assert {} == mounts
 
 def test_no_local_nfs_mounts(tmpdir):
     mount_file = _create_mount_file(
@@ -71,6 +62,57 @@ def test_no_local_nfs_mounts(tmpdir):
     mounts = watchdog.get_current_local_nfs_mounts(mount_file)
 
     assert {} == mounts
+
+
+def test_invalid_mount_with_nfs(tmpdir, caplog):
+    mount_file = _create_mount_file(
+        tmpdir,
+        [
+            MOUNT_FMT_LINE.format(
+                address="127.0.0.1",
+                mountpoint="/ mnt",
+                fs_type="nfs4",
+                options=DEFAULT_OPTS,
+            )
+        ],
+    )
+    with caplog.at_level(logging.WARNING):
+        mounts = watchdog.get_current_local_nfs_mounts(mount_file)
+    assert "Watchdog ignoring malformed nfs4 mount" in caplog.text
+
+
+def test_invalid_mount_without_nfs(tmpdir, caplog):
+    mount_file = _create_mount_file(
+        tmpdir,
+        [
+            MOUNT_FMT_LINE.format(
+                address="127.0.0.1",
+                mountpoint="/ mnt",
+                fs_type="overlay",
+                options=DEFAULT_OPTS,
+            )
+        ],
+    )
+    with caplog.at_level(logging.DEBUG):
+        mounts = watchdog.get_current_local_nfs_mounts(mount_file)
+    assert "Watchdog ignoring malformed mount" in caplog.text
+
+
+def test_invalid_mount_arguments_without_nfs(tmpdir, caplog):
+    mount_file = _create_mount_file(
+        tmpdir,
+        [
+            MOUNT_FMT_LINE.format(
+                address="127.0.0.1",
+                mountpoint="/ mnt",
+                fs_type="overlay",
+                options="rw,port= 12345",
+            )
+        ],
+    )
+    with caplog.at_level(logging.DEBUG):
+        mounts = watchdog.get_current_local_nfs_mounts(mount_file)
+    assert "Watchdog ignoring malformed mount" in caplog.text
 
 
 def test_local_nfs_mount(tmpdir):

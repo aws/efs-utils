@@ -35,7 +35,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.34.4
+Version   : 1.34.5
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -137,6 +137,12 @@ fi
 %clean
 
 %changelog
+* Wed Jan 1 2023 Ryan Stankiewicz <rjstank@amazon.com> - 1.34.5
+- Watchdog detect empty private key and regenerate
+- Update man page
+- Avoid redundant get_target_region call
+- Handle invalid mount point name
+
 * Tue Dec 13 2022 Ryan Stankiewicz <rjstank@amazon.com> - 1.34.4
 - Fix potential tlsport selection collision by using state file as tlsport lock file.
 

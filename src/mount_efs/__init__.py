@@ -85,7 +85,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.34.4"
+VERSION = "1.34.5"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -1390,22 +1390,18 @@ def get_init_system(comm_file="/proc/1/comm"):
 
 def check_network_target(fs_id):
     with open(os.devnull, "w") as devnull:
-        if not check_if_platform_is_mac():
-            rc = subprocess.call(
-                ["systemctl", "is-active", "network.target"],
-                stdout=devnull,
-                stderr=devnull,
-                close_fds=True,
-            )
-        else:
-            rc = subprocess.call(
-                ["sudo", "ifconfig", "en0"],
-                stdout=devnull,
-                stderr=devnull,
-                close_fds=True,
-            )
+        rc = subprocess.call(
+            ["systemctl", "is-active", "network.target"],
+            stdout=devnull,
+            stderr=devnull,
+            close_fds=True,
+        )
 
     if rc != 0:
+        # For fstab mount, the exit code 0 below is to avoid non-zero exit status causing instance to fail the
+        # local-fs.target boot up and then fail the network setup failure can result in the instance being unresponsive.
+        # https://docs.amazonaws.cn/en_us/efs/latest/ug/troubleshooting-efs-mounting.html#automount-fails
+        #
         fatal_error(
             'Failed to mount %s because the network was not yet available, add "_netdev" to your mount options'
             % fs_id,
@@ -1413,6 +1409,15 @@ def check_network_target(fs_id):
         )
 
 
+# This network status check is necessary for the fstab automount use case and should not be removed.
+# efs-utils relies on the network to retrieve the instance metadata and get information e.g. region, to further parse
+# the DNS name of file system to mount target IP address, we need a way to inform users to add `_netdev` option to fstab
+# entry if they haven't do so.
+#
+# However, network.target status itself cannot accurately reflect the status of network reachability.
+# We will replace this check with other accurate way such that even network.target is turned off while network is
+# reachable, the mount can still proceed.
+#
 def check_network_status(fs_id, init_system):
     if init_system != "systemd":
         logging.debug("Not testing network on non-systemd init systems")
@@ -1562,7 +1567,6 @@ def bootstrap_tls(
         )
         # common name for certificate signing request is max 64 characters
         cert_details["commonName"] = socket.gethostname()[0:64]
-        region = get_target_region(config)
         cert_details["region"] = region
         cert_details["certificateCreationTime"] = create_certificate(
             config,
