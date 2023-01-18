@@ -1,0 +1,99 @@
+#!/bin/sh
+#
+# Copyright 2017-2018 Amazon.com, Inc. and its affiliates. All Rights Reserved.
+#
+# Licensed under the MIT License. See the LICENSE accompanying this file
+# for the specific language governing permissions and limitations under
+# the License.
+#
+### BEGIN INIT INFO
+# Provides: amazon-efs-mount-watchdog
+# Required-Start: $network
+# Required-Stop: $network
+# X-Start-Before: $remote_fs
+# X-Stop-After: $remote_fs
+# Default-Stop:  016
+# Short-Description: Amazon EFS Mount Watchdog
+# Description: Amazon EFS Mount Watchdog
+### END INIT INFO
+
+name=$(basename "$0")
+pid_file="/var/run/$name.pid"
+cmd="/usr/bin/env amazon-efs-mount-watchdog"
+
+get_pid() {
+    cat "$pid_file" 2>/dev/null
+}
+
+is_running() {
+    [ -f "$pid_file" ] && ps -p "$(get_pid)" >/dev/null 2>&1
+}
+
+root_required() {
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "ERROR: root privileges are required"
+        exit 2
+    fi
+}
+
+case "$1" in
+    start)
+        if is_running; then
+            echo "Already started"
+        else
+            root_required
+
+            echo "Starting $name..."
+            $cmd &
+            echo $! > "$pid_file"
+            if ! is_running; then
+                echo "ERROR: Failed to start"
+                exit 1
+            fi
+            echo "Running"
+        fi
+        ;;
+    stop)
+        if is_running; then
+            root_required
+
+            echo "Stopping $name..."
+            kill "$(get_pid)"
+            for i in $(seq 10); do
+                if ! is_running; then
+                    break
+                fi
+                sleep 1
+            done
+
+            if is_running; then
+                echo "ERROR: Failed to stop"
+                exit 1
+            else
+                echo "Stopped"
+                rm -f "$pid_file"
+            fi
+        else
+            echo "Not running"
+        fi
+        ;;
+    restart)
+        $0 stop || exit $?
+        sleep 1
+        $0 start
+        ;;
+    status)
+        if is_running; then
+            echo "Running"
+        else
+            echo "Stopped"
+            exit 3
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
+
+exit 0

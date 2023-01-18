@@ -81,7 +81,9 @@ mkdir -p %{buildroot}%{_unitdir}
 install -p -m 644 %{_builddir}/%{name}/dist/amazon-efs-mount-watchdog.service %{buildroot}%{_unitdir}
 %else
 mkdir -p %{buildroot}%{_sysconfdir}/init
+mkdir -p %{buildroot}%{_sysconfdir}/init.d
 install -p -m 644 %{_builddir}/%{name}/dist/amazon-efs-mount-watchdog.conf %{buildroot}%{_sysconfdir}/init
+install -p -m 755 %{_builddir}/%{name}/dist/amazon-efs-mount-watchdog.sysvinit %{buildroot}%{_sysconfdir}/init.d/amazon-efs-mount-watchdog
 %endif
 
 mkdir -p %{buildroot}%{efs_bindir}
@@ -101,6 +103,7 @@ install -p -m 644 %{_builddir}/%{name}/man/mount.efs.8 %{buildroot}%{_mandir}/ma
 %{_unitdir}/amazon-efs-mount-watchdog.service
 %else
 %config(noreplace) %{_sysconfdir}/init/amazon-efs-mount-watchdog.conf
+%config(noreplace) %{_sysconfdir}/init.d/amazon-efs-mount-watchdog
 %endif
 %{_sysconfdir}/amazon/efs/efs-utils.crt
 %{efs_bindir}/mount.efs
@@ -124,12 +127,20 @@ install -p -m 644 %{_builddir}/%{name}/man/mount.efs.8 %{buildroot}%{_mandir}/ma
 
 %preun
 if [ $1 -eq 0 ]; then
-   /sbin/stop amazon-efs-mount-watchdog &> /dev/null || true
+    if [ -f /sbin/init.sysvinit ]; then
+        service amazon-efs-mount-watchdog stop &> /dev/null || true
+    else
+        /sbin/stop amazon-efs-mount-watchdog &> /dev/null || true
+    fi
 fi
 
 %postun
 if [ $1 -eq 1 ]; then
-    /sbin/restart amazon-efs-mount-watchdog &> /dev/null || true
+    if [ -f /sbin/init.sysvinit ]; then
+        service amazon-efs-mount-watchdog restart &> /dev/null || true
+    else
+        /sbin/restart amazon-efs-mount-watchdog &> /dev/null || true
+    fi
 fi
 
 %endif
