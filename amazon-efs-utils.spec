@@ -35,7 +35,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.34.2
+Version   : 1.34.5
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -137,6 +137,20 @@ fi
 %clean
 
 %changelog
+* Wed Jan 1 2023 Ryan Stankiewicz <rjstank@amazon.com> - 1.34.5
+- Watchdog detect empty private key and regenerate
+- Update man page
+- Avoid redundant get_target_region call
+- Handle invalid mount point name
+
+* Tue Dec 13 2022 Ryan Stankiewicz <rjstank@amazon.com> - 1.34.4
+- Fix potential tlsport selection collision by using state file as tlsport lock file.
+
+* Thu Dec 1 2022 Preetham Puneeth Munipalli <tmunipre@amazon.com> - 1.34.3
+- Fix potential tlsport selection race condition by closing socket right before establishing stunnel
+- Fix stunnel constantly restart issue when upgrading from 1.32.1 and before version to latest version
+- Speed up the way to check network availability by using systemctl is-active
+
 * Tue Nov 22 2022 Preetham Puneeth Munipalli <tmunipre@amazon.com> - 1.34.2
 - Fix potential issue on AL2 when watchdog trying to restart stunnel for the TLS mounts that existing before upgrade
 

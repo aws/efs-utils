@@ -85,7 +85,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.34.2"
+VERSION = "1.34.5"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -954,29 +954,29 @@ def get_tls_port_range(config):
     return lower_bound, upper_bound
 
 
-def choose_tls_port_and_bind_sock(state_file_dir, fs_id, mountpoint, config, options):
+def choose_tls_port_and_get_bind_sock(config, options, state_file_dir):
     if "tlsport" in options:
         ports_to_try = [int(options["tlsport"])]
     else:
         lower_bound, upper_bound = get_tls_port_range(config)
 
-        tls_ports = list(range(lower_bound, upper_bound))
+        ports_to_try = list(range(lower_bound, upper_bound))
 
-        # Choose a random midpoint, and then try ports in-order from there
-        mid = random.randrange(len(tls_ports))
-
-        ports_to_try = tls_ports[mid:] + tls_ports[:mid]
-        assert len(tls_ports) == len(ports_to_try)
+        # shuffle the ports_to_try to reduce possibility of multiple mounts starting from same port range
+        random.shuffle(ports_to_try)
 
     if "netns" not in options:
-        tls_port_sock = find_tls_port_in_range(state_file_dir, fs_id, mountpoint, ports_to_try)
+        tls_port_sock = find_tls_port_in_range_and_get_bind_sock(
+            ports_to_try, state_file_dir
+        )
     else:
         with NetNS(nspath=options["netns"]):
-            tls_port_sock = find_tls_port_in_range(state_file_dir, fs_id, mountpoint, ports_to_try)
+            tls_port_sock = find_tls_port_in_range_and_get_bind_sock(
+                ports_to_try, state_file_dir
+            )
 
     if tls_port_sock:
-        tls_port = tls_port_sock.getsockname()[1]
-        return tls_port_sock, tls_port
+        return tls_port_sock
 
     if "tlsport" in options:
         fatal_error(
@@ -990,22 +990,41 @@ def choose_tls_port_and_bind_sock(state_file_dir, fs_id, mountpoint, config, opt
         )
 
 
-def find_tls_port_in_range(state_file_dir, fs_id, mountpoint, ports_to_try):
+def find_tls_port_in_range_and_get_bind_sock(ports_to_try, state_file_dir):
     sock = socket.socket()
     for tls_port in ports_to_try:
-        mount_filename = get_mount_specific_filename(fs_id, mountpoint, tls_port)
-        config_file = get_stunnel_config_filename(state_file_dir, mount_filename)
-        if os.access(config_file, os.R_OK):
-            logging.info("confifguration for port %s already exists, trying another port", tls_port)
+        mount = find_existing_mount_using_tls_port(state_file_dir, tls_port)
+        if mount:
+            logging.debug(
+                "Skip binding TLS port %s as it is already assigned to %s",
+                tls_port,
+                mount,
+            )
             continue
         try:
             logging.info("binding %s", tls_port)
             sock.bind(("localhost", tls_port))
             return sock
         except socket.error as e:
-            logging.info(e)
+            logging.warning(e)
             continue
     sock.close()
+    return None
+
+
+def find_existing_mount_using_tls_port(state_file_dir, tls_port):
+    if not os.path.exists(state_file_dir):
+        logging.debug(
+            "State file dir %s does not exist, assuming no existing mount using tls port %s",
+            state_file_dir,
+            tls_port,
+        )
+        return None
+
+    for fname in os.listdir(state_file_dir):
+        if fname.endswith(".%s" % tls_port):
+            return fname
+
     return None
 
 
@@ -1282,7 +1301,9 @@ def write_stunnel_config_file(
     )
     logging.debug("Writing stunnel configuration:\n%s", stunnel_config)
 
-    stunnel_config_file = get_stunnel_config_filename(state_file_dir, mount_filename)
+    stunnel_config_file = os.path.join(
+        state_file_dir, "stunnel-config.%s" % mount_filename
+    )
 
     with open(stunnel_config_file, "w") as f:
         f.write(stunnel_config)
@@ -1321,6 +1342,24 @@ def write_tls_tunnel_state_file(
         json.dump(state, f)
 
     return state_file
+
+
+def rewrite_tls_tunnel_state_file(state, state_file_dir, state_file):
+    with open(os.path.join(state_file_dir, state_file), "w") as f:
+        json.dump(state, f)
+    return state_file
+
+
+def update_tls_tunnel_temp_state_file_with_tunnel_pid(
+    temp_tls_state_file, state_file_dir, stunnel_pid
+):
+    with open(os.path.join(state_file_dir, temp_tls_state_file), "r") as f:
+        state = json.load(f)
+    state["pid"] = stunnel_pid
+    temp_tls_state_file = rewrite_tls_tunnel_state_file(
+        state, state_file_dir, temp_tls_state_file
+    )
+    return temp_tls_state_file
 
 
 def test_tunnel_process(tunnel_proc, fs_id):
@@ -1366,22 +1405,18 @@ def get_init_system(comm_file="/proc/1/comm"):
 
 def check_network_target(fs_id):
     with open(os.devnull, "w") as devnull:
-        if not check_if_platform_is_mac():
-            rc = subprocess.call(
-                ["systemctl", "is-active", "network.target"],
-                stdout=devnull,
-                stderr=devnull,
-                close_fds=True,
-            )
-        else:
-            rc = subprocess.call(
-                ["sudo", "ifconfig", "en0"],
-                stdout=devnull,
-                stderr=devnull,
-                close_fds=True,
-            )
+        rc = subprocess.call(
+            ["systemctl", "is-active", "network.target"],
+            stdout=devnull,
+            stderr=devnull,
+            close_fds=True,
+        )
 
     if rc != 0:
+        # For fstab mount, the exit code 0 below is to avoid non-zero exit status causing instance to fail the
+        # local-fs.target boot up and then fail the network setup failure can result in the instance being unresponsive.
+        # https://docs.amazonaws.cn/en_us/efs/latest/ug/troubleshooting-efs-mounting.html#automount-fails
+        #
         fatal_error(
             'Failed to mount %s because the network was not yet available, add "_netdev" to your mount options'
             % fs_id,
@@ -1389,6 +1424,15 @@ def check_network_target(fs_id):
         )
 
 
+# This network status check is necessary for the fstab automount use case and should not be removed.
+# efs-utils relies on the network to retrieve the instance metadata and get information e.g. region, to further parse
+# the DNS name of file system to mount target IP address, we need a way to inform users to add `_netdev` option to fstab
+# entry if they haven't do so.
+#
+# However, network.target status itself cannot accurately reflect the status of network reachability.
+# We will replace this check with other accurate way such that even network.target is turned off while network is
+# reachable, the mount can still proceed.
+#
 def check_network_status(fs_id, init_system):
     if init_system != "systemd":
         logging.debug("Not testing network on non-systemd init systems")
@@ -1482,8 +1526,11 @@ def create_required_directory(config, directory):
             raise
 
 
-def get_stunnel_config_filename(state_file_dir, mount_filename):
-    return os.path.join(state_file_dir, "stunnel-config.%s" % mount_filename)
+# Example of a localhost bind sock: sock.bind(('localhost',12345))
+# sock.getsockname() -> ('127.0.0.1', 12345)
+# This function returns the port of the bind socket, in the example is 12345
+def get_tls_port_from_sock(tls_port_sock):
+    return tls_port_sock.getsockname()[1]
 
 
 @contextmanager
@@ -1497,7 +1544,9 @@ def bootstrap_tls(
     state_file_dir=STATE_FILE_DIR,
     fallback_ip_address=None,
 ):
-    sock, tls_port = choose_tls_port_and_bind_sock(state_file_dir, fs_id, mountpoint, config, options)
+    tls_port_sock = choose_tls_port_and_get_bind_sock(config, options, state_file_dir)
+    tls_port = get_tls_port_from_sock(tls_port_sock)
+
     try:
         # override the tlsport option so that we can later override the port the NFS client uses to connect to stunnel.
         # if the user has specified tlsport=X at the command line this will just re-set tlsport to X.
@@ -1537,7 +1586,6 @@ def bootstrap_tls(
         )
         # common name for certificate signing request is max 64 characters
         cert_details["commonName"] = socket.gethostname()[0:64]
-        region = get_target_region(config)
         cert_details["region"] = region
         cert_details["certificateCreationTime"] = create_certificate(
             config,
@@ -1578,14 +1626,26 @@ def bootstrap_tls(
             cert_details=cert_details,
             fallback_ip_address=fallback_ip_address,
         )
-    except Exception as e:
-        logging.error("Error while creating the configuration file: %s" % e)
+        tunnel_args = [_stunnel_bin(), stunnel_config_file]
+        if "netns" in options:
+            tunnel_args = ["nsenter", "--net=" + options["netns"]] + tunnel_args
+
+        # This temp state file is acting like a tlsport lock file, which is why pid =- 1
+        temp_tls_state_file = write_tls_tunnel_state_file(
+            fs_id,
+            mountpoint,
+            tls_port,
+            -1,
+            tunnel_args,
+            [stunnel_config_file],
+            state_file_dir,
+            cert_details=cert_details,
+        )
     finally:
-        # close the socket now, so the stunnel process can bind to the port
-        sock.close()
-    tunnel_args = [_stunnel_bin(), stunnel_config_file]
-    if "netns" in options:
-        tunnel_args = ["nsenter", "--net=" + options["netns"]] + tunnel_args
+        # Always close the socket we created when choosing TLS port only until now to
+        # 1. avoid concurrent TLS mount port collision 2. enable stunnel process to bind the port
+        logging.debug("Closing socket used to choose TLS port %s.", tls_port)
+        tls_port_sock.close()
 
     # launch the tunnel in a process group so if it has any child processes, they can be killed easily by the mount watchdog
     logging.info('Starting TLS tunnel: "%s"', " ".join(tunnel_args))
@@ -1598,15 +1658,8 @@ def bootstrap_tls(
     )
     logging.info("Started TLS tunnel, pid: %d", tunnel_proc.pid)
 
-    temp_tls_state_file = write_tls_tunnel_state_file(
-        fs_id,
-        mountpoint,
-        tls_port,
-        tunnel_proc.pid,
-        tunnel_args,
-        [stunnel_config_file],
-        state_file_dir,
-        cert_details=cert_details,
+    update_tls_tunnel_temp_state_file_with_tunnel_pid(
+        temp_tls_state_file, state_file_dir, tunnel_proc.pid
     )
 
     if "netns" not in options:

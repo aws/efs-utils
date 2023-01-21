@@ -21,7 +21,8 @@ when the file system is created\&.
 .IP \(bu
 A domain name that has a resolvable DNS-CNAME record, \
 which in turn points to a fully-qualified EFS DNS name \
-in the form of "fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com"\&.
+in the form of "fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com" \
+or "us\-east\-1a\&.fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com"\&.
 .P
 \fImount-point\fR is the local directory \
 on which the file system will be mounted\&.
@@ -46,8 +47,8 @@ tls (for Mac distributions)
 .\}
 .sp
 By default, when using the Amazon EFS mount helper with Transport \
-Layer Security (TLS), the mount helper enforces the use of Online \
-Certificate Status Protocol (OCSP) and certificate hostname checking\&. \
+Layer Security (TLS), the mount helper enforces the certificate hostname \
+checking and disables the use of Online Certificate Status Protocol (OCSP). \
 These options can be configured in the config file located at \
 \fI/etc/amazon/efs/efs\-utils\&.conf\&\fR.
 .sp
@@ -69,14 +70,16 @@ options:
 .\}
 .TP
 \fBtls\fR
-Mounts the EFS file system over TLS\&.
+Mounts the EFS file system over TLS\&. For EC2 instances using Mac distributions, \
+this option is by default passed and the EFS file system is mounted over TLS\&.
 .TP
 \fBnotls\fR
-Mounts the EFS file system without TLS. For EC2 instances using Mac distributions, \
-the default mount command mounts the EFS file system over TLS.\&.
+Mounts the EFS file system without TLS, applies for Mac distributions only\&.
 .TP
 \fBtlsport=\fR\fIn\fR
-Configure the TLS relay to listen on the specified port\&.
+Configure the TLS relay to listen on the specified port\&. By default, the \
+tlsport is choosing randomly from port range defined in the config file located \
+at \fI/etc/amazon/efs/efs\-utils\&.conf\&\fR.
 .TP
 \fBverify=\fR\fIn\fR
 Verify TLS certificates using the specified stunnel verify level\&. For \
@@ -84,15 +87,16 @@ more information, see \fBstunnel(8)\fR\&.
 .TP
 \fBocsp / noocsp\fR
 Selects whether to perform OCSP validation on TLS certificates\&, \
-overriding /etc/amazon/efs/efs-utils.conf. \
+overriding /etc/amazon/efs/efs-utils.conf. By default OCSP is disabled. \
 For more information, see \fBstunnel(8)\fR\&.
 .TP
 \fBiam\fR
 Use the system's IAM identity to authenticate with EFS. The mount helper will try \
-to retrieve the required IAM credentials from the following locations: the EC2 instance \
-profile, the AWS CLI credentials file (~/.aws/credentials), and the AWS CLI config \
-file (~/.aws/config). The first location that has credentials will be used. \
-This option requires the \fBtls\fR option\&.
+to retrieve the required IAM credentials from the following locations: the aws credentials \
+URI passed by mount option, the AWS CLI credentials file (~/.aws/credentials), and the
+AWS CLI config file (~/.aws/config), the AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
+environment variable, the AssumeRoleWithWebIdentity, the EC2 instance profile\&.
+The first location that has credentials will be used. This option requires the \fBtls\fR option\&.
 .TP
 \fBaccesspoint\fR
 Mount the EFS file system using the specified access point. This option requires the \
@@ -109,7 +113,7 @@ is not specified, the "default" profile is used\&.
 Use the relative uri to lookup IAM credentials from ecs task metadata endpoint\&.
 .TP
 \fBcafile\fR
-Use the cafile as the stunnel certificate authority file.\&.
+Use the cafile as the stunnel certificate authority file\&.
 .TP
 \fBnetns\fR
 Mount the EFS file system to the specified network namespace\&.

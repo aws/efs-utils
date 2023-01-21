@@ -20,10 +20,18 @@ def _mock_subprocess_call(mocker, returncode=0):
     return mocker.patch("subprocess.call", side_effect=call_mock)
 
 
-def test_non_systemd(mocker):
+def test_non_systemd_init(mocker):
     call_mock = _mock_subprocess_call(mocker)
 
     mount_efs.check_network_status(FS_ID, "init")
+
+    utils.assert_not_called(call_mock)
+
+
+def test_non_systemd_launchd(mocker):
+    call_mock = _mock_subprocess_call(mocker)
+
+    mount_efs.check_network_status(FS_ID, "launchd")
 
     utils.assert_not_called(call_mock)
 

@@ -114,10 +114,12 @@ def test_is_mount_stunnel_proc_running_pid_file_not_exist(mocker, tmpdir):
     assert not os.path.exists(os.path.join(str(mount_dir), watchdog.STUNNEL_PID_FILE))
     mock_log_debug = mocker.patch("logging.debug")
 
-    assert False == watchdog.is_mount_stunnel_proc_running(PID, STATE_FILE, str(tmpdir))
+    assert True == watchdog.is_mount_stunnel_proc_running(PID, STATE_FILE, str(tmpdir))
 
-    debug_log = mock_log_debug.call_args[0][0]
-    assert "Pid file of stunnel is already removed" in debug_log
+    assert "Pid file of stunnel does not exist" in str(
+        mock_log_debug.call_args_list[0][0]
+    )
+    assert "is running with pid " in str(mock_log_debug.call_args_list[1][0])
 
 
 def test_is_mount_stunnel_proc_running_pid_mismatch(mocker, tmpdir):
