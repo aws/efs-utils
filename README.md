@@ -36,6 +36,43 @@ The `efs-utils` package has been verified against the following MacOS distributi
 | MacOS Big Sur  | `launchd` |
 | MacOS Monterey | `launchd` |
 
+## README contents
+  - [Prerequisites](#prerequisites)
+  - [Optional](#optional)
+  - [Installation](#installation)
+    - [On Amazon Linux distributions](#on-amazon-linux-distributions)
+    - [Install via AWS Systems Manager Distributor](#install-via-aws-systems-manager-distributor)
+    - [On other Linux distributions](#on-other-linux-distributions)
+    - [On MacOS Big Sur and macOS Monterey distribution](#on-macos-big-sur-and-macos-monterey-distribution)
+      - [Run tests](#run-tests)
+  - [Usage](#usage)
+    - [mount.efs](#mountefs)
+    - [MacOS](#macos)
+    - [amazon-efs-mount-watchdog](#amazon-efs-mount-watchdog)
+  - [Troubleshooting](#troubleshooting)
+  - [Upgrading stunnel for RHEL/CentOS](#upgrading-stunnel-for-rhelcentos)
+  - [Upgrading stunnel for SLES12](#upgrading-stunnel-for-sles12)
+  - [Upgrading stunnel for MacOS](#upgrading-stunnel-for-macos)
+  - [Install botocore](#install-botocore)
+      - [RPM](#rpm)
+      - [DEB](#deb)
+      - [On Debian10 and Ubuntu20, the botocore needs to be installed in specific target folder](#on-debian10-and-ubuntu20-the-botocore-needs-to-be-installed-in-specific-target-folder)
+      - [To install botocore on MacOS](#to-install-botocore-on-macos)
+  - [Upgrade botocore](#upgrade-botocore)
+  - [Enable mount success/failure notification via CloudWatch log](#enable-mount-successfailure-notification-via-cloudwatch-log)
+    - [Step 1. Install botocore](#step-1-install-botocore)
+    - [Step 2. Enable CloudWatch log feature in efs-utils config file `/etc/amazon/efs/efs-utils.conf`](#step-2-enable-cloudwatch-log-feature-in-efs-utils-config-file-etcamazonefsefs-utilsconf)
+    - [Step 3. Attach the CloudWatch logs policy to the IAM role attached to instance.](#step-3-attach-the-cloudwatch-logs-policy-to-the-iam-role-attached-to-instance)
+  - [Optimize readahead max window size on Linux 5.4+](#optimize-readahead-max-window-size-on-linux-54)
+  - [Using botocore to retrieve mount target ip address when dns name cannot be resolved](#using-botocore-to-retrieve-mount-target-ip-address-when-dns-name-cannot-be-resolved)
+    - [Step 1. Install botocore](#step-1-install-botocore-1)
+    - [Step 2. Allow DescribeMountTargets and DescribeAvailabilityZones action in the IAM policy](#step-2-allow-describemounttargets-and-describeavailabilityzones-action-in-the-iam-policy)
+  - [The way to access instance metadata](#the-way-to-access-instance-metadata)
+  - [Use the assumed profile credentials for IAM](#use-the-assumed-profile-credentials-for-iam)
+  - [Enabling FIPS Mode](#enabling-fips-mode)
+  - [License Summary](#license-summary)
+
+
 ## Prerequisites
 
 * `nfs-utils` (RHEL/CentOS/Amazon Linux/Fedora) or `nfs-common` (Debian/Ubuntu)
@@ -245,6 +282,18 @@ $ sudo mount -t efs -o notls file-system-id efs-mount-point/
 ### amazon-efs-mount-watchdog
 
 `efs-utils` contains a watchdog process to monitor the health of TLS mounts. This process is managed by either `upstart` or `systemd` depending on your Linux distribution and `launchd` on Mac distribution, and is started automatically the first time an EFS file system is mounted over TLS.
+
+## Troubleshooting
+If you run into a problem with efs-utils, please open an issue in this repository.  We can more easily
+assist you if relevant logs are provided.  You can find the log file at `/var/log/amazon/efs/mount.log`.  
+
+Often times, enabling debug level logging can help us find problems more easily.  To do this, run  
+`sed -i '/logging_level = INFO/s//logging_level = DEBUG/g' /etc/amazon/efs/efs-utils.conf`.  
+
+You can also enable stunnel debug logs with  
+`sed -i '/stunnel_debug_enabled = false/s//stunnel_debug_enabled = true/g' /etc/amazon/efs/efs-utils.conf`.   
+
+Make sure to perform the failed mount again after running the prior commands before pulling the logs.
 
 ## Upgrading stunnel for RHEL/CentOS
 
@@ -496,6 +545,7 @@ Threading:PTHREAD Sockets:POLL,IPv6 SSL:ENGINE,OCSP,FIPS Auth:LIBWRAP
 ```
 
 For more information on how to configure OpenSSL with FIPS see the [OpenSSL FIPS README](https://github.com/openssl/openssl/blob/master/README-FIPS.md).
+
 ## License Summary
 
 This code is made available under the MIT license.
