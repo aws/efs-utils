@@ -268,6 +268,7 @@ SYSTEM_RELEASE_PATH = "/etc/system-release"
 OS_RELEASE_PATH = "/etc/os-release"
 MACOS_BIG_SUR_RELEASE = "macOS-11"
 MACOS_MONTEREY_RELEASE = "macOS-12"
+MACOS_VENTURA_RELEASE = "macOS-13"
 
 # Multiplier for max read ahead buffer size
 # Set default as 15 aligning with prior linux kernel 5.4
@@ -276,11 +277,11 @@ NFS_READAHEAD_CONFIG_PATH_FORMAT = "/sys/class/bdi/%s:%s/read_ahead_kb"
 NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION = [5, 4]
 
 # MacOS does not support the property of Socket SO_BINDTODEVICE in stunnel configuration
-SKIP_NO_SO_BINDTODEVICE_RELEASES = [MACOS_BIG_SUR_RELEASE, MACOS_MONTEREY_RELEASE]
+SKIP_NO_SO_BINDTODEVICE_RELEASES = [MACOS_BIG_SUR_RELEASE, MACOS_MONTEREY_RELEASE, MACOS_VENTURA_RELEASE]
 
 MAC_OS_PLATFORM_LIST = ["darwin"]
-# MacOS Versions : Monterey - 21.*, Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
-MAC_OS_SUPPORTED_VERSION_LIST = ["20", "21"]
+# MacOS Versions : Ventura - 22.*, Monterey - 21.*, Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
+MAC_OS_SUPPORTED_VERSION_LIST = ["20", "21", "22"]
 
 AWS_FIPS_ENDPOINT_CONFIG_ENV = "AWS_USE_FIPS_ENDPOINT"
 ECS_URI_ENV = "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
