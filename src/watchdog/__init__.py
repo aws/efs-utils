@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "1.34.5"
+VERSION = "1.35.0"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -1051,6 +1051,12 @@ def cleanup_mount_state_if_stunnel_not_running(
 
 def rewrite_state_file(state, state_file_dir, state_file):
     tmp_state_file = os.path.join(state_file_dir, "~%s" % state_file)
+    logging.debug(
+        "Rewriting state file: writing "
+        + str(len(json.dumps(state)))
+        + " characters into the state file "
+        + str(tmp_state_file)
+    )
     with open(tmp_state_file, "w") as f:
         json.dump(state, f)
 

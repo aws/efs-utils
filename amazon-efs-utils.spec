@@ -35,7 +35,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.34.5
+Version   : 1.35.0
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -137,6 +137,11 @@ fi
 %clean
 
 %changelog
+* Wed Mar 15 2023 Soyeon Ju <mjsoyeon@amazon.com> - 1.35.0
+- Support MacOS Ventura, Oracle8 distribution
+- Add debug statement for size of state file write
+- Add parameters in mount options for assume web role with web identity
+
 * Wed Jan 1 2023 Ryan Stankiewicz <rjstank@amazon.com> - 1.34.5
 - Watchdog detect empty private key and regenerate
 - Update man page

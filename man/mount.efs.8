@@ -98,6 +98,12 @@ AWS CLI config file (~/.aws/config), the AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
 environment variable, the AssumeRoleWithWebIdentity, the EC2 instance profile\&.
 The first location that has credentials will be used. This option requires the \fBtls\fR option\&.
 .TP
+\fBrolearn\fR
+Role ARN for IAM authentication with AssumeRoleWithWebIdentity API\&.
+.TP
+\fBjwtpath\fR
+Identity token for IAM authentication with AssumeRoleWithWebIdentity API\&.
+.TP
 \fBaccesspoint\fR
 Mount the EFS file system using the specified access point. This option requires the \
 \fBtls\fR option\&. The access point must be in the "available" state before it \
@@ -185,6 +191,11 @@ sudo mount -t efs -o tls,iam fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point "/mnt/efs" \
 with encryption of data in transit. The mount helper will authenticate with EFS using \
 the system's IAM identity\&.
+.TP
+sudo mount -t efs -o tls,iam,rolearn="ROLE_ARN",jwtpath="PATH/JWT_TOKEN_FILE" fs-abcd1234 /mnt/efs
+Mount an EFS file system with file system ID "fs-abcd1234" at mount point "/mnt/efs" \
+with encryption of data in transit. The mount helper will assume the role "ROLE_ARN" by calling \
+the AssumeRoleWithWebIdentity API with the identity token at "PATH/JWT_TOKEN_FILE"\&.
 .TP
 sudo mount -t efs -o tls,iam,awsprofile=test-profile fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point "/mnt/efs" \

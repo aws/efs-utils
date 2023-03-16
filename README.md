@@ -7,28 +7,28 @@ Utilities for Amazon Elastic File System (EFS)
 The `efs-utils` package has been verified against the following Linux distributions:
 
 | Distribution         | Package Type | `init` System |
-|----------------------|--------------|--------------|
-| Amazon Linux 2017.09 | `rpm`        | `upstart`    |
-| Amazon Linux 2       | `rpm`        | `systemd`    |
-| CentOS 7             | `rpm`        | `systemd`    |
-| CentOS 8             | `rpm`        | `systemd`    |
-| RHEL 7               | `rpm`        | `systemd`    |
-| RHEL 8               | `rpm`        | `systemd`    |
-| Fedora 28            | `rpm`        | `systemd`    |
-| Fedora 29            | `rpm`        | `systemd`    |
-| Fedora 30            | `rpm`        | `systemd`    |
-| Fedora 31            | `rpm`        | `systemd`    |
-| Fedora 32            | `rpm`        | `systemd`    |
-| Debian 9             | `deb`        | `systemd`    |
-| Debian 10            | `deb`        | `systemd`    |
-| Ubuntu 16.04         | `deb`        | `systemd`    |
-| Ubuntu 18.04         | `deb`        | `systemd`    |
-| Ubuntu 20.04         | `deb`        | `systemd`    |
-| OpenSUSE Leap        | `rpm`        | `systemd`    |
-| OpenSUSE Tumbleweed  | `rpm`        | `systemd`    |
-| Oracle8              | `rpm`        | `systemd`    |
-| SLES 12              | `rpm`        | `systemd`    |
-| SLES 15              | `rpm`        | `systemd`    |
+|----------------------| ----- | --------- |
+| Amazon Linux 2017.09 | `rpm` | `upstart` |
+| Amazon Linux 2       | `rpm` | `systemd` |
+| CentOS 7             | `rpm` | `systemd` |
+| CentOS 8             | `rpm` | `systemd` |
+| RHEL 7               | `rpm`| `systemd` |
+| RHEL 8               | `rpm`| `systemd` |
+| Fedora 28            | `rpm` | `systemd` |
+| Fedora 29            | `rpm` | `systemd` |
+| Fedora 30            | `rpm` | `systemd` |
+| Fedora 31            | `rpm` | `systemd` |
+| Fedora 32            | `rpm` | `systemd` |
+| Debian 9             | `deb` | `systemd` |
+| Debian 10            | `deb` | `systemd` |
+| Ubuntu 16.04         | `deb` | `systemd` |
+| Ubuntu 18.04         | `deb` | `systemd` |
+| Ubuntu 20.04         | `deb` | `systemd` |
+| OpenSUSE Leap        | `rpm` | `systemd` |
+| OpenSUSE Tumbleweed  | `rpm` | `systemd` |
+| Oracle8              | `rpm` | `systemd` |
+| SLES 12              | `rpm` | `systemd` |
+| SLES 15              | `rpm` | `systemd` |
 
 The `efs-utils` package has been verified against the following MacOS distributions:
 
@@ -45,7 +45,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
     - [On Amazon Linux distributions](#on-amazon-linux-distributions)
     - [Install via AWS Systems Manager Distributor](#install-via-aws-systems-manager-distributor)
     - [On other Linux distributions](#on-other-linux-distributions)
-    - [On MacOS Big Sur and macOS Monterey distribution](#on-macos-big-sur-and-macos-monterey-distribution)
+    - [On MacOS Big Sur, macOS Monterey and macOS Ventura distribution](#on-macos-big-sur-macos-monterey-and-macos-ventura-distribution)
       - [Run tests](#run-tests)
   - [Usage](#usage)
     - [mount.efs](#mountefs)
@@ -97,7 +97,7 @@ $ sudo yum -y install amazon-efs-utils
 ```
 
 ### Install via AWS Systems Manager Distributor
-You can now use AWS Systems Manage Distributor to automatically install or update `amazon-efs-utils`.
+You can now use AWS Systems Manage Distributor to automatically install or update `amazon-efs-utils`. 
 Please refer to [Using AWS Systems Manager to automatically install or update Amazon EFS clients](https://docs.aws.amazon.com/efs/latest/ug/manage-efs-utils-with-aws-sys-manager.html) for more guidance.
 
 The following are prerequisites for using AWS Systems Manager Distributor to install or update `amazon-efs-utils`:
@@ -156,31 +156,20 @@ $ ./build-deb.sh
 $ sudo apt-get -y install ./build/amazon-efs-utils*deb
 ```
 
-### On macOS Big Sur, macOS Monterey, and macOS Ventura distributions
+### On MacOS Big Sur, macOS Monterey and macOS Ventura distribution
 
-For EC2 Mac instances running macOS Big Sur, macOS Monterey and macOS Ventura, you can install amazon-efs-utils from the
+For EC2 Mac instances running macOS Big Sur, macOS Monterey and macOS Ventura, you can install amazon-efs-utils from the 
 [homebrew-aws](https://github.com/aws/homebrew-aws) respository. **Note that this will ONLY work on EC2 instances
-running macOS Big Sur and macOS Monterey, not local Mac computers.**
+running macOS Big Sur, macOS Monterey and macOS Ventura, not local Mac computers.**
 ```bash
 brew install amazon-efs-utils
 ```
 
-This will install amazon-efs-utils on your EC2 Mac Instance in the directory `/usr/local/Cellar/amazon-efs-utils`. At the end of the installation, it will print a set of commands that must be executed in order to start using efs-utils. The instructions that are printed after amazon-efs-utils and must be executed are:
-
+This will install amazon-efs-utils on your EC2 Mac Instance running macOS Big Sur, macOS Monterey and macOS Ventura in the directory `/usr/local/Cellar/amazon-efs-utils`. 
+  		  
+***Follow the instructions in caveats when using efs-utils on EC2 Mac instance for the first time.*** To check the package caveats run below command
 ```bash
-# Perform below actions to start using efs:
-    sudo mkdir -p /Library/Filesystems/efs.fs/Contents/Resources
-    sudo ln -s /usr/local/bin/mount.efs /Library/Filesystems/efs.fs/Contents/Resources/mount_efs
-
-# Perform below actions to stop using efs:
-    sudo rm /Library/Filesystems/efs.fs/Contents/Resources/mount_efs
-
-# To enable watchdog for using TLS mounts:
-    sudo cp /usr/local/Cellar/amazon-efs-utils/<version>/libexec/amazon-efs-mount-watchdog.plist /Library/LaunchAgents
-    sudo launchctl load /Library/LaunchAgents/amazon-efs-mount-watchdog.plist
-
-# To disable watchdog for using TLS mounts:
-    sudo launchctl unload /Library/LaunchAgents/amazon-efs-mount-watchdog.plist
+brew info amazon-efs-utils
 ```
 
 #### Run tests
@@ -262,7 +251,7 @@ man mount.efs
 
 or refer to the [documentation](https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html).
 
-### MacOS
+### MacOS 
 
 For EC2 instances using Mac distribution, the recommended default options will perform a tls mount:
 
@@ -299,7 +288,7 @@ Make sure to perform the failed mount again after running the prior commands bef
 
 ## Upgrading stunnel for RHEL/CentOS
 
-By default, when using the EFS mount helper with TLS, it enforces certificate hostname checking. The EFS mount helper uses the `stunnel` program for its TLS functionality. Please note that some versions of Linux do not include a version of `stunnel` that supports TLS features by default. When using such a Linux version, mounting an EFS file system using TLS will fail.
+By default, when using the EFS mount helper with TLS, it enforces certificate hostname checking. The EFS mount helper uses the `stunnel` program for its TLS functionality. Please note that some versions of Linux do not include a version of `stunnel` that supports TLS features by default. When using such a Linux version, mounting an EFS file system using TLS will fail. 
 
 Once you’ve installed the `amazon-efs-utils` package, to upgrade your system’s version of `stunnel`, see [Upgrading Stunnel](https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html#upgrading-stunnel).
 
@@ -323,9 +312,9 @@ brew upgrade stunnel
 ## Install botocore
 
 `efs-utils` uses botocore to interact with other AWS services. Please note the package type from the above table and install
-botocore based on that info. If botocore is already installed and does not meet the minimum required version,
+botocore based on that info. If botocore is already installed and does not meet the minimum required version, 
 you can upgrade the botocore by following the [upgrade botocore section](#Upgrade-botocore).
-
+ 
 - Download the `get-pip.py` script
 #### RPM
 ```bash
@@ -404,7 +393,13 @@ sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/}' /etc
 
 - For MacOS:
 ```bash
-sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/;}' /usr/local/Cellar/amazon-efs-utils/<version>/libexec/etc/amazon/efs/efs-utils.conf
+    EFS_UTILS_VERSION=<e.g. 1.34.5>
+    sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/;}' /usr/local/Cellar/amazon-efs-utils/${EFS_UTILS_VERSION}/libexec/etc/amazon/efs/efs-utils.conf
+```
+- For Mac2 instance:
+```bash
+    EFS_UTILS_VERSION=<e.g. 1.34.5>
+    sudo sed -i -e '/\[cloudwatch-log\]/{N;s/# enabled = true/enabled = true/;}' /opt/homebrew/Cellar/amazon-efs-utils/${EFS_UTILS_VERSION}/libexec/etc/amazon/efs/efs-utils.conf
 ```
 You can also configure CloudWatch log group name and log retention days in the config file.
 If you want to have separate log groups in Cloudwatch for every mounted file system, add `/{fs_id}` to the end of the `log_group_name` field in `efs-utils.conf` file. For example, the `log_group_name` in `efs-utils.conf` file would look something like:
@@ -413,7 +408,6 @@ If you want to have separate log groups in Cloudwatch for every mounted file sys
 [cloudwatch-log]
 log_group_name = /aws/efs/utils/{fs_id}
 ```
-
 ### Step 3. Attach the CloudWatch logs policy to the IAM role attached to instance.
 Attach AWS managed policy `AmazonElasticFileSystemsUtils` to the iam role you attached to the instance, or the aws credentials
 configured on your instance.
@@ -452,15 +446,15 @@ $ sudo bash -c "echo read-ahead-value-in-kb > /sys/class/bdi/0:$(stat -c '%d' ef
 
 ## Using botocore to retrieve mount target ip address when dns name cannot be resolved
 
-`efs-utils` now supports using botocore to retrieve mount target ip address when dns name cannot be resolved, e.g.
+`efs-utils` now supports using botocore to retrieve mount target ip address when dns name cannot be resolved, e.g. 
 when user is mounting a file system in another VPC. There are two prerequisites to use this feature:
 
 ### Step 1. Install botocore
 Follow [install botocore section](#Install-botocore)
 
 ### Step 2. Allow DescribeMountTargets and DescribeAvailabilityZones action in the IAM policy
-Allow the `elasticfilesystem:DescribeMountTargets` and `ec2:DescribeAvailabilityZones` action in your policy attached to
-the iam role you attached to the instance, or the aws credentials configured on your instance. We recommend you attach
+Allow the `elasticfilesystem:DescribeMountTargets` and `ec2:DescribeAvailabilityZones` action in your policy attached to 
+the iam role you attached to the instance, or the aws credentials configured on your instance. We recommend you attach 
 AWS managed policy `AmazonElasticFileSystemsUtils`.
 
 This feature will be enabled by default. To disable this feature:
@@ -469,11 +463,11 @@ This feature will be enabled by default. To disable this feature:
 sed -i "s/fall_back_to_mount_target_ip_address_enabled = true/fall_back_to_mount_target_ip_address_enabled = false/" /etc/amazon/efs/efs-utils.conf
 ```
 
-If you decide that you do not want to use this feature, but need to mount a cross-VPC file system, you can use the mounttargetip
+If you decide that you do not want to use this feature, but need to mount a cross-VPC file system, you can use the mounttargetip 
 option to do so, using the desired mount target ip address in the mount command.
 
 ## The way to access instance metadata
-`efs-utils` by default uses IMDSv2, which is a session-oriented method used to access instance metadata. If you don't want to use
+`efs-utils` by default uses IMDSv2, which is a session-oriented method used to access instance metadata. If you don't want to use 
 IMDSv2, you can disable the token fetching feature by running the following command:
 
 ```bash
@@ -481,7 +475,7 @@ sed -i "s/disable_fetch_ec2_metadata_token = false/disable_fetch_ec2_metadata_to
 ```
 
 ## Use the assumed profile credentials for IAM
-To authenticate with EFS using the system’s IAM identity of an awsprofile, add the `iam` option and pass the profile name to
+To authenticate with EFS using the system’s IAM identity of an awsprofile, add the `iam` option and pass the profile name to 
 `awsprofile` option. These options require the `tls` option.
 
 ```bash
@@ -490,18 +484,18 @@ $ sudo mount -t efs -o tls,iam,awsprofile=test-profile file-system-id efs-mount-
 
 To configure the named profile, see the [Named Profiles doc](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-profiles.html)
 and [Support Config File Settings doc](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html#cli-configure-files-settings)
-for more details. If the credentials (e.g. aws_access_key_id) are not configured in `/root/.aws/credentials` or `/root/.aws/config`
-(note that the path prefix may vary based on the root path of sudo), efs-utils will use botocore to assume the named profile.
+for more details. If the credentials (e.g. aws_access_key_id) are not configured in `/root/.aws/credentials` or `/root/.aws/config` 
+(note that the path prefix may vary based on the root path of sudo), efs-utils will use botocore to assume the named profile. 
 This will require botocore is pre-installed, please follow [install botocore section](#Install-botocore) to install botocore first.
 
 Normally you will need to configure your profile IAM policy to make the assume works. For example, if you want to perform a
-cross-account mounting, suppose you have established
+cross-account mounting, suppose you have established 
 [vpc-peering-connections](https://docs.aws.amazon.com/vpc/latest/peering/create-vpc-peering-connection.html) between your vpcs,
-next step you need to do is giving permission to account B so that it can assume a role in account A and then mount the file system
-that belongs to account A. You can see
+next step you need to do is giving permission to account B so that it can assume a role in account A and then mount the file system 
+that belongs to account A. You can see 
 [IAM doc](https://docs.aws.amazon.com/IAM/latest/UserGuide/tutorial_cross-account-with-roles.html) for more details.
 
-After the IAM identity is setup, you can configure your awsprofile credentials or config. You can refer to
+After the IAM identity is setup, you can configure your awsprofile credentials or config. You can refer to 
 [sdk settings](https://docs.aws.amazon.com/sdkref/latest/guide/settings-global.html). For example you can define
 the profile to use the credentials of profile `default` to assume role in account A by defining the `source_profile`.
 
@@ -550,7 +544,7 @@ Efs-Utils is able to enter FIPS mode when mounting your file system. To enable F
 ```bash
 sed -i "s/fips_mode_enabled = false/fips_mode_enabled = true/" /etc/amazon/efs/efs-utils.conf
 ```
-This will enable any potential API call from EFS-Utils to use FIPS endpoints and cause stunnel to enter FIPS mode
+This will enable any potential API call from EFS-Utils to use FIPS endpoints and cause stunnel to enter FIPS mode 
 
 Note: FIPS mode requires that the installed version of OpenSSL is compiled with FIPS.
 

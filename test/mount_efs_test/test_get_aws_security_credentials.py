@@ -41,6 +41,9 @@ DEFAULT_PROFILE = "DEFAULT"
 AWSPROFILE = "test_profile"
 AWSCREDSURI = "/v2/credentials/{uuid}"
 
+WEB_IDENTITY_ROLE_ARN = "FAKE_ROLE_ARN"
+WEB_IDENTITY_TOKEN_FILE = "WEB_IDENTITY_TOKEN_FILE"
+
 
 class MockHeaders(object):
     def __init__(self, content_charset=None):
@@ -433,4 +436,73 @@ def test_credentials_file_helper_awsprofile_found_missing_key(caplog, tmpdir):
         "aws_access_key_id or aws_secret_access_key not found in %s under named profile [test_profile]"
         % fake_file
         in [rec.message for rec in caplog.records][0]
+    )
+
+
+def test_get_aws_security_credentials_from_webidentity_passed_in_both_params(mocker):
+    config = get_fake_config()
+    creds_mocked = {
+        "AccessKeyId": ACCESS_KEY_ID_VAL,
+        "SecretAccessKey": SECRET_ACCESS_KEY_VAL,
+        "Token": SESSION_TOKEN_VAL,
+    }
+    credentials_source_mocked = "webidentity:" + ",".join(
+        [WEB_IDENTITY_ROLE_ARN, WEB_IDENTITY_TOKEN_FILE]
+    )
+
+    mocker.patch.dict(os.environ, {})
+    mocker.patch(
+        "mount_efs.get_aws_security_credentials_from_webidentity",
+        return_value=(creds_mocked, credentials_source_mocked),
+    )
+
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(
+        config,
+        True,
+        "us-east-1",
+        jwt_path=WEB_IDENTITY_TOKEN_FILE,
+        role_arn=WEB_IDENTITY_ROLE_ARN,
+    )
+
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] == SESSION_TOKEN_VAL
+    assert credentials_source == credentials_source_mocked
+
+
+def test_get_aws_security_credentials_from_webidentity_passed_in_one_param(
+    mocker, capsys
+):
+    config = get_fake_config(False)
+    creds_mocked = {
+        "AccessKeyId": ACCESS_KEY_ID_VAL,
+        "SecretAccessKey": SECRET_ACCESS_KEY_VAL,
+        "Token": SESSION_TOKEN_VAL,
+    }
+    credentials_source_mocked = "webidentity:" + ",".join(
+        [WEB_IDENTITY_ROLE_ARN, WEB_IDENTITY_TOKEN_FILE]
+    )
+
+    mocker.patch.dict(os.environ, {})
+    mocker.patch(
+        "mount_efs.get_aws_security_credentials_from_webidentity",
+        return_value=(creds_mocked, credentials_source_mocked),
+    )
+    mocker.patch("mount_efs.get_iam_role_name", return_value=None)
+
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.get_aws_security_credentials(
+            config, True, "us-east-1", jwt_path=WEB_IDENTITY_TOKEN_FILE
+        )
+
+    assert 0 != ex.value.code
+
+    out, err = capsys.readouterr()
+    assert (
+        "AWS Access Key ID and Secret Access Key are not found in AWS credentials file"
+        in err
+    )
+    assert (
+        "from ECS credentials relative uri, or from the instance security credentials service"
+        in err
     )

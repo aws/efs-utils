@@ -34,6 +34,9 @@ WRONG_ACCESS_KEY_ID_VAL = "WRONG_AWS_ACCESS_KEY_ID"
 WRONG_SECRET_ACCESS_KEY_VAL = "WRONG_AWS_SECRET_ACCESS_KEY"
 WRONG_SESSION_TOKEN_VAL = "WRONG_SESSION_TOKEN"
 
+ROLE_ARN = "fake_role_arn"
+WEB_IDENTITY_TOKEN_FILE = "/fake_web_identity_token_file"
+
 AWS_CONFIG_FILE = "fake_aws_config"
 DEFAULT_PROFILE = "DEFAULT"
 AWSPROFILE = "test_profile"
@@ -431,6 +434,28 @@ def test_get_aws_security_credentials_botocore_present_get_assumed_profile_crede
     credentials = watchdog.get_aws_security_credentials(
         config, "named_profile:test-profile", "us-east-1"
     )
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] == SESSION_TOKEN_VAL
+
+
+def test_get_aws_security_credentials_webidentity(mocker):
+    config = get_fake_config()
+    credentials_source = "webidentity:" + ",".join([ROLE_ARN, WEB_IDENTITY_TOKEN_FILE])
+    mock_response = {
+        "AccessKeyId": ACCESS_KEY_ID_VAL,
+        "SecretAccessKey": SECRET_ACCESS_KEY_VAL,
+        "Token": SESSION_TOKEN_VAL,
+    }
+    mocker.patch(
+        "watchdog.get_aws_security_credentials_from_webidentity",
+        return_value=mock_response,
+    )
+
+    credentials = watchdog.get_aws_security_credentials(
+        config, credentials_source, "us-east-1"
+    )
+
     assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
     assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
     assert credentials["Token"] == SESSION_TOKEN_VAL

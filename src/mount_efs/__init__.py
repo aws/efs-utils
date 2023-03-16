@@ -85,7 +85,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.34.5"
+VERSION = "1.35.0"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -272,6 +272,7 @@ MACOS_BIG_SUR_RELEASE = "macOS-11"
 MACOS_MONTEREY_RELEASE = "macOS-12"
 MACOS_VENTURA_RELEASE = "macOS-13"
 
+
 # Multiplier for max read ahead buffer size
 # Set default as 15 aligning with prior linux kernel 5.4
 DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER = 15
@@ -279,7 +280,11 @@ NFS_READAHEAD_CONFIG_PATH_FORMAT = "/sys/class/bdi/%s:%s/read_ahead_kb"
 NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION = [5, 4]
 
 # MacOS does not support the property of Socket SO_BINDTODEVICE in stunnel configuration
-SKIP_NO_SO_BINDTODEVICE_RELEASES = [MACOS_BIG_SUR_RELEASE, MACOS_MONTEREY_RELEASE, MACOS_VENTURA_RELEASE]
+SKIP_NO_SO_BINDTODEVICE_RELEASES = [
+    MACOS_BIG_SUR_RELEASE,
+    MACOS_MONTEREY_RELEASE,
+    MACOS_VENTURA_RELEASE,
+]
 
 MAC_OS_PLATFORM_LIST = ["darwin"]
 # MacOS Versions : Ventura - 22.*, Monterey - 21.*, Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
@@ -549,13 +554,24 @@ def get_aws_ec2_metadata_token(timeout=DEFAULT_TIMEOUT):
 
 
 def get_aws_security_credentials(
-    config, use_iam, region, awsprofile=None, aws_creds_uri=None, jwt_path=None, role_arn=None
+    config,
+    use_iam,
+    region,
+    awsprofile=None,
+    aws_creds_uri=None,
+    jwt_path=None,
+    role_arn=None,
 ):
     """
-    Lookup AWS security credentials (access key ID and secret access key). Adapted credentials provider chain from:
+    Lookup AWS security credentials. Adapted credentials provider chain from:
     https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html and
     https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/credentials.html
+
+    If iam is enabled, this function will return two objects, credentials and credentials_source.
+    credentials is a dictionary with three keys, "AccessKeyId", "SecretAccessKey", and "Token".
+    credentials_source will be a string that describes the method by which the credentials were obtained.
     """
+
     if not use_iam:
         return None, None
 
@@ -576,9 +592,9 @@ def get_aws_security_credentials(
         )
         if credentials and credentials_source:
             return credentials, credentials_source
-    
+
     # attempt to lookup AWS security credentials through AssumeRoleWithWebIdentity
-    # this is used for Pod impersonation feature.
+    # (e.g. for IAM Role for Service Accounts (IRSA) approach on EKS)
     if jwt_path and role_arn:
         credentials, credentials_source = get_aws_security_credentials_from_webidentity(
             config,
@@ -590,8 +606,6 @@ def get_aws_security_credentials(
         if credentials and credentials_source:
             return credentials, credentials_source
 
-    # attempt to lookup AWS security credentials through AssumeRoleWithWebIdentity
-    # (e.g. for IAM Role for Service Accounts (IRSA) approach on EKS)
     if (
         WEB_IDENTITY_ROLE_ARN_ENV in os.environ
         and WEB_IDENTITY_TOKEN_FILE_ENV in os.environ
@@ -1567,7 +1581,7 @@ def bootstrap_tls(
             if aws_creds_uri:
                 kwargs = {"aws_creds_uri": aws_creds_uri}
             elif role_arn and jwt_path:
-                kwargs = {"role_arn": role_arn, "jwt_path" : jwt_path}
+                kwargs = {"role_arn": role_arn, "jwt_path": jwt_path}
             else:
                 kwargs = {"awsprofile": get_aws_profile(options, use_iam)}
 
@@ -1577,6 +1591,10 @@ def bootstrap_tls(
 
             if credentials_source:
                 cert_details["awsCredentialsMethod"] = credentials_source
+                logging.debug(
+                    "AWS credentials source used for IAM authentication: ",
+                    credentials_source,
+                )
 
         if ap_id:
             cert_details["accessPoint"] = ap_id
