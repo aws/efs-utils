@@ -238,6 +238,7 @@ EFS_ONLY_OPTIONS = [
     "verify",
     "rolearn",
     "jwtpath",
+    "fsap"
 ]
 
 UNSUPPORTED_OPTIONS = ["capath"]
