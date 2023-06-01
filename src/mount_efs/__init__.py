@@ -1623,10 +1623,10 @@ def bootstrap_tls(
         cert_details["privateKey"] = get_private_key_path()
         cert_details["fsId"] = fs_id
 
-        start_watchdog(init_system)
-
         if not os.path.exists(state_file_dir):
             create_required_directory(config, state_file_dir)
+
+        start_watchdog(init_system)
 
         verify_level = int(options.get("verify", DEFAULT_STUNNEL_VERIFY_LEVEL))
         ocsp_enabled = is_ocsp_enabled(config, options)

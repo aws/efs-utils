@@ -63,6 +63,7 @@ CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
 CONFIG_SECTION = "mount-watchdog"
 MOUNT_CONFIG_SECTION = "mount"
 CLIENT_INFO_SECTION = "client-info"
+ENABLE_VERSION_CHECK = "enable_version_check"
 CLIENT_SOURCE_STR_LEN_LIMIT = 100
 DISABLE_FETCH_EC2_METADATA_TOKEN_ITEM = "disable_fetch_ec2_metadata_token"
 DEFAULT_UNKNOWN_VALUE = "unknown"
@@ -75,6 +76,7 @@ LOG_FILE = "mount-watchdog.log"
 
 STATE_FILE_DIR = "/var/run/efs"
 STUNNEL_PID_FILE = "stunnel.pid"
+LAST_VERSION_CHECK_FILE = "last_version_check.json"
 
 DEFAULT_NFS_PORT = "2049"
 PRIVATE_KEY_FILE = "/etc/amazon/efs/privateKey.pem"
@@ -180,6 +182,255 @@ MAC_OS_PLATFORM_LIST = ["darwin"]
 SYSTEM_RELEASE_PATH = "/etc/system-release"
 OS_RELEASE_PATH = "/etc/os-release"
 STUNNEL_INSTALLATION_MESSAGE = "Please install it following the instructions at: https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html#upgrading-stunnel"
+
+
+def check_if_platform_is_mac():
+    return sys.platform in MAC_OS_PLATFORM_LIST
+
+
+def get_system_release_version():
+    # MacOS does not maintain paths /etc/os-release and /etc/sys-release
+    if check_if_platform_is_mac():
+        return platform.platform()
+
+    try:
+        with open(SYSTEM_RELEASE_PATH) as f:
+            return f.read().strip()
+    except IOError:
+        logging.debug("Unable to read %s", SYSTEM_RELEASE_PATH)
+
+    try:
+        with open(OS_RELEASE_PATH) as f:
+            for line in f:
+                if "PRETTY_NAME" in line:
+                    return line.split("=")[1].strip()
+    except IOError:
+        logging.debug("Unable to read %s", OS_RELEASE_PATH)
+
+    return DEFAULT_UNKNOWN_VALUE
+
+
+class Version:
+    """This class is used for the version check logic.  An instance of this class represents
+    a semantic version following the format major.minor.patch.  It is useful for comparing versions."""
+
+    def __init__(self, version_str):
+        self.version_str = version_str
+
+        # The version list will have the format [major, minor, patch]
+        self.version = version_str.split(".")
+        if len(self.version) != 3:
+            raise ValueError(
+                "Version class must be instantiated with a version string that follows the format 'major.minor.patch'."
+            )
+
+    def __validate_comparison_input(self, other):
+        """Assert that other has type Version"""
+        if not isinstance(other, self.__class__):
+            raise TypeError(
+                "Version comparisons are only permitted between Version instances."
+            )
+
+    def __lt__(self, other):
+        """returns True if self < other"""
+        self.__validate_comparison_input(other)
+        return (not self.__eq__(other)) and (not self.__gt__(other))
+
+    def __gt__(self, other):
+        """returns True if self > other"""
+        self.__validate_comparison_input(other)
+        return self.version > other.version
+
+    def __eq__(self, other):
+        """returns True if self == other"""
+        self.__validate_comparison_input(other)
+        return self.version == other.version
+
+    def __str__(self):
+        return self.version_str
+
+
+class EFSUtilsVersionChecker:
+    GITHUB_TIMEOUT_SEC = 0.300
+    VERSION_CHECK_POLL_INTERVAL_SEC = 3600
+    VERSION_CHECK_FILE_KEY = "time"
+    GITHUB_TAG_API_URL = "https://api.github.com/repos/aws/efs-utils/tags"
+    SHOULD_CHECK_AMZN_REPOS = "Amazon Linux" in get_system_release_version()
+
+    @staticmethod
+    def get_latest_version_by_github():
+        """Queries the github api and returns a string with the latest tag (version) for efs-utils in the form of (e.g.) 1.34.5"""
+        logging.debug("Querying github for the latest amazon-efs-utils version")
+        with urlopen(
+            EFSUtilsVersionChecker.GITHUB_TAG_API_URL,
+            timeout=EFSUtilsVersionChecker.GITHUB_TIMEOUT_SEC,
+        ) as response:
+            html = response.read()
+            string = html.decode("utf-8")
+            json_obj = json.loads(string)
+            latest_version_dict = json_obj[0]
+            latest_version_str = latest_version_dict["name"]
+            logging.debug(
+                "Latest amazon-efs-utils version found on github: "
+                + latest_version_str[1:]
+            )
+            return latest_version_str[1:]
+
+    @staticmethod
+    def get_latest_version_by_yum():
+        """
+        Queries yum and returns a string with the latest tag (version) for efs-utils in the form of (e.g.) 1.34.5.
+        Returns an empty string if amazon-efs-utils is not available on Yum
+        """
+        logging.debug("Querying yum for the latest amazon-efs-utils version")
+        ps_yum = subprocess.Popen(
+            ["yum", "info", "amazon-efs-utils"],
+            stdout=subprocess.PIPE,
+        )
+        ps_grep = subprocess.Popen(
+            ["grep", "Available Packages", "-A", "4"],
+            stdin=ps_yum.stdout,
+            stdout=subprocess.PIPE,
+        )
+        latest_version_str = subprocess.check_output(
+            ["awk", "/Version/ {printf $3}"], stdin=ps_grep.stdout
+        ).decode("utf-8")
+
+        if not latest_version_str:
+            logging.debug("amazon-efs-utils was not found by yum")
+            return ""
+
+        logging.debug(
+            "Latest amazon-efs-utils version found on yum: " + latest_version_str
+        )
+        return latest_version_str
+
+    @staticmethod
+    def warn_newer_version_available_yum(current_version, newer_version):
+        message = (
+            "We recommend you upgrade to the latest version of efs-utils by running 'yum update amazon-efs-utils'. "
+            + "Current version: "
+            + str(current_version)
+            + ". Latest version: "
+            + str(newer_version)
+        )
+        logging.warning(message)
+
+    @staticmethod
+    def warn_newer_version_available_github(current_version, newer_version):
+        message = (
+            "We recommend you install the latest version of efs-utils from github. "
+            + "Current version: "
+            + str(current_version)
+            + ". Latest version: "
+            + str(newer_version)
+        )
+        logging.warning(message)
+
+    @staticmethod
+    def get_last_version_check_time():
+        """
+        Return the date that the last amazon-efs-utils version check was performed.
+        Returns None if the version check file does not exist (indicates check hasn't happened yet).
+        """
+        version_check_file = os.path.join(STATE_FILE_DIR, LAST_VERSION_CHECK_FILE)
+        if not os.path.exists(version_check_file):
+            return None
+
+        with open(version_check_file, "r") as f:
+            data = json.load(f)
+            if EFSUtilsVersionChecker.VERSION_CHECK_FILE_KEY not in data:
+                return None
+            last_version_check_time = datetime.strptime(
+                data[EFSUtilsVersionChecker.VERSION_CHECK_FILE_KEY],
+                CERT_DATETIME_FORMAT,
+            )
+
+        return last_version_check_time
+
+    @staticmethod
+    def version_check_ready():
+        """Inspect the last version check file and return true if the time since last version check
+        is greater than VERSION_CHECK_POLL_INTERVAL"""
+        last_version_check_time = EFSUtilsVersionChecker.get_last_version_check_time()
+        if not last_version_check_time:
+            return True
+
+        elapsed_seconds = (get_utc_now() - last_version_check_time).total_seconds()
+        return elapsed_seconds >= EFSUtilsVersionChecker.VERSION_CHECK_POLL_INTERVAL_SEC
+
+    @staticmethod
+    def update_version_check_file():
+        """Write current time into the version check file"""
+        current_time_str = get_utc_now().strftime(CERT_DATETIME_FORMAT)
+        dictionary = {
+            EFSUtilsVersionChecker.VERSION_CHECK_FILE_KEY: current_time_str,
+        }
+
+        if not os.path.exists(STATE_FILE_DIR):
+            logging.warning(
+                "update_version_check_file failed: "
+                + str(STATE_FILE_DIR)
+                + " does not exist."
+            )
+            return
+
+        with open(os.path.join(STATE_FILE_DIR, LAST_VERSION_CHECK_FILE), "w+") as f:
+            json.dump(dictionary, f)
+
+    @staticmethod
+    def check_if_using_old_version(current_version_string):
+        """Log a warning and print to console if newer version of amazon-efs-utils is available.
+        The check will first query yum, and then if that fails,
+        it will pull the latest tag from the github api.
+        """
+        current_version = Version(current_version_string)
+
+        if EFSUtilsVersionChecker.SHOULD_CHECK_AMZN_REPOS:
+            try:
+                latest_yum_version = Version(
+                    EFSUtilsVersionChecker.get_latest_version_by_yum()
+                )
+                if latest_yum_version > current_version:
+                    EFSUtilsVersionChecker.warn_newer_version_available_yum(
+                        current_version, latest_yum_version
+                    )
+                    EFSUtilsVersionChecker.update_version_check_file()
+                    return
+            except Exception as err:
+                logging.debug(
+                    "Failed to query Yum for latest version of amazon-efs-utils. "
+                    + str(err)
+                )
+                pass
+
+        try:
+            latest_github_version = Version(
+                EFSUtilsVersionChecker.get_latest_version_by_github()
+            )
+            if latest_github_version > current_version:
+                EFSUtilsVersionChecker.warn_newer_version_available_github(
+                    current_version, latest_github_version
+                )
+        except Exception as err:
+            logging.debug(
+                "Failed to query Github for latest version of amazon-efs-utils.  This is expected when Github is not reachable. "
+                + str(err)
+            )
+            pass
+
+        EFSUtilsVersionChecker.update_version_check_file()
+
+        @staticmethod
+        def should_check_efs_utils_version(config):
+            """Returns True if a customer has enabled the amazon-efs-utils version check,
+            and if the last version check occurred more than VERSION_CHECK_POLL_INTERVAL seconds ago."""
+            version_check_enabled = get_boolean_config_item_value(
+                config, CONFIG_SECTION, ENABLE_VERSION_CHECK, default_value=True
+            )
+            return (
+                version_check_enabled and EFSUtilsVersionChecker.version_check_ready()
+            )
 
 
 def fatal_error(user_message, log_message=None):
@@ -867,32 +1118,6 @@ def is_pid_running(pid):
         return True
     except OSError:
         return False
-
-
-def check_if_platform_is_mac():
-    return sys.platform in MAC_OS_PLATFORM_LIST
-
-
-def get_system_release_version():
-    # MacOS does not maintain paths /etc/os-release and /etc/sys-release
-    if check_if_platform_is_mac():
-        return platform.platform()
-
-    try:
-        with open(SYSTEM_RELEASE_PATH) as f:
-            return f.read().strip()
-    except IOError:
-        logging.debug("Unable to read %s", SYSTEM_RELEASE_PATH)
-
-    try:
-        with open(OS_RELEASE_PATH) as f:
-            for line in f:
-                if "PRETTY_NAME" in line:
-                    return line.split("=")[1].strip()
-    except IOError:
-        logging.debug("Unable to read %s", OS_RELEASE_PATH)
-
-    return DEFAULT_UNKNOWN_VALUE
 
 
 def find_command_path(command, install_method):
@@ -2148,6 +2373,9 @@ def main():
                 unmount_count_for_consistency,
             )
             check_child_procs(child_procs)
+
+            if EFSUtilsVersionChecker.should_check_efs_utils_version(config):
+                EFSUtilsVersionChecker.check_if_using_old_version(VERSION)
 
             time.sleep(poll_interval_sec)
     else:

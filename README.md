@@ -10,6 +10,7 @@ The `efs-utils` package has been verified against the following Linux distributi
 |----------------------| ----- | --------- |
 | Amazon Linux 2017.09 | `rpm` | `upstart` |
 | Amazon Linux 2       | `rpm` | `systemd` |
+| Amazon Linux 2023    | `rpm` | `systemd` |
 | CentOS 7             | `rpm` | `systemd` |
 | CentOS 8             | `rpm` | `systemd` |
 | RHEL 7               | `rpm`| `systemd` |
@@ -72,6 +73,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
   - [The way to access instance metadata](#the-way-to-access-instance-metadata)
   - [Use the assumed profile credentials for IAM](#use-the-assumed-profile-credentials-for-iam)
   - [Enabling FIPS Mode](#enabling-fips-mode)
+  - [Disabling Version Check](#disabling-version-check)
   - [License Summary](#license-summary)
 
 
@@ -557,6 +559,18 @@ Threading:PTHREAD Sockets:POLL,IPv6 SSL:ENGINE,OCSP,FIPS Auth:LIBWRAP
 ```
 
 For more information on how to configure OpenSSL with FIPS see the [OpenSSL FIPS README](https://github.com/openssl/openssl/blob/master/README-FIPS.md).
+
+## Disabling Version Check
+By default, once an hour, the watchdog daemon service will check to see if a newer version of amazon-efs-utils is available on github or yum.
+You can disable this check by setting the `enable_version_check` field in `/etc/amazon/efs/efs-utils.conf` to `false`. For example, 
+```bash
+sudo sed -i 's/enable_version_check = true/enable_version_check = false/' /etc/amazon/efs/efs-utils.conf
+```  
+Or on MacOS:  
+```bash
+VERSION=<efs-utils version, e.g. 1.34.1>
+sudo sed -i 's/enable_version_check = true/enable_version_check = false/' /usr/local/Cellar/amazon-efs-utils/${VERSION}/libexec/etc/amazon/efs/efs-utils.conf
+```
 
 ## License Summary
 
