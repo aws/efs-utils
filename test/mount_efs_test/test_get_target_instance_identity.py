@@ -84,9 +84,9 @@ def get_config(dns_name_format, region=None):
     return config
 
 
-def get_target_region_helper():
+def get_target_region_helper(options={}):
     config = get_config(DEFAULT_DNS_NAME_FORMAT)
-    return mount_efs.get_target_region(config)
+    return mount_efs.get_target_region(config, options)
 
 
 def get_target_az_helper(options={}):
@@ -101,13 +101,13 @@ Get target region from ec2 instance metadata
 def test_get_target_region_with_token(mocker):
     mocker.patch("mount_efs.get_aws_ec2_metadata_token", return_value="ABCDEFG==")
     mocker.patch("mount_efs.urlopen", return_value=MockUrlLibResponse())
-    assert "us-east-1" == get_target_region_helper()
+    assert "us-east-1" == get_target_region_helper({})
 
 
 def test_get_target_region_without_token(mocker):
     mocker.patch("mount_efs.get_aws_ec2_metadata_token", return_value=None)
     mocker.patch("mount_efs.urlopen", return_value=MockUrlLibResponse())
-    assert "us-east-1" == get_target_region_helper()
+    assert "us-east-1" == get_target_region_helper({})
 
 
 # Reproduce https://github.com/aws/efs-utils/issues/46
@@ -116,7 +116,7 @@ def test_get_target_region_token_endpoint_fetching_timeout(mocker):
     mocker.patch(
         "mount_efs.urlopen", side_effect=[socket.timeout, MockUrlLibResponse()]
     )
-    assert "us-east-1" == get_target_region_helper()
+    assert "us-east-1" == get_target_region_helper({})
 
 
 def test_get_target_region_token_fetch_httperror(mocker):
@@ -127,7 +127,7 @@ def test_get_target_region_token_fetch_httperror(mocker):
             MockUrlLibResponse(),
         ],
     )
-    assert "us-east-1" == get_target_region_helper()
+    assert "us-east-1" == get_target_region_helper({})
 
 
 def test_get_target_region_token_fetch_unknownerror(mocker):
@@ -135,7 +135,7 @@ def test_get_target_region_token_fetch_unknownerror(mocker):
         "mount_efs.urlopen",
         side_effect=[Exception("Unknown Exception"), MockUrlLibResponse()],
     )
-    assert "us-east-1" == get_target_region_helper()
+    assert "us-east-1" == get_target_region_helper({})
 
 
 def test_get_target_region_py3_no_charset(mocker):
@@ -144,7 +144,7 @@ def test_get_target_region_py3_no_charset(mocker):
         "mount_efs.urlopen",
         return_value=MockUrlLibResponse(data=bytearray(INSTANCE_DOCUMENT, "us-ascii")),
     )
-    assert "us-east-1" == get_target_region_helper()
+    assert "us-east-1" == get_target_region_helper({})
 
 
 def test_get_target_region_py3_utf8_charset(mocker):
@@ -155,14 +155,14 @@ def test_get_target_region_py3_utf8_charset(mocker):
         return_value=MockUrlLibResponse(data=bytearray(INSTANCE_DOCUMENT, charset)),
         headers=MockHeaders(content_charset=charset),
     )
-    assert "us-east-1" == get_target_region_helper()
+    assert "us-east-1" == get_target_region_helper({})
 
 
 def test_get_target_region_from_metadata(mocker):
     mocker.patch("mount_efs.get_aws_ec2_metadata_token", return_value=None)
     mocker.patch("mount_efs.urlopen", return_value=MockUrlLibResponse())
     config = get_config("{fs_id}.efs.{region}.{dns_name_suffix}", None)
-    assert TARGET_REGION == mount_efs.get_target_region(config)
+    assert TARGET_REGION == mount_efs.get_target_region(config, {})
 
 
 def test_get_target_region_config_metadata_unavailable(mocker, capsys):
@@ -170,7 +170,7 @@ def test_get_target_region_config_metadata_unavailable(mocker, capsys):
     mocker.patch("mount_efs.urlopen", side_effect=URLError("test error"))
     config = get_config("{fs_id}.efs.{region}.{dns_name_suffix}")
     with pytest.raises(SystemExit) as ex:
-        mount_efs.get_target_region(config)
+        mount_efs.get_target_region(config, {})
 
     assert 0 != ex.value.code
     out, err = capsys.readouterr()
@@ -187,7 +187,7 @@ def _test_get_target_region_error(mocker, capsys, response=None, error=None):
         mocker.patch("mount_efs.urlopen", side_effect=error)
 
     with pytest.raises(SystemExit) as ex:
-        get_target_region_helper()
+        get_target_region_helper({})
 
     assert 0 != ex.value.code
 
@@ -228,13 +228,13 @@ Get target region from configuration file
 
 def test_get_target_region_from_config_variable(mocker):
     config = get_config("{az}.{fs_id}.efs.us-east-2.{dns_name_suffix}", TARGET_REGION)
-    assert TARGET_REGION == mount_efs.get_target_region(config)
+    assert TARGET_REGION == mount_efs.get_target_region(config, {})
 
 
 def _test_get_target_region_from_dns_format(mocker, config):
     mocker.patch("mount_efs.get_aws_ec2_metadata_token", return_value=None)
     mocker.patch("mount_efs.urlopen", side_effect=URLError("test error"))
-    assert TARGET_REGION == mount_efs.get_target_region(config)
+    assert TARGET_REGION == mount_efs.get_target_region(config, {})
 
 
 def test_get_target_region_from_legacy_dns_name_format(mocker):
@@ -269,6 +269,9 @@ def test_get_target_az_not_present_in_options_and_instance_metadata(mocker):
 """
 Get target region from options
 """
+
+def test_get_target_region_from_options(mocker):
+    assert TARGET_REGION == get_target_region_helper(options={"region": TARGET_REGION})
 
 
 def test_get_target_az_from_options(mocker):
