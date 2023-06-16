@@ -13,6 +13,11 @@ import pytest
 
 import watchdog
 
+try:
+    import ConfigParser
+except ImportError:
+    from configparser import ConfigParser
+
 OLD_VERSION = "1.34.3"
 GITHUB_VERSION = "1.35.9"
 YUM_VERSION = "1.35.8"
@@ -171,3 +176,21 @@ def test_version_empty_version_str():
     """Assert that an Exception is thrown when we try to construct a Version instance with an empty string"""
     with pytest.raises(Exception):
         watchdog.Version("")
+
+
+def test_should_check_efs_utils_version(mocker):
+    mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
+    mocker.patch(
+        "watchdog.EFSUtilsVersionChecker.version_check_ready", return_value=True
+    )
+    config = ConfigParser()
+    assert watchdog.EFSUtilsVersionChecker.should_check_efs_utils_version(config)
+
+    mocker.patch("watchdog.get_boolean_config_item_value", return_value=False)
+    assert not watchdog.EFSUtilsVersionChecker.should_check_efs_utils_version(config)
+
+    mocker.patch(
+        "watchdog.EFSUtilsVersionChecker.version_check_ready", return_value=False
+    )
+    mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
+    assert not watchdog.EFSUtilsVersionChecker.should_check_efs_utils_version(config)

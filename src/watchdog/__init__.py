@@ -421,16 +421,14 @@ class EFSUtilsVersionChecker:
 
         EFSUtilsVersionChecker.update_version_check_file()
 
-        @staticmethod
-        def should_check_efs_utils_version(config):
-            """Returns True if a customer has enabled the amazon-efs-utils version check,
-            and if the last version check occurred more than VERSION_CHECK_POLL_INTERVAL seconds ago."""
-            version_check_enabled = get_boolean_config_item_value(
-                config, CONFIG_SECTION, ENABLE_VERSION_CHECK, default_value=True
-            )
-            return (
-                version_check_enabled and EFSUtilsVersionChecker.version_check_ready()
-            )
+    @staticmethod
+    def should_check_efs_utils_version(config):
+        """Returns True if a customer has enabled the amazon-efs-utils version check,
+        and if the last version check occurred more than VERSION_CHECK_POLL_INTERVAL seconds ago."""
+        version_check_enabled = get_boolean_config_item_value(
+            config, CONFIG_SECTION, ENABLE_VERSION_CHECK, default_value=True
+        )
+        return version_check_enabled and EFSUtilsVersionChecker.version_check_ready()
 
 
 def fatal_error(user_message, log_message=None):
