@@ -8,7 +8,7 @@ The `efs-utils` package has been verified against the following Linux distributi
 
 | Distribution         | Package Type | `init` System |
 |----------------------| ----- | --------- |
-| Amazon Linux 2017.09 | `rpm` | `upstart` |
+| Amazon Linux 1       | `rpm` | `upstart` |
 | Amazon Linux 2       | `rpm` | `systemd` |
 | Amazon Linux 2023    | `rpm` | `systemd` |
 | CentOS 7             | `rpm` | `systemd` |
@@ -43,7 +43,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
   - [Prerequisites](#prerequisites)
   - [Optional](#optional)
   - [Installation](#installation)
-    - [On Amazon Linux distributions](#on-amazon-linux-distributions)
+    - [On Amazon Linux](#on-amazon-linux)
     - [Install via AWS Systems Manager Distributor](#install-via-aws-systems-manager-distributor)
     - [On other Linux distributions](#on-other-linux-distributions)
     - [On MacOS Big Sur, macOS Monterey and macOS Ventura distribution](#on-macos-big-sur-macos-monterey-and-macos-ventura-distribution)
@@ -90,9 +90,9 @@ The `efs-utils` package has been verified against the following MacOS distributi
 
 ## Installation
 
-### On Amazon Linux distributions
+### On Amazon Linux
 
-For those using Amazon Linux or Amazon Linux 2, the easiest way to install `efs-utils` is from Amazon's repositories:
+For those using Amazon Linux, the easiest way to install `efs-utils` is from Amazon's repositories using `yum` (or `dnf` on AL2023):
 
 ```bash
 $ sudo yum -y install amazon-efs-utils
