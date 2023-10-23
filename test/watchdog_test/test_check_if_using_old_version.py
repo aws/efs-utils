@@ -35,6 +35,10 @@ def test_check_if_using_old_version_yum_works(mocker, caplog):
         return_value=GITHUB_VERSION,
     )
     mocker.patch("watchdog.EFSUtilsVersionChecker.update_version_check_file")
+    mocker.patch(
+        "watchdog.EFSUtilsVersionChecker.SHOULD_CHECK_AMZN_REPOS",
+        return_value=True,
+    )
 
     with caplog.at_level(logging.INFO):
         watchdog.EFSUtilsVersionChecker.check_if_using_old_version(OLD_VERSION)
