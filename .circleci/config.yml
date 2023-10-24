@@ -33,7 +33,6 @@ commands:
           path: build
   build-deb:
     steps:
-      - checkout
       - run:
           name: Repo update
           command: |
@@ -41,7 +40,12 @@ commands:
       - run:
           name: Install dependencies
           command: |
-            apt-get -y install binutils
+            apt-get -y install binutils git
+      - run:
+          name: Add local build repo as safe git directory
+          command: |
+            git config --global --add safe.directory /tmp/_circleci_local_build_repo
+      - checkout
       - run:
           name: Build DEB
           command: |
@@ -112,6 +116,14 @@ commands:
         command: |
           sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
           sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+  build-debian-eol-repo:
+    steps:
+      - run:
+          name: change repo url to archive.debian.org and remove updates repo for EOL versions
+          command: |
+            sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list
+            sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list
+            sed -i '/stretch-updates/d' /etc/apt/sources.list
 jobs:
   test:
     parameters:
@@ -159,6 +171,16 @@ jobs:
     steps:
       - build-centos-repo
       - build-rpm
+  build-debian-eol-rpm-package:
+    parameters:
+      image:
+        type: string
+    executor:
+      name: linux
+      image: << parameters.image >>
+    steps:
+      - build-debian-eol-repo
+      - build-deb
 workflows:
   workflow:
     jobs:
@@ -195,7 +217,7 @@ workflows:
       - build-deb-package:
           name: ubuntu22
           image: ubuntu:22.04
-      - build-deb-package:
+      - build-debian-eol-rpm-package:
           name: debian9
           image: debian:stretch
       - build-deb-package:
