@@ -28,7 +28,7 @@ STATE = {
     "pid": PID,
     "commonName": "deadbeef.com",
     "certificate": "/tmp/foobar",
-    "certificateCreationTime": datetime.utcnow().strftime(
+    "certificateCreationTime": datetime.now(datetime.UTC).strftime(
         watchdog.CERT_DATETIME_FORMAT
     ),
     "mountStateDir": "fs-deadbeef.mount.dir.12345",

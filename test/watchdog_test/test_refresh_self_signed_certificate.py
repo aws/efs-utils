@@ -9,9 +9,8 @@ import logging
 import os
 from datetime import datetime, timedelta
 
-import pytest
-
 import mount_efs
+import pytest
 import watchdog
 
 try:
@@ -472,7 +471,9 @@ def test_refresh_self_signed_certificate_send_sighup(mocker, tmpdir, caplog):
 
     config = _get_config()
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
-    four_hours_back = (datetime.utcnow() - timedelta(hours=4)).strftime(DT_PATTERN)
+    four_hours_back = (datetime.now(datetime.UTC) - timedelta(hours=4)).strftime(
+        DT_PATTERN
+    )
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     state = _create_certificate_and_state(
         tls_dict, str(tmpdir), pk_path, four_hours_back, ap_id=AP_ID
@@ -494,7 +495,9 @@ def test_refresh_self_signed_certificate_pid_not_running(mocker, tmpdir, caplog)
 
     config = _get_config()
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
-    four_hours_back = (datetime.utcnow() - timedelta(hours=4)).strftime(DT_PATTERN)
+    four_hours_back = (datetime.now(datetime.UTC) - timedelta(hours=4)).strftime(
+        DT_PATTERN
+    )
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     state = _create_certificate_and_state(
         tls_dict, str(tmpdir), pk_path, four_hours_back, False, ap_id=AP_ID

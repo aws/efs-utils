@@ -10,7 +10,6 @@ import tempfile
 from datetime import date, datetime
 
 import pytest
-
 import watchdog
 
 try:
@@ -88,7 +87,7 @@ def test_check_if_using_old_version_yum_github_fail(mocker, caplog):
 
 
 def test_get_last_version_check_date(mocker, tmp_path):
-    current_time_str = datetime.utcnow().strftime(CERT_DATETIME_FORMAT)
+    current_time_str = datetime.now(datetime.UTC).strftime(CERT_DATETIME_FORMAT)
     dictionary = {
         "time": current_time_str,
     }
@@ -107,7 +106,7 @@ def test_get_last_version_check_date(mocker, tmp_path):
 
 def test_get_last_version_check_bad_format(mocker, tmp_path):
     """Make sure that watchdog does not crash if the version check file does not have a format we expect"""
-    current_time_str = datetime.utcnow().strftime(CERT_DATETIME_FORMAT)
+    current_time_str = datetime.now(datetime.UTC).strftime(CERT_DATETIME_FORMAT)
     dictionary = {
         "bad_key": current_time_str,
     }
@@ -135,7 +134,7 @@ def test_version_check_ready(mocker):
 
 def test_update_version_check_file(mocker, tmp_path):
     """Write current time into the version check file"""
-    current_time = datetime.utcnow()
+    current_time = datetime.now(datetime.UTC)
     mocker.patch("watchdog.get_utc_now", return_value=current_time)
     version_check_file = tempfile.NamedTemporaryFile(mode="w+", dir=str(tmp_path))
     mocker.patch("os.path.join", return_value=version_check_file.name)

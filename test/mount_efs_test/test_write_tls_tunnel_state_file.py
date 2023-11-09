@@ -27,7 +27,7 @@ def test_write_tls_tunnel_state_file_netns(tmpdir):
 
     mount_point = "/home/user/foo/mount"
 
-    current_time = datetime.utcnow()
+    current_time = datetime.now(datetime.UTC)
     cert_creation_time = current_time.strftime(DATETIME_FORMAT)
 
     cert_details = {
@@ -85,7 +85,7 @@ def test_write_tls_tunnel_state_file(tmpdir):
 
     mount_point = "/home/user/foo/mount"
 
-    current_time = datetime.utcnow()
+    current_time = datetime.now(datetime.UTC)
     cert_creation_time = current_time.strftime(DATETIME_FORMAT)
 
     cert_details = {

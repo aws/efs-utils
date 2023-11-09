@@ -47,7 +47,8 @@ try:
 except ImportError:
     from urllib import urlencode
 
-    from urllib2 import HTTPError, HTTPHandler, Request, URLError, build_opener, urlopen
+    from urllib2 import (HTTPError, HTTPHandler, Request, URLError,
+                         build_opener, urlopen)
 
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -2229,7 +2230,7 @@ def get_utc_now():
     """
     Wrapped for patching purposes in unit tests
     """
-    return datetime.utcnow()
+    return datetime.now(datetime.UTC)
 
 
 def check_process_name(pid):
