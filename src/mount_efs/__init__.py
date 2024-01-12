@@ -85,7 +85,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.35.0"
+VERSION = "1.35.1"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -238,7 +238,7 @@ EFS_ONLY_OPTIONS = [
     "verify",
     "rolearn",
     "jwtpath",
-    "fsap"
+    "fsap",
 ]
 
 UNSUPPORTED_OPTIONS = ["capath"]
@@ -1761,7 +1761,6 @@ def get_nfs_mount_options(options):
 
 
 def mount_nfs(config, dns_name, path, mountpoint, options, fallback_ip_address=None):
-
     if "tls" in options:
         mount_path = "127.0.0.1:%s" % path
     elif fallback_ip_address:
@@ -1827,7 +1826,7 @@ def call_nfs_mount_command_with_retry_succeed(
 ):
     def backoff_function(i):
         """Backoff exponentially and add a constant 0-1 second jitter"""
-        return (1.5 ** i) + random.random()
+        return (1.5**i) + random.random()
 
     if not get_boolean_config_item_value(
         config, CONFIG_SECTION, "retry_nfs_mount_command", default_value=True
@@ -2090,12 +2089,15 @@ def create_certificate(
     not_before = get_certificate_timestamp(current_time, minutes=-NOT_BEFORE_MINS)
     not_after = get_certificate_timestamp(current_time, hours=NOT_AFTER_HOURS)
 
-    cmd = "openssl ca -startdate %s -enddate %s -selfsign -batch -notext -config %s -in %s -out %s" % (
-        not_before,
-        not_after,
-        certificate_config,
-        certificate_signing_request,
-        certificate,
+    cmd = (
+        "openssl ca -startdate %s -enddate %s -selfsign -batch -notext -config %s -in %s -out %s"
+        % (
+            not_before,
+            not_after,
+            certificate_config,
+            certificate_signing_request,
+            certificate,
+        )
     )
     subprocess_call(cmd, "Failed to create self-signed client-side certificate")
     return current_time.strftime(CERT_DATETIME_FORMAT)
@@ -2148,8 +2150,10 @@ def check_and_create_private_key(base_path=STATE_FILE_DIR):
 
     def generate_key():
         if os.path.isfile(key):
+            # If the openssl genpkey command is interrupted or isn't successful,
+            # it will leave behind an empty file.
             if os.path.getsize(key) == 0:
-                logging.info("Purging empty private key file")
+                logging.warning("Purging empty private key file")
                 os.remove(key)
             else:
                 return
@@ -3669,7 +3673,6 @@ def handle_general_botocore_exceptions(error):
 # NFS client might see a throughput drop in kernel 5.4+, especially for sequential read.
 # To fix the issue, below function will modify read_ahead_kb to 15 * rsize (1MB by default) after mount.
 def optimize_readahead_window(mountpoint, options, config):
-
     if not should_revise_readahead(config):
         return
 

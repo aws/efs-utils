@@ -91,6 +91,12 @@ def test_tlsport():
     assert "tls" not in nfs_opts
 
 
+def test_fsap_efs_only():
+    nfs_opts = mount_efs.get_nfs_mount_options({"fsap": None})
+
+    assert "fsap" not in nfs_opts
+
+
 def test_get_default_nfs_mount_options_macos(mocker):
     mocker.patch("mount_efs.check_if_platform_is_mac", return_value=True)
     nfs_opts = mount_efs.get_nfs_mount_options({})

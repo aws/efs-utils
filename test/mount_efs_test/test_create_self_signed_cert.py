@@ -711,3 +711,25 @@ def test_create_ca_conf_no_ap_no_iam_with_client_source(tmpdir):
     )
 
     assert full_config_body == matching_config_body
+
+
+def test_check_and_create_private_key_key_was_empty(mocker, tmpdir):
+    pk_path = _get_mock_private_key_path(mocker, tmpdir)
+    with open(pk_path, "w") as pk_file:
+        pass
+
+    state_file_dir = str(tmpdir)
+    mount_efs.check_and_create_private_key(state_file_dir)
+    assert os.path.getsize(pk_path) > 0
+
+
+def test_check_and_create_private_key_key_already_exists(mocker, tmpdir):
+    pk_path = _get_mock_private_key_path(mocker, tmpdir)
+    with open(pk_path, "w") as pk_file:
+        pk_file.write("private key file contents")
+
+    call_mock = mocker.patch("mount_efs.subprocess_call")
+
+    state_file_dir = str(tmpdir)
+    mount_efs.check_and_create_private_key(state_file_dir)
+    assert call_mock.call_count == 0

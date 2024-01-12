@@ -41,7 +41,6 @@ def _get_config(
     stunnel_libwrap_option_supported=True,
     fips_mode_enabled=False,
 ):
-
     options = []
     if stunnel_check_cert_hostname_supported:
         options.append(b"checkHost              = peer certificate host name pattern")
@@ -163,7 +162,6 @@ def _get_expected_efs_config(
     disable_libwrap=True,
     fallback_ip_address=None,
 ):
-
     expected_efs_config = dict(mount_efs.STUNNEL_EFS_CONFIG)
     expected_efs_config["accept"] = expected_efs_config["accept"] % port
     if not fallback_ip_address:

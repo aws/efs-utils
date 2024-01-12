@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "1.35.0"
+VERSION = "1.35.1"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -212,7 +212,8 @@ def get_system_release_version():
 
 class Version:
     """This class is used for the version check logic.  An instance of this class represents
-    a semantic version following the format major.minor.patch.  It is useful for comparing versions."""
+    a semantic version following the format major.minor.patch.  It is useful for comparing versions.
+    """
 
     def __init__(self, version_str):
         self.version_str = version_str
@@ -424,7 +425,8 @@ class EFSUtilsVersionChecker:
     @staticmethod
     def should_check_efs_utils_version(config):
         """Returns True if a customer has enabled the amazon-efs-utils version check,
-        and if the last version check occurred more than VERSION_CHECK_POLL_INTERVAL seconds ago."""
+        and if the last version check occurred more than VERSION_CHECK_POLL_INTERVAL seconds ago.
+        """
         version_check_enabled = get_boolean_config_item_value(
             config, CONFIG_SECTION, ENABLE_VERSION_CHECK, default_value=True
         )
@@ -963,7 +965,6 @@ def get_current_local_nfs_mounts(mount_file="/proc/mounts"):
 
 
 def get_nfs_mount_options_on_macos(mount_point, mount_server="127.0.0.1:/"):
-
     if not mount_point:
         logging.warning("Unable to get local mount options with empty mount point")
         return None
@@ -1762,12 +1763,15 @@ def recreate_certificate(
     not_before = get_certificate_timestamp(current_time, minutes=-NOT_BEFORE_MINS)
     not_after = get_certificate_timestamp(current_time, hours=NOT_AFTER_HOURS)
 
-    cmd = "openssl ca -startdate %s -enddate %s -selfsign -batch -notext -config %s -in %s -out %s" % (
-        not_before,
-        not_after,
-        certificate_config,
-        certificate_signing_request,
-        certificate,
+    cmd = (
+        "openssl ca -startdate %s -enddate %s -selfsign -batch -notext -config %s -in %s -out %s"
+        % (
+            not_before,
+            not_after,
+            certificate_config,
+            certificate_signing_request,
+            certificate,
+        )
     )
     subprocess_call(cmd, "Failed to create self-signed client-side certificate")
     return current_time.strftime(CERT_DATETIME_FORMAT)
@@ -1822,8 +1826,10 @@ def check_and_create_private_key(base_path=STATE_FILE_DIR):
 
     def generate_key():
         if os.path.isfile(key):
+            # If the openssl genpkey command is interrupted or isn't successful,
+            # it will leave behind an empty file.
             if os.path.getsize(key) == 0:
-                logging.info("Purging empty private key file")
+                logging.warning("Purging empty private key file")
                 os.remove(key)
             else:
                 return

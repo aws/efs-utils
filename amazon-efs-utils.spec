@@ -35,7 +35,7 @@
 %endif
 
 Name      : amazon-efs-utils
-Version   : 1.35.0
+Version   : 1.35.1
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -53,7 +53,14 @@ Requires  : stunnel5
 Requires  : stunnel >= 4.56
 %endif
 Requires  : %{python_requires}
-Requires  : openssl >= 1.0.2
+
+%define openssl_3_available %(rpm -q openssl-3 >/dev/null && echo 1 || echo 0)
+%if %{openssl_3_available}
+Requires: openssl-3
+%else
+Requires: openssl >= 1.0.2, openssl >= 3.0.0
+%endif
+
 Requires  : util-linux
 Requires  : which
 
@@ -137,6 +144,12 @@ fi
 %clean
 
 %changelog
+* Wed Jan 10 2024 Sean Zatz <zatsea@amazon.com> - 1.35.1
+- Add 'fsap' to ignored mount option list
+- Accept openssl 3.0 in rpm spec file
+- Watchdog now prints a log message if efs-utils is on an old version
+- Regenerate the private key if the file is empty
+
 * Wed Mar 15 2023 Soyeon Ju <mjsoyeon@amazon.com> - 1.35.0
 - Support MacOS Ventura, Oracle8 distribution
 - Add debug statement for size of state file write
