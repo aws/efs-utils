@@ -72,6 +72,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
     - [Step 2. Allow DescribeMountTargets and DescribeAvailabilityZones action in the IAM policy](#step-2-allow-describemounttargets-and-describeavailabilityzones-action-in-the-iam-policy)
   - [The way to access instance metadata](#the-way-to-access-instance-metadata)
   - [Use the assumed profile credentials for IAM](#use-the-assumed-profile-credentials-for-iam)
+  - [Enabling FIPS Mode](#enabling-fips-mode)
   - [Disabling Version Check](#disabling-version-check)
   - [License Summary](#license-summary)
 
@@ -540,6 +541,25 @@ $ sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
 $ sudo mount -t efs -o tls,iam,rolearn="ROLE_ARN",jwtpath="PATH/JWT_TOKEN_FILE" file-system-id efs-mount-point/
 ```
 
+## Enabling FIPS Mode
+Efs-Utils is able to enter FIPS mode when mounting your file system. To enable FIPS you need to modify the EFS-Utils config file:
+```bash
+sed -i "s/fips_mode_enabled = false/fips_mode_enabled = true/" /etc/amazon/efs/efs-utils.conf
+```
+This will enable any potential API call from EFS-Utils to use FIPS endpoints and cause stunnel to enter FIPS mode 
+
+Note: FIPS mode requires that the installed version of OpenSSL is compiled with FIPS.
+
+To verify that the installed version is compiled with FIPS, look for `OpenSSL X.X.Xx-fips` in the `stunnel -version` command output e.g.
+```bash
+$ stunnel -version
+stunnel 4.56 on x86_64-koji-linux-gnu platform
+Compiled/running with OpenSSL 1.0.2k-fips  26 Jan 2017
+Threading:PTHREAD Sockets:POLL,IPv6 SSL:ENGINE,OCSP,FIPS Auth:LIBWRAP
+```
+
+For more information on how to configure OpenSSL with FIPS see the [OpenSSL FIPS README](https://github.com/openssl/openssl/blob/master/README-FIPS.md).
+
 ## Disabling Version Check
 By default, once an hour, the watchdog daemon service will check to see if a newer version of amazon-efs-utils is available on github or yum.
 You can disable this check by setting the `enable_version_check` field in `/etc/amazon/efs/efs-utils.conf` to `false`. For example, 
@@ -551,10 +571,6 @@ Or on MacOS:
 VERSION=<efs-utils version, e.g. 1.34.1>
 sudo sed -i 's/enable_version_check = true/enable_version_check = false/' /usr/local/Cellar/amazon-efs-utils/${VERSION}/libexec/etc/amazon/efs/efs-utils.conf
 ```
-
-## EFS FIPS Compliance Status: 
-The EFS API is currently FIPS compliant. However, our EFS server is in the process of transitioning to use FIPS-compliant cryptographic libraries. We are committed to achieving full FIPS compliance for our file system server and will keep our documentation updated with the latest developments.
-
 
 ## License Summary
 
