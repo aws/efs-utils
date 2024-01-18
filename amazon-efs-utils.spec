@@ -54,13 +54,7 @@ Requires  : stunnel >= 4.56
 %endif
 Requires  : %{python_requires}
 
-%define openssl_3_available %(rpm -q openssl-3 >/dev/null && echo 1 || echo 0)
-%if %{openssl_3_available}
-Requires: openssl-3
-%else
-Requires: openssl >= 1.0.2, openssl >= 3.0.0
-%endif
-
+Requires  : openssl >= 1.0.2
 Requires  : util-linux
 Requires  : which
 
