@@ -38,6 +38,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
 | MacOS Big Sur  | `launchd` |
 | MacOS Monterey | `launchd` |
 | MacOS Ventura  | `launchd` |
+| MacOS Sonoma   | `launchd` |
 
 ## README contents
   - [Prerequisites](#prerequisites)
@@ -158,11 +159,11 @@ $ ./build-deb.sh
 $ sudo apt-get -y install ./build/amazon-efs-utils*deb
 ```
 
-### On MacOS Big Sur, macOS Monterey and macOS Ventura distribution
+### On macOS Big Sur, Monterey, Ventura or Sonoma
 
-For EC2 Mac instances running macOS Big Sur, macOS Monterey and macOS Ventura, you can install amazon-efs-utils from the 
+For EC2 Mac instances running macOS Big Sur, Monterey, Ventura, or Sonoma, you can install amazon-efs-utils from the 
 [homebrew-aws](https://github.com/aws/homebrew-aws) respository. **Note that this will ONLY work on EC2 instances
-running macOS Big Sur, macOS Monterey and macOS Ventura, not local Mac computers.**
+running macOS Big Sur, Monterey, Ventura or Sonoma and not on local Apple mac hardware.**
 ```bash
 brew install amazon-efs-utils
 ```
