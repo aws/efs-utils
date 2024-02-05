@@ -7,29 +7,30 @@ Utilities for Amazon Elastic File System (EFS)
 The `efs-utils` package has been verified against the following Linux distributions:
 
 | Distribution         | Package Type | `init` System |
-|----------------------| ----- | --------- |
-| Amazon Linux 2017.09 | `rpm` | `upstart` |
-| Amazon Linux 2       | `rpm` | `systemd` |
-| Amazon Linux 2023    | `rpm` | `systemd` |
-| CentOS 7             | `rpm` | `systemd` |
-| CentOS 8             | `rpm` | `systemd` |
-| RHEL 7               | `rpm`| `systemd` |
-| RHEL 8               | `rpm`| `systemd` |
-| Fedora 28            | `rpm` | `systemd` |
-| Fedora 29            | `rpm` | `systemd` |
-| Fedora 30            | `rpm` | `systemd` |
-| Fedora 31            | `rpm` | `systemd` |
-| Fedora 32            | `rpm` | `systemd` |
-| Debian 9             | `deb` | `systemd` |
-| Debian 10            | `deb` | `systemd` |
-| Ubuntu 16.04         | `deb` | `systemd` |
-| Ubuntu 18.04         | `deb` | `systemd` |
-| Ubuntu 20.04         | `deb` | `systemd` |
-| OpenSUSE Leap        | `rpm` | `systemd` |
-| OpenSUSE Tumbleweed  | `rpm` | `systemd` |
-| Oracle8              | `rpm` | `systemd` |
-| SLES 12              | `rpm` | `systemd` |
-| SLES 15              | `rpm` | `systemd` |
+|----------------------|--------------| --------- |
+| Amazon Linux 2017.09 | `rpm`        | `upstart` |
+| Amazon Linux 2       | `rpm`        | `systemd` |
+| Amazon Linux 2023    | `rpm`        | `systemd` |
+| CentOS 7             | `rpm`        | `systemd` |
+| CentOS 8             | `rpm`        | `systemd` |
+| RHEL 7               | `rpm`        | `systemd` |
+| RHEL 8               | `rpm`        | `systemd` |
+| RHEL 9               | `rpm`        | `systemd` |
+| Fedora 28            | `rpm`        | `systemd` |
+| Fedora 29            | `rpm`        | `systemd` |
+| Fedora 30            | `rpm`        | `systemd` |
+| Fedora 31            | `rpm`        | `systemd` |
+| Fedora 32            | `rpm`        | `systemd` |
+| Debian 9             | `deb`        | `systemd` |
+| Debian 10            | `deb`        | `systemd` |
+| Ubuntu 16.04         | `deb`        | `systemd` |
+| Ubuntu 18.04         | `deb`        | `systemd` |
+| Ubuntu 20.04         | `deb`        | `systemd` |
+| OpenSUSE Leap        | `rpm`        | `systemd` |
+| OpenSUSE Tumbleweed  | `rpm`        | `systemd` |
+| Oracle8              | `rpm`        | `systemd` |
+| SLES 12              | `rpm`        | `systemd` |
+| SLES 15              | `rpm`        | `systemd` |
 
 The `efs-utils` package has been verified against the following MacOS distributions:
 
