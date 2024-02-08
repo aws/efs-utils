@@ -272,6 +272,7 @@ OS_RELEASE_PATH = "/etc/os-release"
 MACOS_BIG_SUR_RELEASE = "macOS-11"
 MACOS_MONTEREY_RELEASE = "macOS-12"
 MACOS_VENTURA_RELEASE = "macOS-13"
+MACOS_SONOMA_RELEASE = "macOS-14"
 
 
 # Multiplier for max read ahead buffer size
@@ -285,11 +286,12 @@ SKIP_NO_SO_BINDTODEVICE_RELEASES = [
     MACOS_BIG_SUR_RELEASE,
     MACOS_MONTEREY_RELEASE,
     MACOS_VENTURA_RELEASE,
+    MACOS_SONOMA_RELEASE
 ]
 
 MAC_OS_PLATFORM_LIST = ["darwin"]
-# MacOS Versions : Ventura - 22.*, Monterey - 21.*, Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
-MAC_OS_SUPPORTED_VERSION_LIST = ["20", "21", "22"]
+# MacOS Versions : Sonoma - 23.*, Ventura - 22.*, Monterey - 21.*, Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
+MAC_OS_SUPPORTED_VERSION_LIST = ["20", "21", "22", "23"]
 
 AWS_FIPS_ENDPOINT_CONFIG_ENV = "AWS_USE_FIPS_ENDPOINT"
 ECS_URI_ENV = "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
