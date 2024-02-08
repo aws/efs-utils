@@ -16,11 +16,9 @@ The `efs-utils` package has been verified against the following Linux distributi
 | RHEL 7               | `rpm`        | `systemd` |
 | RHEL 8               | `rpm`        | `systemd` |
 | RHEL 9               | `rpm`        | `systemd` |
-| Fedora 28            | `rpm`        | `systemd` |
-| Fedora 29            | `rpm`        | `systemd` |
-| Fedora 30            | `rpm`        | `systemd` |
-| Fedora 31            | `rpm`        | `systemd` |
-| Fedora 32            | `rpm`        | `systemd` |
+| Fedora 38            | `rpm`        | `systemd` |
+| Fedora 39            | `rpm`        | `systemd` |
+| Fedora 40 (rawhide)  | `rpm`        | `systemd` |
 | Debian 9             | `deb`        | `systemd` |
 | Debian 10            | `deb`        | `systemd` |
 | Ubuntu 16.04         | `deb`        | `systemd` |
