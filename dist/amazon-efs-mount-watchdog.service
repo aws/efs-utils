@@ -12,7 +12,7 @@ Before=remote-fs-pre.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env amazon-efs-mount-watchdog
+ExecStart=/usr/bin/amazon-efs-mount-watchdog
 KillMode=process
 Restart=on-failure
 RestartSec=15s
