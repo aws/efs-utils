@@ -8,18 +8,14 @@ The `efs-utils` package has been verified against the following Linux distributi
 
 | Distribution         | Package Type | `init` System |
 |----------------------| ----- | --------- |
-| Amazon Linux 2017.09 | `rpm` | `upstart` |
+| Amazon Linux 1       | `rpm` | `upstart` |
 | Amazon Linux 2       | `rpm` | `systemd` |
 | Amazon Linux 2023    | `rpm` | `systemd` |
 | CentOS 7             | `rpm` | `systemd` |
 | CentOS 8             | `rpm` | `systemd` |
 | RHEL 7               | `rpm`| `systemd` |
 | RHEL 8               | `rpm`| `systemd` |
-| Fedora 28            | `rpm` | `systemd` |
-| Fedora 29            | `rpm` | `systemd` |
-| Fedora 30            | `rpm` | `systemd` |
-| Fedora 31            | `rpm` | `systemd` |
-| Fedora 32            | `rpm` | `systemd` |
+| Fedora               | `rpm` | `systemd` |
 | Debian 9             | `deb` | `systemd` |
 | Debian 10            | `deb` | `systemd` |
 | Ubuntu 16.04         | `deb` | `systemd` |
@@ -44,7 +40,8 @@ The `efs-utils` package has been verified against the following MacOS distributi
   - [Prerequisites](#prerequisites)
   - [Optional](#optional)
   - [Installation](#installation)
-    - [On Amazon Linux distributions](#on-amazon-linux-distributions)
+    - [On Amazon Linux](#on-amazon-linux)
+    - [On Fedora](#on-fedora)
     - [Install via AWS Systems Manager Distributor](#install-via-aws-systems-manager-distributor)
     - [On other Linux distributions](#on-other-linux-distributions)
     - [On MacOS Big Sur, macOS Monterey and macOS Ventura distribution](#on-macos-big-sur-macos-monterey-and-macos-ventura-distribution)
@@ -90,12 +87,20 @@ The `efs-utils` package has been verified against the following MacOS distributi
 
 ## Installation
 
-### On Amazon Linux distributions
+### On Amazon Linux
 
-For those using Amazon Linux or Amazon Linux 2, the easiest way to install `efs-utils` is from Amazon's repositories:
+For those using Amazon Linux, the easiest way to install `efs-utils` is from Amazon's repositories using `yum` (or `dnf` on AL2023):
 
 ```bash
 $ sudo yum -y install amazon-efs-utils
+```
+
+### On Fedora
+
+For those using Fedora 38 or higher, the easiest way to install `efs-utils` is from the Fedora repositories using `dnf`:
+
+```bash
+$ sudo dnf -y install efs-utils
 ```
 
 ### Install via AWS Systems Manager Distributor
