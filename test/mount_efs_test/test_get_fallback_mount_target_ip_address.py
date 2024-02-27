@@ -33,6 +33,7 @@ SPECIAL_REGION_DNS_DICT = {
 SPECIAL_REGIONS = ["cn-north-1", "cn-northwest-1", "us-iso-east-1", "us-isob-east-1"]
 DEFAULT_NFS_OPTIONS = {}
 OPTIONS_WITH_AZ = {"az": DEFAULT_AZ}
+OPTIONS_WITH_CROSSACCOUNT = {"crossaccount": None}
 MOCK_EFS_AGENT = "fake-efs-client"
 MOCK_EC2_AGENT = "fake-ec2-client"
 
@@ -230,6 +231,30 @@ def test_get_fall_back_ip_address_feature_not_enabled(mocker):
     assert "not enabled" in str(excinfo)
 
     utils.assert_called(check_fallback_enabled_mock)
+    utils.assert_not_called(get_fallback_mount_target_ip_mock)
+    utils.assert_not_called(check_ip_resolve_mock)
+
+
+def test_get_fall_back_ip_address_when_crossaccount_enabled(mocker):
+    """
+    When the crossacount feature is enabled this should throw an Exception
+    """
+    config = _get_mock_config()
+
+    get_fallback_mount_target_ip_mock = mocker.patch(
+        "mount_efs.get_fallback_mount_target_ip_address_helper"
+    )
+    check_ip_resolve_mock = mocker.patch(
+        "mount_efs.mount_target_ip_address_can_be_resolved"
+    )
+
+    with pytest.raises(mount_efs.FallbackException) as excinfo:
+        mount_efs.get_fallback_mount_target_ip_address(
+            config, OPTIONS_WITH_CROSSACCOUNT, FS_ID, DNS_NAME
+        )
+
+    assert "crossaccount option" in str(excinfo)
+
     utils.assert_not_called(get_fallback_mount_target_ip_mock)
     utils.assert_not_called(check_ip_resolve_mock)
 
