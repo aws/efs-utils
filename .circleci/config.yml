@@ -60,11 +60,15 @@ commands:
             mount.efs --version
   build-rpm:
     steps:
-      - checkout
       - run:
           name: Install dependencies
           command: |
-            yum -y install rpm-build make systemd
+            yum -y install rpm-build make systemd git
+      - run:
+          name: Add local build repo as safe git directory
+          command: |
+            git config --global --add safe.directory /tmp/_circleci_local_build_repo
+      - checkout
       - run:
           name: Build RPM
           command: |
@@ -238,6 +242,9 @@ workflows:
       - build-rpm-package:
           name: rocky8
           image: rockylinux/rockylinux:8
+      - build-rpm-package:
+          name: rocky9
+          image: rockylinux/rockylinux:9
       - build-rpm-package:
           name: amazon-linux-latest
           image: amazonlinux:latest
