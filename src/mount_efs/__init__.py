@@ -85,7 +85,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.35.2"
+VERSION = "1.36.0"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -117,6 +117,7 @@ FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM = (
     "fall_back_to_mount_target_ip_address_enabled"
 )
 INSTANCE_IDENTITY = None
+INSTANCE_AZ_ID_METADATA = None
 RETRYABLE_ERRORS = ["reset by peer"]
 OPTIMIZE_READAHEAD_ITEM = "optimize_readahead"
 
@@ -198,6 +199,9 @@ INSTANCE_METADATA_TOKEN_URL = "http://169.254.169.254/latest/api/token"
 INSTANCE_METADATA_SERVICE_URL = (
     "http://169.254.169.254/latest/dynamic/instance-identity/document/"
 )
+INSTANCE_METADATA_SERVICE_AZ_ID_URL = (
+    "http://169.254.169.254/latest/meta-data/placement/availability-zone-id"
+)
 INSTANCE_IAM_URL = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
 NAMED_PROFILE_HELP_URL = (
     "https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-profiles.html"
@@ -239,6 +243,7 @@ EFS_ONLY_OPTIONS = [
     "rolearn",
     "jwtpath",
     "fsap",
+    "crossaccount",
 ]
 
 UNSUPPORTED_OPTIONS = ["capath"]
@@ -297,6 +302,10 @@ AWS_FIPS_ENDPOINT_CONFIG_ENV = "AWS_USE_FIPS_ENDPOINT"
 ECS_URI_ENV = "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
 WEB_IDENTITY_ROLE_ARN_ENV = "AWS_ROLE_ARN"
 WEB_IDENTITY_TOKEN_FILE_ENV = "AWS_WEB_IDENTITY_TOKEN_FILE"
+
+ECS_FARGATE_TASK_METADATA_ENDPOINT_ENV = "ECS_CONTAINER_METADATA_URI_V4"
+ECS_FARGATE_TASK_METADATA_ENDPOINT_URL_EXTENSION = "/task"
+ECS_FARGATE_CLIENT_IDENTIFIER = "ecs.fargate"
 
 
 def errcheck(ret, func, args):
@@ -425,6 +434,88 @@ def get_az_from_instance_metadata(config):
         raise Exception("Cannot retrieve az from instance_metadata")
 
     return instance_identity
+
+
+def get_az_id_from_instance_metadata(config, options):
+    az_id = get_az_id_info_from_instance_metadata(config, options)
+
+    if not az_id:
+        raise RuntimeError("Cannot retrieve az-id from instance_metadata")
+
+    return az_id
+
+
+def get_az_id_info_from_instance_metadata(config, options):
+    logging.debug("Retrieve availability-zone-id from instance metadata")
+    instance_az_id_url = get_instance_az_id_metadata_url(config)
+    metadata_unsuccessful_resp = (
+        "Unsuccessful retrieval of metadata at %s." % instance_az_id_url
+    )
+    metadata_url_error_msg = (
+        "Unable to reach %s to retrieve instance metadata." % instance_az_id_url
+    )
+
+    global INSTANCE_AZ_ID_METADATA
+    if INSTANCE_AZ_ID_METADATA:
+        logging.debug(
+            "Instance az_id already retrieved in previous call, use the cached values."
+        )
+        az_id_metadata = INSTANCE_AZ_ID_METADATA
+    else:
+        az_id_metadata = url_request_helper(
+            config,
+            instance_az_id_url,
+            metadata_unsuccessful_resp,
+            metadata_url_error_msg,
+        )
+        INSTANCE_AZ_ID_METADATA = az_id_metadata
+
+    # ECS Fargate returns a json response with the AZ-name which we convert to AZ-ID
+    if az_id_metadata and is_ecs_fargate_client(config):
+        return get_az_id_from_ecs_fargate_response(config, options, az_id_metadata)
+    elif az_id_metadata:
+        return az_id_metadata
+
+    return None
+
+
+def get_instance_az_id_metadata_url(config):
+    instance_az_id_url = INSTANCE_METADATA_SERVICE_AZ_ID_URL
+    if is_ecs_fargate_client(config):
+        # ECS-Fargate Metadata Endpoint must be used for ECS-Fargate clients.
+        logging.debug("ECS-Fargate client detected, use ECS-Fargate Metadata Endpoint")
+        try:
+            instance_az_id_url = (
+                os.getenv(ECS_FARGATE_TASK_METADATA_ENDPOINT_ENV)
+                + ECS_FARGATE_TASK_METADATA_ENDPOINT_URL_EXTENSION
+            )
+        except Exception as e:
+            logging.warning("Unable to parse ECS-Fargate Metadata Endpoint: %s", e)
+            instance_az_id_url = None
+    return instance_az_id_url
+
+
+def is_ecs_fargate_client(config):
+    client_info = get_client_info(config)
+    if client_info and client_info.get("source") == ECS_FARGATE_CLIENT_IDENTIFIER:
+        return True
+    return False
+
+
+def get_az_id_from_ecs_fargate_response(config, options, az_id_metadata):
+    try:
+        property = "AvailabilityZone"
+        az_name = az_id_metadata[property]
+        ec2_client = get_botocore_client(config, "ec2", options)
+        az_id = get_az_id_by_az_name(ec2_client, az_name)
+        return az_id
+    except KeyError as e:
+        logging.warning("%s not present in %s: %s" % (property, az_id_metadata, e))
+    except TypeError as e:
+        logging.warning("response %s is not a json object: %s" % (az_id_metadata, e))
+    except FallbackException as e:
+        fatal_error(e.message)
+    return None
 
 
 def get_instance_identity_info_from_instance_metadata(config, property):
@@ -2406,48 +2497,65 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
                 "DNS name format has an incorrect number of replacement fields"
             )
 
-    dns_name_format = config.get(CONFIG_SECTION, "dns_name_format")
+    # mounts using crossaccount have a predetermined dns name format
+    if options and "crossaccount" in options:
+        try:
+            az_id = get_az_id_from_instance_metadata(config, options)
+            region = get_target_region(config)
+            dns_name = "%s.%s.efs.%s.amazonaws.com" % (az_id, fs_id, region)
+        except RuntimeError:
+            err_msg = "Cannot retrieve AZ-ID from metadata service. This is required for the crossaccount mount option."
+            fatal_error(err_msg)
+    else:
+        dns_name_format = config.get(CONFIG_SECTION, "dns_name_format")
 
-    if "{fs_id}" not in dns_name_format:
-        raise ValueError("DNS name format must include {fs_id}")
+        if "{fs_id}" not in dns_name_format:
+            raise ValueError("DNS name format must include {fs_id}")
 
-    format_args = {"fs_id": fs_id}
+        format_args = {"fs_id": fs_id}
 
-    expected_replacement_field_ct = 1
+        expected_replacement_field_ct = 1
 
-    if "{az}" in dns_name_format:
-        az = options.get("az")
-        if az:
+        if "{az}" in dns_name_format:
+            az = options.get("az")
+            if az:
+                expected_replacement_field_ct += 1
+                format_args["az"] = az
+            else:
+                dns_name_format = dns_name_format.replace("{az}.", "")
+
+        if "{region}" in dns_name_format:
             expected_replacement_field_ct += 1
-            format_args["az"] = az
-        else:
-            dns_name_format = dns_name_format.replace("{az}.", "")
+            format_args["region"] = get_target_region(config)
 
-    if "{region}" in dns_name_format:
-        expected_replacement_field_ct += 1
-        format_args["region"] = get_target_region(config)
+        if "{dns_name_suffix}" in dns_name_format:
+            expected_replacement_field_ct += 1
+            config_section = CONFIG_SECTION
+            region = format_args.get("region")
 
-    if "{dns_name_suffix}" in dns_name_format:
-        expected_replacement_field_ct += 1
-        config_section = CONFIG_SECTION
-        region = format_args.get("region")
+            if region:
+                config_section = get_config_section(config, region)
 
-        if region:
-            config_section = get_config_section(config, region)
+            format_args["dns_name_suffix"] = config.get(
+                config_section, "dns_name_suffix"
+            )
 
-        format_args["dns_name_suffix"] = config.get(config_section, "dns_name_suffix")
+            logging.debug(
+                "Using dns_name_suffix %s in config section [%s]",
+                format_args.get("dns_name_suffix"),
+                config_section,
+            )
 
-        logging.debug(
-            "Using dns_name_suffix %s in config section [%s]",
-            format_args.get("dns_name_suffix"),
-            config_section,
+        _validate_replacement_field_count(
+            dns_name_format, expected_replacement_field_ct
         )
-
-    _validate_replacement_field_count(dns_name_format, expected_replacement_field_ct)
-
-    dns_name = dns_name_format.format(**format_args)
+        dns_name = dns_name_format.format(**format_args)
 
     if "mounttargetip" in options:
+        if "crossaccount" in options:
+            fatal_error(
+                "mounttargetip option is incompatible with crossaccount option."
+            )
         ip_address = options.get("mounttargetip")
         logging.info(
             "Use the mount target ip address %s provided in the mount options to mount."
@@ -2491,6 +2599,10 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
 
 
 def get_fallback_mount_target_ip_address(config, options, fs_id, dns_name):
+    if options and "crossaccount" in options:
+        fallback_message = "Fallback to mount target ip address feature is not available when the crossaccount option is used."
+        raise FallbackException(fallback_message)
+
     fall_back_to_ip_address_enabled = (
         check_if_fall_back_to_mount_target_ip_address_is_enabled(config)
     )

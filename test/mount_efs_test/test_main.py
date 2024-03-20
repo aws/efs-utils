@@ -22,6 +22,7 @@ TLS_PORT = 10000
 AWSPROFILE = "test_profile"
 AWSCREDSURI = "/v2/credentials/{uuid}"
 TLSPORT_INCORRECT = "incorrect"
+AZ_ID = "usw1-az1"
 
 
 @contextmanager
@@ -42,6 +43,7 @@ def _test_main(
     tlsport=None,
     awscredsuri=None,
     notls=False,
+    crossaccount=False,
 ):
     options = {}
 
@@ -65,6 +67,8 @@ def _test_main(
         options["tlsport"] = tlsport
     if awscredsuri is not None:
         options["awscredsuri"] = awscredsuri
+    if crossaccount:
+        options["crossaccount"] = None
 
     if root:
         mocker.patch("os.geteuid", return_value=0)
@@ -73,10 +77,16 @@ def _test_main(
 
     bootstrap_logging_mock = mocker.patch("mount_efs.bootstrap_logging")
     network_status_check_mock = mocker.patch("mount_efs.check_network_status")
-    get_dns_mock = mocker.patch(
-        "mount_efs.get_dns_name_and_fallback_mount_target_ip_address",
-        return_value=("fs-deadbeef.efs.us-west-1.amazonaws.com", None),
-    )
+    if crossaccount:
+        get_dns_mock = mocker.patch(
+            "mount_efs.get_dns_name_and_fallback_mount_target_ip_address",
+            return_value=("usw1-az1.fs-deadbeef.efs.us-west-1.amazonaws.com", None),
+        )
+    else:
+        get_dns_mock = mocker.patch(
+            "mount_efs.get_dns_name_and_fallback_mount_target_ip_address",
+            return_value=("fs-deadbeef.efs.us-west-1.amazonaws.com", None),
+        )
     parse_arguments_mock = mocker.patch(
         "mount_efs.parse_arguments", return_value=("fs-deadbeef", "/", "/mnt", options)
     )
@@ -320,3 +330,15 @@ def test_main_tls_ocsp_and_noocsp_option(mocker, capsys):
     _test_main_assert_error(
         mocker, capsys, expected_err, tls=True, tlsport=TLS_PORT, notls=True
     )
+
+
+def test_main_crossaccount_and_tls_option(mocker):
+    _test_main(mocker, crossaccount=True, tls=True, tlsport=TLS_PORT)
+
+
+def test_main_crossaccount_without_tls_option(mocker):
+    _test_main(mocker, crossaccount=True, tls=False)
+
+
+def test_main_crossaccount_tls_and_ap_option(mocker):
+    _test_main(mocker, crossaccount=True, tls=True, ap_id=AP_ID, tlsport=TLS_PORT)

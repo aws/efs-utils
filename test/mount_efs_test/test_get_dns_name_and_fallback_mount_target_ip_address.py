@@ -34,6 +34,7 @@ SPECIAL_REGIONS = ["cn-north-1", "cn-northwest-1", "us-iso-east-1", "us-isob-eas
 DEFAULT_NFS_OPTIONS = {}
 OPTIONS_WITH_AZ = {"az": DEFAULT_AZ}
 OPTIONS_WITH_IP = {"mounttargetip": IP_ADDRESS}
+OPTIONS_WITH_CROSSACCOUNT = {"crossaccount": None}
 MOCK_EFS_AGENT = "fake-efs-client"
 MOCK_EC2_AGENT = "fake-ec2-client"
 
@@ -117,6 +118,24 @@ def test_get_dns_name_with_ip_in_options(mocker):
     assert "%s.efs.%s.amazonaws.com" % (FS_ID, DEFAULT_REGION) == dns_name
     assert IP_ADDRESS == ip_address
     utils.assert_called(ip_address_connect_mock)
+
+
+def test_get_dns_name_with_crossaccount_in_options(mocker):
+    config = _get_mock_config("{az}.{fs_id}.efs.{region}.amazonaws.com")
+
+    get_az_id_mock = mocker.patch(
+        "mount_efs.get_az_id_from_instance_metadata", return_value=DEFAULT_AZ_ID
+    )
+
+    dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
+        config, FS_ID, OPTIONS_WITH_CROSSACCOUNT
+    )
+
+    assert (
+        "%s.%s.efs.%s.amazonaws.com" % (DEFAULT_AZ_ID, FS_ID, DEFAULT_REGION)
+        == dns_name
+    )
+    utils.assert_called(get_az_id_mock)
 
 
 def test_get_dns_name_suffix_hardcoded():

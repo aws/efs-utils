@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "1.35.2"
+VERSION = "1.36.0"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"

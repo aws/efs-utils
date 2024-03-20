@@ -220,6 +220,13 @@ To mount file system to the mount target in specific availability zone (e.g. us-
 $ sudo mount -t efs -o az=az-name file-system-id efs-mount-point/
 ```
 
+**Note: The [prequisites in the crossaccount section below](#crossaccount-option-prerequisites) must be completed before using the crossaccount option.**
+
+To mount the filesystem mount target in the same physical availability zone ID (e.g. use1-az1) as the client instance over cross-AWS-account mounts, run:
+```
+$ sudo mount -t efs -o crossaccount file-system-id efs-mount-point/
+```
+
 To mount over TLS, simply add the `tls` option:
 
 ```bash
@@ -252,6 +259,28 @@ man mount.efs
 ```
 
 or refer to the [documentation](https://docs.aws.amazon.com/efs/latest/ug/using-amazon-efs-utils.html).
+
+#### crossaccount Option Prerequisites
+
+The crossaccount mount option ensures that the client instance Availability Zone ID (e.g. use1-az1) is the same as the EFS mount target Availability Zone ID for cross-AWS-account mounts (e.g. if the client instance is in Account A while the EFS instance is in Account B). 
+
+Given a client instance in Account A/VPC A and an EFS instance in Account B/VPC B, the following prerequisites must be completed prior to using the crossaccount option:
+- Cross-VPC Communication:
+  - Create a VPC Peering relationship between VPC A & VPC B. Documentation to create the peering relationship can be found [here](https://docs.aws.amazon.com/vpc/latest/peering/create-vpc-peering-connection.html).
+  - Configure VPC route tables to send/receive traffic. Documentation can be found [here](https://docs.aws.amazon.com/vpc/latest/peering/vpc-peering-routing.html).
+  - Create subnet in VPC B in the Availability Zone of the Account A client instance if it does not exist already.
+  - Create an EFS Mount Target in each of the Availability Zones from the above step in VPC B if they do not exist already.
+  - Attach a VPC Security Group to each of the EFS Mount Targets which allow inbound NFS access from VPC A’s CIDR block.
+- Route 53 Setup:
+  - For a mount target A in <availability-zone-id>, create a Route 53 Hosted Zone for the domain <availability-zone-id>.<file-system-id>.efs.<aws-region>.amazonaws.com.
+  - Then, add an A record in the Hosted Zone which resolves to mount target A's IP Address. Leave the subdomain blank.
+
+
+Once the above steps have been completed, to mount the filesystem mount target in the same physical availability zone ID (e.g. use1-az1) as the client instance over cross-AWS-account mounts, run:
+```
+$ sudo mount -t efs -o crossaccount file-system-id efs-mount-point/
+```
+
 
 ### MacOS 
 
