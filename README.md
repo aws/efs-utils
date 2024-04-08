@@ -273,7 +273,7 @@ Given a client instance in Account A/VPC A and an EFS instance in Account B/VPC 
   - Create an EFS Mount Target in each of the Availability Zones from the above step in VPC B if they do not exist already.
   - Attach a VPC Security Group to each of the EFS Mount Targets which allow inbound NFS access from VPC A’s CIDR block.
 - Route 53 Setup:
-  - For a mount target A in <availability-zone-id>, create a Route 53 Hosted Zone for the domain <availability-zone-id>.<file-system-id>.efs.<aws-region>.amazonaws.com.
+  - For a mount target A in \<availability-zone-id>, create a Route 53 Hosted Zone for the domain \<availability-zone-id>.\<file-system-id>.efs.\<aws-region>.amazonaws.com.
   - Then, add an A record in the Hosted Zone which resolves to mount target A's IP Address. Leave the subdomain blank.
 
 
