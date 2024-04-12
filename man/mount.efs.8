@@ -7,10 +7,13 @@
 .SH "DESCRIPTION"
 .sp
 \fBmount\&.efs\fR is part of the \fBamazon\-efs\-utils\fR \
-package, which simplifies using EFS file systems\&.
+package. It improves mount performance and simplifies using EFS file systems\&.
 .sp
 \fBmount\&.efs\fR is meant to be used through the \
 \fBmount\fR(8) command for mounting EFS file systems\&.
+.sp
+\fBmount\&.efs\fR launches a proxy process that forwards NFS traffic from the kernel's NFS client to EFS. \
+This proxy is responsible for TLS encryption, and for providing improved throughput performance.
 .sp
 \fIfs-id-or-dns-name\fR has to be of one of the following \
 two forms:
@@ -77,8 +80,9 @@ this option is by default passed and the EFS file system is mounted over TLS\&.
 Mounts the EFS file system without TLS, applies for Mac distributions only\&.
 .TP
 \fBtlsport=\fR\fIn\fR
-Configure the TLS relay to listen on the specified port\&. By default, the \
-tlsport is choosing randomly from port range defined in the config file located \
+Configures the proxy process to listen for connections from the NFS client on the specified port\&. This is applicable to both non-tls and tls mounts.
+ By default, the \
+tlsport is chosen randomly from port range defined in the config file located \
 at \fI/etc/amazon/efs/efs\-utils\&.conf\&\fR.
 .TP
 \fBverify=\fR\fIn\fR
@@ -88,7 +92,9 @@ more information, see \fBstunnel(8)\fR\&.
 \fBocsp / noocsp\fR
 Selects whether to perform OCSP validation on TLS certificates\&, \
 overriding /etc/amazon/efs/efs-utils.conf. By default OCSP is disabled. \
-For more information, see \fBstunnel(8)\fR\&.
+For more information, see \fBstunnel(8)\fR\&. \
+The ocsp mount option is incompatible with the efs-proxy process, and will revert efs-utils \
+to the legacy "stunnel" mode, which does not support improved per-client throughput performance.
 .TP
 \fBiam\fR
 Use the system's IAM identity to authenticate with EFS. The mount helper will try \
@@ -132,6 +138,12 @@ Use the port 2049 to bypass portmapper daemon on EC2 Mac instances running macOS
 .TP
 \fBmounttargetip\fR
 Mount the EFS file system to the specified mount target ip address\&.
+.TP
+\fBstunnel\fR
+Forward NFS traffic from the local NFS client to EFS using stunnel instead of efs-proxy.
+This will enable compatibility with the ocsp mount option, but will not
+deliver the increased throughput performance provided by efs-proxy. \
+This option is enabled by default for Mac clients.
 .if n \{\
 .RE
 .\}

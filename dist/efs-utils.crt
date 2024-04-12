@@ -1,12 +1,3 @@
-#
-# Copyright 2017-2018 Amazon.com, Inc. and its affiliates. All Rights Reserved.
-#
-# Licensed under the MIT License. See the LICENSE accompanying this file
-# for the specific language governing permissions and limitations under
-# the License.
-#
-
-# Amazon Root CA 1
 -----BEGIN CERTIFICATE-----
 MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF
 ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6
@@ -28,7 +19,6 @@ o/ufQJVtMVT8QtPHRh8jrdkPSHCa2XV4cdFyQzR1bldZwgJcJmApzyMZFo6IQ6XU
 rqXRfboQnoZsG4q5WTP468SQvvG5
 -----END CERTIFICATE-----
 
-# Amazon Root CA 2
 -----BEGIN CERTIFICATE-----
 MIIFQTCCAymgAwIBAgITBmyf0pY1hp8KD+WGePhbJruKNzANBgkqhkiG9w0BAQwF
 ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6
@@ -61,7 +51,6 @@ n749sSmvZ6ES8lgQGVMDMBu4Gon2nL2XA46jCfMdiyHxtN/kHNGfZQIG6lzWE7OE
 4PsJYGw=
 -----END CERTIFICATE-----
 
-# Amazon Root CA 3
 -----BEGIN CERTIFICATE-----
 MIIBtjCCAVugAwIBAgITBmyf1XSXNmY/Owua2eiedgPySjAKBggqhkjOPQQDAjA5
 MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6b24g
@@ -75,7 +64,6 @@ BqWTrBqYaGFy+uGh0PsceGCmQ5nFuMQCIQCcAu/xlJyzlvnrxir4tiz+OpAUFteM
 YyRIHN8wfdVoOw==
 -----END CERTIFICATE-----
 
-# Amazon Root CA 4
 -----BEGIN CERTIFICATE-----
 MIIB8jCCAXigAwIBAgITBmyf18G7EEwpQ+Vxe3ssyBrBDjAKBggqhkjOPQQDAzA5
 MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6b24g

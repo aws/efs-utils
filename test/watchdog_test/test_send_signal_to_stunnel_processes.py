@@ -93,7 +93,7 @@ def test_is_mount_stunnel_proc_running_process_not_stunnel(mocker, tmpdir):
 
     assert False == watchdog.is_mount_stunnel_proc_running(PID, STATE_FILE, tmpdir)
     debug_log = mock_log_debug.call_args[0][0]
-    assert "is not a stunnel process" in debug_log
+    assert "is not an efs-proxy or stunnel process" in debug_log
 
 
 def test_is_mount_stunnel_proc_running_process_not_running(mocker, tmpdir):

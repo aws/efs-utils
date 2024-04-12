@@ -54,6 +54,8 @@ NFS_MOUNT_POINT_IDX_MACOS = -1
 
 NETNS = "/proc/1/net/ns"
 
+LOCAL_HOST = "127.0.0.1"
+
 
 def _get_config(
     mount_nfs_command_retry="true",
@@ -108,22 +110,48 @@ def test_mount_nfs(mocker):
     args = args[0]
 
     assert "/sbin/mount.nfs4" == args[NFS_BIN_ARG_IDX]
-    assert DNS_NAME in args[NFS_MOUNT_PATH_IDX]
+    assert LOCAL_HOST in args[NFS_MOUNT_PATH_IDX]
     assert "/mnt" == args[NFS_MOUNT_POINT_IDX]
 
     utils.assert_called_once(optimize_readahead_window_mock)
 
 
-def test_mount_nfs_with_fallback_ip_address(mocker):
+def test_mount_nfs_stunnel_enabled(mocker):
     mock = _mock_popen(mocker)
     optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
+    options = dict(DEFAULT_OPTIONS)
+    options["stunnel"] = None
 
     mount_efs.mount_nfs(
         _get_config(mount_nfs_command_retry="false"),
         DNS_NAME,
         "/",
         "/mnt",
-        DEFAULT_OPTIONS,
+        options,
+    )
+
+    args, _ = mock.call_args
+    args = args[0]
+
+    assert "/sbin/mount.nfs4" == args[NFS_BIN_ARG_IDX]
+    assert DNS_NAME in args[NFS_MOUNT_PATH_IDX]
+    assert "/mnt" == args[NFS_MOUNT_POINT_IDX]
+
+    utils.assert_called_once(optimize_readahead_window_mock)
+
+
+def test_mount_nfs_stunnel_with_fallback_ip_address(mocker):
+    mock = _mock_popen(mocker)
+    optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
+    options = dict(DEFAULT_OPTIONS)
+    options["stunnel"] = None
+
+    mount_efs.mount_nfs(
+        _get_config(mount_nfs_command_retry="false"),
+        DNS_NAME,
+        "/",
+        "/mnt",
+        options,
         fallback_ip_address=FALLBACK_IP_ADDRESS,
     )
 
@@ -138,12 +166,13 @@ def test_mount_nfs_with_fallback_ip_address(mocker):
     utils.assert_called_once(optimize_readahead_window_mock)
 
 
-def test_mount_nfs_tls(mocker):
+def test_mount_nfs_tls_stunnel_enabled(mocker):
     mock = _mock_popen(mocker)
     optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
 
     options = dict(DEFAULT_OPTIONS)
     options["tls"] = None
+    options["stunnel"] = None
 
     mount_efs.mount_nfs(
         _get_config(mount_nfs_command_retry="false"), DNS_NAME, "/", "/mnt", options
@@ -205,11 +234,11 @@ def test_mount_tls_mountpoint_mounted_with_nfs(mocker, capsys):
     options = dict(DEFAULT_OPTIONS)
     options["tls"] = None
 
-    bootstrap_tls_mock = mocker.patch("mount_efs.bootstrap_tls")
+    bootstrap_proxy_mock = mocker.patch("mount_efs.bootstrap_proxy")
     optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
     mocker.patch("os.path.ismount", return_value=True)
     _mock_popen(mocker, stdout="nfs")
-    mount_efs.mount_tls(
+    mount_efs.mount_with_proxy(
         _get_config(mount_nfs_command_retry="false"),
         INIT_SYSTEM,
         DNS_NAME,
@@ -220,7 +249,7 @@ def test_mount_tls_mountpoint_mounted_with_nfs(mocker, capsys):
     )
     out, err = capsys.readouterr()
     assert "is already mounted" in out
-    utils.assert_not_called(bootstrap_tls_mock)
+    utils.assert_not_called(bootstrap_proxy_mock)
 
     utils.assert_not_called(optimize_readahead_window_mock)
 

@@ -44,6 +44,8 @@ def _test_main(
     awscredsuri=None,
     notls=False,
     crossaccount=False,
+    stunnel=False,
+    macos=False,
 ):
     options = {}
 
@@ -69,6 +71,8 @@ def _test_main(
         options["awscredsuri"] = awscredsuri
     if crossaccount:
         options["crossaccount"] = None
+    if stunnel:
+        options["stunnel"] = None
 
     if root:
         mocker.patch("os.geteuid", return_value=0)
@@ -90,8 +94,8 @@ def _test_main(
     parse_arguments_mock = mocker.patch(
         "mount_efs.parse_arguments", return_value=("fs-deadbeef", "/", "/mnt", options)
     )
-    bootstrap_tls_mock = mocker.patch(
-        "mount_efs.bootstrap_tls", side_effect=dummy_contextmanager
+    bootstrap_proxy_mock = mocker.patch(
+        "mount_efs.bootstrap_proxy", side_effect=dummy_contextmanager
     )
 
     if tls:
@@ -106,10 +110,19 @@ def _test_main(
     utils.assert_called_once(parse_arguments_mock)
     utils.assert_called_once(mount_mock)
 
-    if tls:
-        utils.assert_called_once(bootstrap_tls_mock)
+    stunnel_mode_enabled = stunnel or macos or ocsp
+
+    if stunnel_mode_enabled:
+        if tls:
+            utils.assert_called_once(bootstrap_proxy_mock)
+            kwargs = bootstrap_proxy_mock.call_args[1]
+            assert kwargs["efs_proxy_enabled"] is False
+        else:
+            utils.assert_not_called(bootstrap_proxy_mock)
     else:
-        utils.assert_not_called(bootstrap_tls_mock)
+        utils.assert_called_once(bootstrap_proxy_mock)
+        kwargs = bootstrap_proxy_mock.call_args[1]
+        assert kwargs["efs_proxy_enabled"] is True
 
 
 def _test_main_assert_error(mocker, capsys, expected_err, **kwargs):
@@ -128,7 +141,7 @@ def _test_main_macos(mocker, is_supported_macos_version, **kwargs):
         "mount_efs.check_if_mac_version_is_supported",
         return_value=is_supported_macos_version,
     )
-    _test_main(mocker, **kwargs)
+    _test_main(mocker, macos=True, **kwargs)
 
 
 def _test_main_macos_assert_error(
@@ -232,8 +245,12 @@ def test_main_awscredsuri_without_iam(mocker, capsys):
     )
 
 
-def test_main_tls_ocsp_option(mocker):
-    _test_main(mocker, tls=True, ocsp=True, tlsport=TLS_PORT)
+def test_main_tls_ocsp_option_with_stunnel(mocker):
+    _test_main(mocker, tls=True, ocsp=True, stunnel=True, tlsport=TLS_PORT)
+
+
+def test_main_tls_ocsp_option_should_revert_to_stunnel(mocker):
+    _test_main(mocker, tls=True, ocsp=True, stunnel=False, tlsport=TLS_PORT)
 
 
 def test_main_tls_noocsp_option(mocker):

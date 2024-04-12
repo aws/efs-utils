@@ -29,13 +29,17 @@ def _mock_popen(mocker):
     return mocker.patch("subprocess.Popen", return_value=_get_popen_mock())
 
 
-def _initiate_state_file(tmpdir, cmd=None):
+def _initiate_state_file(tmpdir, cmd=None, efs_proxy_enabled=False):
+    tunnel_executable = "/usr/bin/stunnel"
+    if efs_proxy_enabled:
+        tunnel_executable = "/usr/bin/efs-proxy"
+
     state = {
         "pid": PID - 1,
         "cmd": cmd
         if cmd
         else [
-            "/usr/bin/stunnel",
+            tunnel_executable,
             "/var/run/efs/stunnel-config.fs-deadbeef.mnt.21007",
         ],
     }
@@ -57,6 +61,18 @@ def test_start_tls_tunnel(mocker, tmpdir):
     assert 1 == len(procs)
 
 
+def test_start_tls_tunnel_efs_proxy(mocker, tmpdir):
+    _mock_popen(mocker)
+    mocker.patch("watchdog.is_pid_running", return_value=True)
+
+    state, state_file = _initiate_state_file(tmpdir, efs_proxy_enabled=True)
+    procs = []
+    pid = watchdog.start_tls_tunnel(procs, state, str(tmpdir), state_file)
+
+    assert PID == pid
+    assert 1 == len(procs)
+
+
 def test_start_tls_tunnel_fails(mocker, capsys, tmpdir):
     _mock_popen(mocker)
     mocker.patch("watchdog.is_pid_running", return_value=False)
@@ -70,7 +86,23 @@ def test_start_tls_tunnel_fails(mocker, capsys, tmpdir):
     assert 0 != ex.value.code
 
     out, err = capsys.readouterr()
-    assert "Failed to initialize TLS tunnel" in err
+    assert "Failed to initialize stunnel" in err
+
+
+def test_start_tls_tunnel_fails_proxy_enabled(mocker, capsys, tmpdir):
+    _mock_popen(mocker)
+    mocker.patch("watchdog.is_pid_running", return_value=False)
+
+    state, state_file = _initiate_state_file(tmpdir, efs_proxy_enabled=True)
+    procs = []
+    with pytest.raises(SystemExit) as ex:
+        watchdog.start_tls_tunnel(procs, state, str(tmpdir), state_file)
+
+    assert 0 == len(procs)
+    assert 0 != ex.value.code
+
+    out, err = capsys.readouterr()
+    assert "Failed to initialize efs-proxy" in err
 
 
 # https://github.com/kubernetes-sigs/aws-efs-csi-driver/issues/812 The watchdog is trying to launch stunnel on AL2 for
@@ -159,3 +191,39 @@ def test_start_tls_tunnel_for_mount_via_older_version_of_efs_utils_on_ecs_amazon
     assert " ".join(["nsenter", namespace, "/usr/sbin/stunnel5"]) in " ".join(
         state["cmd"]
     )
+
+
+def test_start_tls_tunnel_efs_proxy_enabled(mocker, tmpdir):
+    """
+    This test makes sure that when efs_proxy is enabled, we will start efs_proxy and not stunnel,
+    even if the existing command used stunnel.
+    """
+    popen_mock = _mock_popen(mocker)
+    mocker.patch("watchdog.is_pid_running", return_value=True)
+    mocker.patch("watchdog.find_command_path", return_value="/usr/bin/efs-proxy")
+
+    proxy_command = [
+        "/usr/bin/efs-proxy",
+        "/var/run/efs/stunnel-config.fs-deadbeef.mnt.21007",
+    ]
+    state, state_file = _initiate_state_file(tmpdir, proxy_command)
+    procs = []
+    pid = watchdog.start_tls_tunnel(procs, state, str(tmpdir), state_file)
+
+    args, _ = popen_mock.call_args
+    args = args[0]
+    assert "/usr/bin/efs-proxy" == args[0]
+    assert "/var/run/efs/stunnel-config.fs-deadbeef.mnt.21007" == args[1]
+
+    assert PID == pid
+    assert 1 == len(procs)
+
+
+def test_command_uses_efs_proxy():
+    cmd = [
+        "/usr/bin/stunnel",
+        "/var/run/efs/stunnel-config.fs-deadbeef.mnt.21007",
+    ]
+    assert watchdog.command_uses_efs_proxy(cmd) == False
+    cmd[0] = "/usr/bin/efs-proxy"
+    assert watchdog.command_uses_efs_proxy(cmd) == True

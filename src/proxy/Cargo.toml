@@ -1,0 +1,38 @@
+[package]
+name = "efs-proxy"
+edition = "2021"
+build = "build.rs"
+# The version of efs-proxy is tied to efs-utils.
+version = "2.0.0"
+publish = false
+
+[dependencies]
+anyhow = "1.0.72"
+async-trait = "0.1"
+bytes = { version = "1.4.0" }
+chrono = "0.4"
+clap = { version = "=4.0.0", features = ["derive"] }
+fern = "0.6"
+futures = "0.3"
+log = "0.4"
+log4rs = { version = "0", features = ["rolling_file_appender", "compound_policy", "size_trigger", "fixed_window_roller"]}
+nix = { version = "0.26.2", features = ["signal"]}
+onc-rpc = "0.2.3"
+rand = "0.8.5"
+s2n-tls = "0.0"
+s2n-tls-tokio = "0.0"
+s2n-tls-sys = "0.0"
+serde = {version="1.0.175",features=["derive"]}
+serde_ini = "0.2.0"
+thiserror = "1.0.44"
+tokio = { version = "1.29.0", features = ["full"] }
+tokio-util = "0.7.8"
+uuid = { version = "1.4.1", features = ["v4", "fast-rng", "macro-diagnostics"]}
+xdr-codec = "0.4.4"
+
+[dev-dependencies]
+test-case = "*"
+tokio = { version = "1.29.0", features = ["test-util"] }
+
+[build-dependencies]
+xdrgen = "0.4.4"

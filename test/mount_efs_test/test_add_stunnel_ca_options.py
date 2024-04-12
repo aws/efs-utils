@@ -41,7 +41,7 @@ def test_use_existing_cafile(tmpdir):
     options = {"cafile": str(_create_temp_file(tmpdir))}
     efs_config = {}
 
-    mount_efs.add_stunnel_ca_options(efs_config, _get_config(), options, DEFAULT_REGION)
+    mount_efs.add_tunnel_ca_options(efs_config, _get_config(), options, DEFAULT_REGION)
 
     assert options["cafile"] == efs_config.get("CAfile")
     assert "CApath" not in efs_config
@@ -52,7 +52,7 @@ def test_use_missing_cafile(capsys):
     efs_config = {}
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.add_stunnel_ca_options(
+        mount_efs.add_tunnel_ca_options(
             efs_config, _get_config(), options, DEFAULT_REGION
         )
 
@@ -68,7 +68,7 @@ def test_stunnel_cafile_configuration_in_option(mocker):
 
     mocker.patch("os.path.exists", return_value=True)
 
-    mount_efs.add_stunnel_ca_options(efs_config, _get_config(), options, DEFAULT_REGION)
+    mount_efs.add_tunnel_ca_options(efs_config, _get_config(), options, DEFAULT_REGION)
 
     assert CAFILE == efs_config.get("CAfile")
 
@@ -82,7 +82,7 @@ def test_stunnel_cafile_configuration_in_config(mocker):
 
     mocker.patch("os.path.exists", return_value=True)
 
-    mount_efs.add_stunnel_ca_options(efs_config, config, options, DEFAULT_REGION)
+    mount_efs.add_tunnel_ca_options(efs_config, config, options, DEFAULT_REGION)
 
     assert CAFILE == efs_config.get("CAfile")
 
@@ -93,7 +93,7 @@ def test_stunnel_cafile_not_configured(mocker):
 
     mocker.patch("os.path.exists", return_value=True)
 
-    mount_efs.add_stunnel_ca_options(efs_config, _get_config(), options, DEFAULT_REGION)
+    mount_efs.add_tunnel_ca_options(efs_config, _get_config(), options, DEFAULT_REGION)
 
     assert mount_efs.DEFAULT_STUNNEL_CAFILE == efs_config.get("CAfile")
 
@@ -110,6 +110,6 @@ def test_stunnel_cafile_configured_in_mount_region_section(mocker):
 
     mocker.patch("os.path.exists", return_value=True)
 
-    mount_efs.add_stunnel_ca_options(efs_config, config, options, ISOLATED_REGION)
+    mount_efs.add_tunnel_ca_options(efs_config, config, options, ISOLATED_REGION)
 
     assert ISOLATED_REGION_STUNNEL_CAFILE == efs_config.get("CAfile")
