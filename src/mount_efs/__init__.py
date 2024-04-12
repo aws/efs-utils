@@ -85,7 +85,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "1.36.0"
+VERSION = "2.0.0"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -222,8 +222,12 @@ SECURITY_CREDS_IAM_ROLE_HELP_URL = (
 DEFAULT_STUNNEL_VERIFY_LEVEL = 2
 DEFAULT_STUNNEL_CAFILE = "/etc/amazon/efs/efs-utils.crt"
 
+LEGACY_STUNNEL_MOUNT_OPTION = "stunnel"
+
 NOT_BEFORE_MINS = 15
 NOT_AFTER_HOURS = 3
+
+EFS_PROXY_TLS_OPTION = "--tls"
 
 EFS_ONLY_OPTIONS = [
     "accesspoint",
@@ -244,6 +248,7 @@ EFS_ONLY_OPTIONS = [
     "jwtpath",
     "fsap",
     "crossaccount",
+    LEGACY_STUNNEL_MOUNT_OPTION,
 ]
 
 UNSUPPORTED_OPTIONS = ["capath"]
@@ -1039,6 +1044,11 @@ def get_resp_obj(request_resp, url, unsuccessful_resp):
 
 
 def parse_options(options):
+    """
+    Parses a comma delineated string of key=value options (e.g. 'opt1,opt2=val').
+    Returns a dictionary of key,value pairs, where value = None if
+    it was not provided.
+    """
     opts = {}
     for o in options.split(","):
         if "=" in o:
@@ -1172,7 +1182,8 @@ def serialize_stunnel_config(config, header=None):
     return lines
 
 
-def add_stunnel_ca_options(efs_config, config, options, region):
+# These options are used by both stunnel and efs-proxy for TLS mounts
+def add_tunnel_ca_options(efs_config, config, options, region):
     if "cafile" in options:
         stunnel_cafile = options["cafile"]
     else:
@@ -1257,6 +1268,11 @@ def _stunnel_bin():
         return find_command_path("stunnel", installation_message)
 
 
+def _efs_proxy_bin():
+    error_message = "The efs-proxy binary is packaged with efs-utils. It was deleted or not installed correctly."
+    return find_command_path("efs-proxy", error_message)
+
+
 def find_command_path(command, install_method):
     # If not running on macOS, use linux paths
     if not check_if_platform_is_mac():
@@ -1314,6 +1330,7 @@ def write_stunnel_config_file(
     log_dir=LOG_DIR,
     cert_details=None,
     fallback_ip_address=None,
+    efs_proxy_enabled=True,
 ):
     """
     Serializes stunnel configuration to a file. Unfortunately this does not conform to Python's config file format, so we have to
@@ -1326,12 +1343,13 @@ def write_stunnel_config_file(
     system_release_version = get_system_release_version()
     global_config = dict(STUNNEL_GLOBAL_CONFIG)
 
-    if is_stunnel_option_supported(
+    if not efs_proxy_enabled and is_stunnel_option_supported(
         stunnel_options, b"foreground", b"quiet", emit_warning_log=False
     ):
         # Do not log to stderr of subprocess in addition to the destinations specified with syslog and output.
         # Only support in stunnel version 5.25+.
         global_config["foreground"] = "quiet"
+
     if any(
         release in system_release_version
         for release in SKIP_NO_SO_BINDTODEVICE_RELEASES
@@ -1350,12 +1368,17 @@ def write_stunnel_config_file(
                 CONFIG_SECTION, "stunnel_logs_file"
             ).replace("{fs_id}", fs_id)
         else:
-            global_config["output"] = os.path.join(
-                log_dir, "%s.stunnel.log" % mount_filename
+            proxy_log_file = (
+                "%s.efs-proxy.log" if efs_proxy_enabled else "%s.stunnel.log"
             )
+            global_config["output"] = os.path.join(
+                log_dir, proxy_log_file % mount_filename
+            )
+
     global_config["pid"] = os.path.join(
         state_file_dir, mount_filename + "+", "stunnel.pid"
     )
+
     if get_fips_config(config):
         global_config["fips"] = "yes"
 
@@ -1367,9 +1390,11 @@ def write_stunnel_config_file(
     else:
         efs_config["connect"] = efs_config["connect"] % dns_name
 
-    efs_config["verify"] = verify_level
-    if verify_level > 0:
-        add_stunnel_ca_options(efs_config, config, options, region)
+    # Verify level is only valid for tls mounts
+    if (verify_level is not None) and tls_enabled(options):
+        efs_config["verify"] = verify_level
+        if verify_level > 0:
+            add_tunnel_ca_options(efs_config, config, options, region)
 
     if cert_details:
         efs_config["cert"] = cert_details["certificate"]
@@ -1381,27 +1406,30 @@ def write_stunnel_config_file(
         % (CONFIG_FILE, "https://docs.aws.amazon.com/console/efs/troubleshooting-tls")
     )
 
-    if get_boolean_config_item_value(
-        config, CONFIG_SECTION, "stunnel_check_cert_hostname", default_value=True
-    ):
-        if is_stunnel_option_supported(stunnel_options, b"checkHost"):
-            # Stunnel checkHost option checks if the specified DNS host name or wildcard matches any of the provider in peer
-            # certificate's CN fields, after introducing the AZ field in dns name, the host name in the stunnel config file
-            # is not valid, remove the az info there
-            efs_config["checkHost"] = dns_name[dns_name.index(fs_id) :]
-        else:
-            fatal_error(tls_controls_message % "stunnel_check_cert_hostname")
+    if tls_enabled(options):
+        # These config options are not applicable to non-tls mounts with efs-proxy
+        if get_boolean_config_item_value(
+            config, CONFIG_SECTION, "stunnel_check_cert_hostname", default_value=True
+        ):
+            if (not efs_proxy_enabled) and (
+                not is_stunnel_option_supported(stunnel_options, b"checkHost")
+            ):
+                fatal_error(tls_controls_message % "stunnel_check_cert_hostname")
+            else:
+                efs_config["checkHost"] = dns_name[dns_name.index(fs_id) :]
 
-    # Only use the config setting if the override is not set
-    if ocsp_enabled:
-        if is_stunnel_option_supported(stunnel_options, b"OCSPaia"):
-            efs_config["OCSPaia"] = "yes"
-        else:
-            fatal_error(tls_controls_message % "stunnel_check_cert_validity")
+        # Only use the config setting if the override is not set
+        if not efs_proxy_enabled and ocsp_enabled:
+            if is_stunnel_option_supported(stunnel_options, b"OCSPaia"):
+                efs_config["OCSPaia"] = "yes"
+            else:
+                fatal_error(tls_controls_message % "stunnel_check_cert_validity")
 
     # If the stunnel libwrap option is supported, we disable the usage of /etc/hosts.allow and /etc/hosts.deny by
     # setting the option to no
-    if is_stunnel_option_supported(stunnel_options, b"libwrap"):
+    if not efs_proxy_enabled and is_stunnel_option_supported(
+        stunnel_options, b"libwrap"
+    ):
         efs_config["libwrap"] = "no"
 
     stunnel_config = "\n".join(
@@ -1420,7 +1448,7 @@ def write_stunnel_config_file(
     return stunnel_config_file
 
 
-def write_tls_tunnel_state_file(
+def write_tunnel_state_file(
     fs_id,
     mountpoint,
     tls_port,
@@ -1433,6 +1461,8 @@ def write_tls_tunnel_state_file(
     """
     Return the name of the temporary file containing TLS tunnel state, prefixed with a '~'. This file needs to be renamed to a
     non-temporary version following a successful mount.
+
+    The "tunnel" here refers to efs-proxy, or stunnel.
     """
     state_file = "~" + get_mount_specific_filename(fs_id, mountpoint, tls_port)
 
@@ -1453,19 +1483,19 @@ def write_tls_tunnel_state_file(
     return state_file
 
 
-def rewrite_tls_tunnel_state_file(state, state_file_dir, state_file):
+def rewrite_tunnel_state_file(state, state_file_dir, state_file):
     with open(os.path.join(state_file_dir, state_file), "w") as f:
         json.dump(state, f)
     return state_file
 
 
-def update_tls_tunnel_temp_state_file_with_tunnel_pid(
+def update_tunnel_temp_state_file_with_tunnel_pid(
     temp_tls_state_file, state_file_dir, stunnel_pid
 ):
     with open(os.path.join(state_file_dir, temp_tls_state_file), "r") as f:
         state = json.load(f)
     state["pid"] = stunnel_pid
-    temp_tls_state_file = rewrite_tls_tunnel_state_file(
+    temp_tls_state_file = rewrite_tunnel_state_file(
         state, state_file_dir, temp_tls_state_file
     )
     return temp_tls_state_file
@@ -1476,9 +1506,9 @@ def test_tunnel_process(tunnel_proc, fs_id):
     if tunnel_proc.returncode is not None:
         _, err = tunnel_proc.communicate()
         fatal_error(
-            "Failed to initialize TLS tunnel for %s, please check mount.log for the failure reason."
+            "Failed to initialize tunnel for %s, please check mount.log for the failure reason."
             % fs_id,
-            'Failed to start TLS tunnel (errno=%d), stderr="%s". If the stderr is lacking enough details, please '
+            'Failed to start tunnel (errno=%d), stderr="%s". If the stderr is lacking enough details, please '
             "enable stunnel debug log in efs-utils config file and retry the mount to capture more info."
             % (tunnel_proc.returncode, err.strip()),
         )
@@ -1642,8 +1672,12 @@ def get_tls_port_from_sock(tls_port_sock):
     return tls_port_sock.getsockname()[1]
 
 
+def tls_enabled(options):
+    return "tls" in options
+
+
 @contextmanager
-def bootstrap_tls(
+def bootstrap_proxy(
     config,
     init_system,
     dns_name,
@@ -1652,85 +1686,115 @@ def bootstrap_tls(
     options,
     state_file_dir=STATE_FILE_DIR,
     fallback_ip_address=None,
+    efs_proxy_enabled=True,
 ):
-    tls_port_sock = choose_tls_port_and_get_bind_sock(config, options, state_file_dir)
-    tls_port = get_tls_port_from_sock(tls_port_sock)
+    """
+    Generates a TLS private key and client-side certificate, a stunnel configuration file, and a state file
+    that is used to pass information to the Watchdog process.
+
+    This function will spin up a stunnel or efs-proxy process, and pass it the stunnel configuration file.
+    The client-side certificate generated by this function contains IAM information that can be used by the EFS backend to enforce
+    file system policies.
+
+    The state file passes information about the mount and the associated proxy process (whether that's stunnel or efs-proxy) to
+    the Watchdog daemon service. This allows Watchdog to monitor the proxy process's health.
+
+    This function will yield a handle on the proxy process, whether it's efs-proxy or stunnel.
+    """
+
+    proxy_listen_sock = choose_tls_port_and_get_bind_sock(
+        config, options, state_file_dir
+    )
+    proxy_listen_port = get_tls_port_from_sock(proxy_listen_sock)
 
     try:
         # override the tlsport option so that we can later override the port the NFS client uses to connect to stunnel.
         # if the user has specified tlsport=X at the command line this will just re-set tlsport to X.
-        options["tlsport"] = tls_port
+        options["tlsport"] = proxy_listen_port
 
         use_iam = "iam" in options
         ap_id = options.get("accesspoint")
-        cert_details = {}
+        cert_details = None
         security_credentials = None
         client_info = get_client_info(config)
         region = get_target_region(config)
 
-        if use_iam:
-            aws_creds_uri = options.get("awscredsuri")
-            role_arn = options.get("rolearn")
-            jwt_path = options.get("jwtpath")
-            if aws_creds_uri:
-                kwargs = {"aws_creds_uri": aws_creds_uri}
-            elif role_arn and jwt_path:
-                kwargs = {"role_arn": role_arn, "jwt_path": jwt_path}
-            else:
-                kwargs = {"awsprofile": get_aws_profile(options, use_iam)}
+        if tls_enabled(options):
+            cert_details = {}
+            # IAM can only be used for tls mounts
+            if use_iam:
+                aws_creds_uri = options.get("awscredsuri")
+                role_arn = options.get("rolearn")
+                jwt_path = options.get("jwtpath")
+                if aws_creds_uri:
+                    kwargs = {"aws_creds_uri": aws_creds_uri}
+                elif role_arn and jwt_path:
+                    kwargs = {"role_arn": role_arn, "jwt_path": jwt_path}
+                else:
+                    kwargs = {"awsprofile": get_aws_profile(options, use_iam)}
 
-            security_credentials, credentials_source = get_aws_security_credentials(
-                config, use_iam, region, **kwargs
-            )
-
-            if credentials_source:
-                cert_details["awsCredentialsMethod"] = credentials_source
-                logging.debug(
-                    "AWS credentials source used for IAM authentication: ",
-                    credentials_source,
+                security_credentials, credentials_source = get_aws_security_credentials(
+                    config, use_iam, region, **kwargs
                 )
 
-        if ap_id:
-            cert_details["accessPoint"] = ap_id
+                if credentials_source:
+                    cert_details["awsCredentialsMethod"] = credentials_source
+                    logging.debug(
+                        "AWS credentials source used for IAM authentication: ",
+                        credentials_source,
+                    )
 
-        # additional symbol appended to avoid naming collisions
-        cert_details["mountStateDir"] = (
-            get_mount_specific_filename(fs_id, mountpoint, tls_port) + "+"
-        )
-        # common name for certificate signing request is max 64 characters
-        cert_details["commonName"] = socket.gethostname()[0:64]
-        cert_details["region"] = region
-        cert_details["certificateCreationTime"] = create_certificate(
-            config,
-            cert_details["mountStateDir"],
-            cert_details["commonName"],
-            cert_details["region"],
-            fs_id,
-            security_credentials,
-            ap_id,
-            client_info,
-            base_path=state_file_dir,
-        )
-        cert_details["certificate"] = os.path.join(
-            state_file_dir, cert_details["mountStateDir"], "certificate.pem"
-        )
-        cert_details["privateKey"] = get_private_key_path()
-        cert_details["fsId"] = fs_id
+            # Access points must be mounted over TLS
+            if ap_id:
+                cert_details["accessPoint"] = ap_id
+
+            # additional symbol appended to avoid naming collisions
+            cert_details["mountStateDir"] = (
+                get_mount_specific_filename(fs_id, mountpoint, proxy_listen_port) + "+"
+            )
+            # common name for certificate signing request is max 64 characters
+            cert_details["commonName"] = socket.gethostname()[0:64]
+            cert_details["region"] = region
+            cert_details["certificateCreationTime"] = create_certificate(
+                config,
+                cert_details["mountStateDir"],
+                cert_details["commonName"],
+                cert_details["region"],
+                fs_id,
+                security_credentials,
+                ap_id,
+                client_info,
+                base_path=state_file_dir,
+            )
+            cert_details["certificate"] = os.path.join(
+                state_file_dir, cert_details["mountStateDir"], "certificate.pem"
+            )
+            cert_details["privateKey"] = get_private_key_path()
+            cert_details["fsId"] = fs_id
 
         if not os.path.exists(state_file_dir):
             create_required_directory(config, state_file_dir)
 
         start_watchdog(init_system)
 
-        verify_level = int(options.get("verify", DEFAULT_STUNNEL_VERIFY_LEVEL))
+        verify_level = (
+            int(options.get("verify", DEFAULT_STUNNEL_VERIFY_LEVEL))
+            if tls_enabled(options)
+            else None
+        )
+
         ocsp_enabled = is_ocsp_enabled(config, options)
+        if ocsp_enabled:
+            assert (
+                not efs_proxy_enabled
+            ), "OCSP is not supported by efs-proxy, and efs-utils failed to revert to stunnel-mode."
 
         stunnel_config_file = write_stunnel_config_file(
             config,
             state_file_dir,
             fs_id,
             mountpoint,
-            tls_port,
+            proxy_listen_port,
             dns_name,
             verify_level,
             ocsp_enabled,
@@ -1738,16 +1802,31 @@ def bootstrap_tls(
             region,
             cert_details=cert_details,
             fallback_ip_address=fallback_ip_address,
+            efs_proxy_enabled=efs_proxy_enabled,
         )
-        tunnel_args = [_stunnel_bin(), stunnel_config_file]
+        if efs_proxy_enabled:
+            if "tls" in options:
+                tunnel_args = [
+                    _efs_proxy_bin(),
+                    stunnel_config_file,
+                    EFS_PROXY_TLS_OPTION,
+                ]
+            else:
+                tunnel_args = [
+                    _efs_proxy_bin(),
+                    stunnel_config_file,
+                ]
+        else:
+            tunnel_args = [_stunnel_bin(), stunnel_config_file]
+
         if "netns" in options:
             tunnel_args = ["nsenter", "--net=" + options["netns"]] + tunnel_args
 
         # This temp state file is acting like a tlsport lock file, which is why pid =- 1
-        temp_tls_state_file = write_tls_tunnel_state_file(
+        temp_tls_state_file = write_tunnel_state_file(
             fs_id,
             mountpoint,
-            tls_port,
+            proxy_listen_port,
             -1,
             tunnel_args,
             [stunnel_config_file],
@@ -1755,13 +1834,21 @@ def bootstrap_tls(
             cert_details=cert_details,
         )
     finally:
-        # Always close the socket we created when choosing TLS port only until now to
-        # 1. avoid concurrent TLS mount port collision 2. enable stunnel process to bind the port
-        logging.debug("Closing socket used to choose TLS port %s.", tls_port)
-        tls_port_sock.close()
+        # When choosing a TLS port for efs-proxy/stunnel to listen on, we open the port to ensure it is free.
+        # However, we must free it again so efs-proxy/stunnel can bind to it. We make sure to only free it after
+        # we write the temporary state file, which acts like a tlsport lock file. This ensures we don't encounter
+        # any race conditions when choosing tls ports during concurrent mounts.
+        logging.debug(
+            "Closing socket used to choose proxy listen port %s.", proxy_listen_port
+        )
+        proxy_listen_sock.close()
 
     # launch the tunnel in a process group so if it has any child processes, they can be killed easily by the mount watchdog
-    logging.info('Starting TLS tunnel: "%s"', " ".join(tunnel_args))
+    logging.info(
+        'Starting %s: "%s"',
+        "efs-proxy" if efs_proxy_enabled else "stunnel",
+        " ".join(tunnel_args),
+    )
     tunnel_proc = subprocess.Popen(
         tunnel_args,
         stdout=subprocess.DEVNULL,
@@ -1769,9 +1856,13 @@ def bootstrap_tls(
         preexec_fn=os.setsid,
         close_fds=True,
     )
-    logging.info("Started TLS tunnel, pid: %d", tunnel_proc.pid)
+    logging.info(
+        "Started %s, pid: %d",
+        "efs-proxy" if efs_proxy_enabled else "stunnel",
+        tunnel_proc.pid,
+    )
 
-    update_tls_tunnel_temp_state_file_with_tunnel_pid(
+    update_tunnel_temp_state_file_with_tunnel_pid(
         temp_tls_state_file, state_file_dir, tunnel_proc.pid
     )
 
@@ -1784,6 +1875,8 @@ def bootstrap_tls(
     try:
         yield tunnel_proc
     finally:
+        # The caller of this function should use this function in the context of a `with` statement
+        # so that the state file is correctly renamed.
         os.rename(
             os.path.join(state_file_dir, temp_tls_state_file),
             os.path.join(state_file_dir, temp_tls_state_file[1:]),
@@ -1813,7 +1906,17 @@ def check_if_nfsvers_is_compatible_with_macos(options):
         fatal_error("NFSv4.1 is not supported on MacOS, please switch to NFSv4.0")
 
 
-def get_nfs_mount_options(options):
+# Use stunnel instead of efs-proxy for tls mounts,
+# and attach non-tls mounts directly to the mount target.
+def legacy_stunnel_mode_enabled(options, config):
+    return (
+        LEGACY_STUNNEL_MOUNT_OPTION in options
+        or check_if_platform_is_mac()
+        or is_ocsp_enabled(config, options)
+    )
+
+
+def get_nfs_mount_options(options, config):
     # If you change these options, update the man page as well at man/mount.efs.8
     if "nfsvers" not in options and "vers" not in options:
         options["nfsvers"] = "4.1" if not check_if_platform_is_mac() else "4.0"
@@ -1838,7 +1941,11 @@ def get_nfs_mount_options(options):
     if check_if_platform_is_mac():
         options["mountport"] = "2049"
 
-    if "tls" in options:
+    if legacy_stunnel_mode_enabled(options, config):
+        # Non-tls mounts in stunnel mode should not re-map the port
+        if "tls" in options:
+            options["port"] = options["tlsport"]
+    else:
         options["port"] = options["tlsport"]
 
     def to_nfs_option(k, v):
@@ -1854,12 +1961,15 @@ def get_nfs_mount_options(options):
 
 
 def mount_nfs(config, dns_name, path, mountpoint, options, fallback_ip_address=None):
-    if "tls" in options:
-        mount_path = "127.0.0.1:%s" % path
-    elif fallback_ip_address:
-        mount_path = "%s:%s" % (fallback_ip_address, path)
+    if legacy_stunnel_mode_enabled(options, config):
+        if "tls" in options:
+            mount_path = "127.0.0.1:%s" % path
+        elif fallback_ip_address:
+            mount_path = "%s:%s" % (fallback_ip_address, path)
+        else:
+            mount_path = "%s:%s" % (dns_name, path)
     else:
-        mount_path = "%s:%s" % (dns_name, path)
+        mount_path = "127.0.0.1:%s" % path
 
     if not check_if_platform_is_mac():
         command = [
@@ -1867,13 +1977,13 @@ def mount_nfs(config, dns_name, path, mountpoint, options, fallback_ip_address=N
             mount_path,
             mountpoint,
             "-o",
-            get_nfs_mount_options(options),
+            get_nfs_mount_options(options, config),
         ]
     else:
         command = [
             "/sbin/mount_nfs",
             "-o",
-            get_nfs_mount_options(options),
+            get_nfs_mount_options(options, config),
             mount_path,
             mountpoint,
         ]
@@ -2448,7 +2558,8 @@ def read_config(config_file=CONFIG_FILE):
     return p
 
 
-def bootstrap_logging(config, log_dir=LOG_DIR):
+# Retrieve and parse the logging level from the config file.
+def get_log_level_from_config(config):
     raw_level = config.get(CONFIG_SECTION, "logging_level")
     levels = {
         "debug": logging.DEBUG,
@@ -2464,6 +2575,26 @@ def bootstrap_logging(config, log_dir=LOG_DIR):
         # delay logging error about malformed log level until after logging is configured
         level_error = True
         level = logging.INFO
+
+    return (level, raw_level, level_error)
+
+
+# Convert the log level provided in the config into a log level string
+# that is understandable by efs-proxy
+def get_efs_proxy_log_level(config):
+    level, raw_level, level_error = get_log_level_from_config(config)
+    if level_error:
+        return "info"
+
+    # Efs-proxy does not have a CRITICAL log level
+    if level == logging.CRITICAL:
+        return "error"
+
+    return raw_level.lower()
+
+
+def bootstrap_logging(config, log_dir=LOG_DIR):
+    level, raw_level, level_error = get_log_level_from_config(config)
 
     max_bytes = config.getint(CONFIG_SECTION, "logging_max_bytes")
     file_count = config.getint(CONFIG_SECTION, "logging_file_count")
@@ -3023,7 +3154,7 @@ def is_nfs_mount(mountpoint):
         return False
 
 
-def mount_tls(
+def mount_with_proxy(
     config,
     init_system,
     dns_name,
@@ -3033,6 +3164,11 @@ def mount_tls(
     options,
     fallback_ip_address=None,
 ):
+    """
+    This function is responsible for launching a efs-proxy process and attaching a NFS mount to that process
+    over the loopback interface. Efs-proxy is responsible for forwarding NFS operations to EFS.
+    When the legacy 'stunnel' mount option is used, this function will launch a stunnel process instead of efs-proxy.
+    """
     if os.path.ismount(mountpoint) and is_nfs_mount(mountpoint):
         sys.stdout.write(
             "%s is already mounted, please run 'mount' command to verify\n" % mountpoint
@@ -3040,7 +3176,10 @@ def mount_tls(
         logging.warning("%s is already mounted, mount aborted" % mountpoint)
         return
 
-    with bootstrap_tls(
+    efs_proxy_enabled = not legacy_stunnel_mode_enabled(options, config)
+    logging.debug("mount_with_proxy: efs_proxy_enabled = %s", efs_proxy_enabled)
+
+    with bootstrap_proxy(
         config,
         init_system,
         dns_name,
@@ -3048,6 +3187,7 @@ def mount_tls(
         mountpoint,
         options,
         fallback_ip_address=fallback_ip_address,
+        efs_proxy_enabled=efs_proxy_enabled,
     ) as tunnel_proc:
         mount_completed = threading.Event()
         t = threading.Thread(
@@ -3907,22 +4047,22 @@ def main():
     if check_if_platform_is_mac() and "notls" not in options:
         options["tls"] = None
 
-    if "tls" in options:
-        mount_tls(
+    if "tls" not in options and legacy_stunnel_mode_enabled(options, config):
+        mount_nfs(
             config,
-            init_system,
             dns_name,
             path,
-            fs_id,
             mountpoint,
             options,
             fallback_ip_address=fallback_ip_address,
         )
     else:
-        mount_nfs(
+        mount_with_proxy(
             config,
+            init_system,
             dns_name,
             path,
+            fs_id,
             mountpoint,
             options,
             fallback_ip_address=fallback_ip_address,

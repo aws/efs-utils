@@ -55,6 +55,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
     - [MacOS](#macos)
     - [amazon-efs-mount-watchdog](#amazon-efs-mount-watchdog)
   - [Troubleshooting](#troubleshooting)
+  - [Upgrading to efs-utils v2.0.0](#upgrading-from-efs-utils-v1-to-v2)
   - [Upgrading stunnel for RHEL/CentOS](#upgrading-stunnel-for-rhelcentos)
   - [Upgrading stunnel for SLES12](#upgrading-stunnel-for-sles12)
   - [Upgrading stunnel for MacOS](#upgrading-stunnel-for-macos)
@@ -81,9 +82,11 @@ The `efs-utils` package has been verified against the following MacOS distributi
 ## Prerequisites
 
 * `nfs-utils` (RHEL/CentOS/Amazon Linux/Fedora) or `nfs-common` (Debian/Ubuntu)
-* OpenSSL 1.0.2+
+* OpenSSL-devel 1.0.2+
 * Python 3.4+
 * `stunnel` 4.56+
+- `rust` 1.68+
+- `cargo`
 
 ## Optional
 
@@ -93,7 +96,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
 
 ### On Amazon Linux distributions
 
-For those using Amazon Linux or Amazon Linux 2, the easiest way to install `efs-utils` is from Amazon's repositories:
+For those using Amazon Linux, the easiest way to install `efs-utils` is from Amazon's repositories:
 
 ```bash
 $ sudo yum -y install amazon-efs-utils
@@ -121,7 +124,7 @@ Other distributions require building the package from source and installing it.
 If the distribution is not OpenSUSE or SLES
 
 ```bash
-$ sudo yum -y install git rpm-build make
+$ sudo yum -y install git rpm-build make rust cargo openssl-devel
 $ git clone https://github.com/aws/efs-utils
 $ cd efs-utils
 $ make rpm
@@ -132,7 +135,7 @@ Otherwise
 
 ```bash
 $ sudo zypper refresh
-$ sudo zypper install -y git rpm-build make
+$ sudo zypper install -y git rpm-build make rust cargo openssl-devel
 $ git clone https://github.com/aws/efs-utils
 $ cd efs-utils
 $ make rpm
@@ -152,11 +155,17 @@ sudo zypper refresh
 
 ```bash
 $ sudo apt-get update
-$ sudo apt-get -y install git binutils
+$ sudo apt-get -y install git binutils rustc cargo pkg-config libssl-dev
 $ git clone https://github.com/aws/efs-utils
 $ cd efs-utils
 $ ./build-deb.sh
 $ sudo apt-get -y install ./build/amazon-efs-utils*deb
+```
+
+If your Debian distribution doesn't provide a rust or cargo package, or your distribution provides versions
+that are older than 1.68, then you can install rust and cargo through rustup:
+```bash
+$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 ### On MacOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura distribution
@@ -194,8 +203,10 @@ $ make test
 ## Usage
 
 ### mount.efs
+`efs-utils` includes a mount helper utility, `mount.efs`, that simplifies and improves the performance of EFS file system mounts.
 
-`efs-utils` includes a mount helper utility to simplify mounting and using EFS file systems.
+`mount.efs` launches a proxy process that forwards NFS traffic from the kernel's NFS client to EFS.
+This proxy is responsible for TLS encryption, and for providing improved throughput performance.
 
 To mount with the recommended default options, simply run:
 
@@ -317,6 +328,16 @@ You can also enable stunnel debug logs with
 `sed -i '/stunnel_debug_enabled = false/s//stunnel_debug_enabled = true/g' /etc/amazon/efs/efs-utils.conf`.   
 
 Make sure to perform the failed mount again after running the prior commands before pulling the logs.
+
+## Upgrading from efs-utils v1 to v2
+Efs-utils v2.0.0 replaces stunnel, which provides TLS encryptions for mounts, with efs-proxy, a component built in-house at AWS.
+Efs-proxy lays the foundation for upcoming feature launches at EFS.
+
+To utilize the improved performance benefits of efs-proxy, you must re-mount any existing mounts. 
+
+Efs-proxy is not compatible with OCSP or Mac clients. In these cases, efs-utils will automatically revert back to using stunnel.  
+
+If you are building efs-utils v2.0.0 from source, then you need Rust and Cargo >= 1.68.
 
 ## Upgrading stunnel for RHEL/CentOS
 

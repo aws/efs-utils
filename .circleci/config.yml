@@ -40,7 +40,7 @@ commands:
       - run:
           name: Install dependencies
           command: |
-            apt-get -y install binutils git
+            apt-get -y install binutils git rustc cargo pkg-config libssl-dev
       - run:
           name: Add local build repo as safe git directory
           command: |
@@ -58,13 +58,41 @@ commands:
           name: Check installed successfully
           command: |
             mount.efs --version
+  install-latest-rust-deb:
+    steps:
+      - run:
+          name: Repo update
+          command: |
+            apt-get update
+      - run:
+          name: Install curl
+          command: |
+            apt-get -y install curl
+      - run:
+          name: Install latest Rust
+          command: |
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            . "$HOME/.cargo/env"
+            export PATH=$HOME/.cargo/env/bin:$PATH
+  install-latest-rust-yum:
+    steps:
+      - run:
+          name: Install dependencies
+          command: |
+            yum install -y curl
+      - run:
+          name: Install latest Rust
+          command: |
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            . "$HOME/.cargo/env"
+            export PATH=$HOME/.cargo/env/bin:$PATH
   build-rpm:
     steps:
       - checkout
       - run:
           name: Install dependencies
           command: |
-            yum -y install rpm-build make systemd
+            yum -y install rpm-build make systemd rust cargo openssl-devel
       - run:
           name: Build RPM
           command: |
@@ -81,6 +109,7 @@ commands:
           name: Check changelog
           command: |
             rpm -q --changelog amazon-efs-utils
+
   build-suse-rpm:
     steps:
       - checkout
@@ -89,10 +118,19 @@ commands:
           command: |
             zypper refresh
       - run:
+          name: Install curl
+          command: |
+            zypper install -y curl
+      - run:
+          name: Install latest Rust
+          command: |
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            . "$HOME/.cargo/env"
+      - run:
           name: Install dependencies
           command: |
             zypper install -y --force-resolution rpm-build
-            zypper install -y make systemd
+            zypper install -y make systemd rust cargo openssl-devel
       - run:
           name: Build RPM
           command: |
@@ -116,14 +154,6 @@ commands:
         command: |
           sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
           sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
-  build-debian-eol-repo:
-    steps:
-      - run:
-          name: change repo url to archive.debian.org and remove updates repo for EOL versions
-          command: |
-            sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list
-            sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list
-            sed -i '/stretch-updates/d' /etc/apt/sources.list
 jobs:
   test:
     parameters:
@@ -142,6 +172,7 @@ jobs:
       name: linux
       image: << parameters.image >>
     steps:
+      - install-latest-rust-deb
       - build-deb
   build-rpm-package:
     parameters:
@@ -151,6 +182,16 @@ jobs:
       name: linux
       image: << parameters.image >>
     steps:
+      - build-rpm
+  build-rpm-package-rustup:
+    parameters:
+      image:
+        type: string
+    executor:
+      name: linux
+      image: << parameters.image >>
+    steps:
+      - install-latest-rust-yum
       - build-rpm
   build-suse-rpm-package:
     parameters:
@@ -170,17 +211,8 @@ jobs:
       image: << parameters.image >>
     steps:
       - build-centos-repo
+      - install-latest-rust-yum
       - build-rpm
-  build-debian-eol-rpm-package:
-    parameters:
-      image:
-        type: string
-    executor:
-      name: linux
-      image: << parameters.image >>
-    steps:
-      - build-debian-eol-repo
-      - build-deb
 workflows:
   workflow:
     jobs:
@@ -217,9 +249,6 @@ workflows:
       - build-deb-package:
           name: ubuntu22
           image: ubuntu:22.04
-      - build-debian-eol-rpm-package:
-          name: debian9
-          image: debian:stretch
       - build-deb-package:
           name: debian10
           image: debian:buster
@@ -245,30 +274,27 @@ workflows:
           name: amazon-linux-2
           image: amazonlinux:2
       - build-rpm-package:
-          name: amazon-linux
-          image: amazonlinux:1
-      - build-rpm-package:
           name: fedora-latest
           image: fedora:latest
-      - build-rpm-package:
+      - build-rpm-package-rustup:
           name: fedora28
           image: fedora:28
-      - build-rpm-package:
+      - build-rpm-package-rustup:
           name: fedora29
           image: fedora:29
-      - build-rpm-package:
+      - build-rpm-package-rustup:
           name: fedora30
           image: fedora:30
-      - build-rpm-package:
+      - build-rpm-package-rustup:
           name: fedora31
           image: fedora:31
-      - build-rpm-package:
+      - build-rpm-package-rustup:
           name: fedora32
           image: fedora:32
-      - build-rpm-package:
+      - build-rpm-package-rustup:
           name: fedora33
           image: fedora:33
-      - build-rpm-package:
+      - build-rpm-package-rustup:
           name: fedora34
           image: fedora:34
       - build-rpm-package:

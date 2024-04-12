@@ -6,6 +6,8 @@
 # the License.
 #
 
+%bcond_without check
+
 %if 0%{?amzn1}
 %global python_requires python36
 %else
@@ -34,8 +36,13 @@
 %global efs_bindir /sbin
 %endif
 
+%global proxy_name efs-proxy
+%global proxy_version 2.0.0
+
+%{?!include_vendor_tarball:%define include_vendor_tarball true}
+
 Name      : amazon-efs-utils
-Version   : 1.36.0
+Version   : 2.0.0
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -43,8 +50,7 @@ Group     : Amazon/Tools
 License   : MIT
 URL       : https://aws.amazon.com/efs
 
-
-BuildArch : noarch
+BuildArchitectures: x86_64 aarch64
 
 Requires  : nfs-utils
 %if 0%{?amzn2}
@@ -67,13 +73,32 @@ Requires(preun)  : /sbin/service /sbin/chkconfig
 Requires(postun) : /sbin/service
 %endif
 
-Source    : %{name}.tar.gz
+BuildRequires  : cargo rust
+BuildRequires: openssl-devel
+
+Source0    : %{name}.tar.gz
+%if "%{include_vendor_tarball}" == "true"
+Source1    : %{proxy_name}-%{proxy_version}-vendor.tar.xz
+Source2    : config.toml
+%endif
 
 %description
 This package provides utilities for simplifying the use of EFS file systems
 
+%global debug_package %{nil}
+
 %prep
 %setup -n %{name}
+mkdir -p %{_builddir}/%{name}/src/proxy/.cargo
+%if "%{include_vendor_tarball}" == "true"
+cp %{SOURCE2} %{_builddir}/%{name}/src/proxy/.cargo/
+tar xf %{SOURCE1}
+mv vendor %{_builddir}/%{name}/src/proxy/
+%endif
+
+%build
+cd %{_builddir}/%{name}/src/proxy
+cargo build --release --manifest-path %{_builddir}/%{name}/src/proxy/Cargo.toml
 
 %install
 mkdir -p %{buildroot}%{_sysconfdir}/amazon/efs
@@ -95,6 +120,7 @@ install -p -m 444 %{_builddir}/%{name}/dist/efs-utils.crt %{buildroot}%{_sysconf
 install -p -m 755 %{_builddir}/%{name}/src/mount_efs/__init__.py %{buildroot}%{efs_bindir}/mount.efs
 install -p -m 755 %{_builddir}/%{name}/src/watchdog/__init__.py %{buildroot}%{_bindir}/amazon-efs-mount-watchdog
 install -p -m 644 %{_builddir}/%{name}/man/mount.efs.8 %{buildroot}%{_mandir}/man8
+install -p -m 755 %{_builddir}/%{name}/src/proxy/target/release/efs-proxy %{buildroot}%{efs_bindir}/efs-proxy
 
 %files
 %defattr(-,root,root,-)
@@ -105,6 +131,7 @@ install -p -m 644 %{_builddir}/%{name}/man/mount.efs.8 %{buildroot}%{_mandir}/ma
 %endif
 %{_sysconfdir}/amazon/efs/efs-utils.crt
 %{efs_bindir}/mount.efs
+%{efs_bindir}/efs-proxy
 %{_bindir}/amazon-efs-mount-watchdog
 /var/log/amazon
 %{_mandir}/man8/mount.efs.8.gz
@@ -138,6 +165,9 @@ fi
 %clean
 
 %changelog
+* Mon Apr 08 2024 Ryan Stankiewicz <rjstank@amazon.com> - 2.0.0
+- Replace stunnel, which provides TLS encryptions for mounts, with efs-proxy, a component built in-house at AWS. Efs-proxy lays the foundation for upcoming feature launches at EFS. 
+
 * Mon Mar 18 2024 Sean Zatz <zatzsea@amazon.com> - 1.36.0
 - Support new mount option: crossaccount, conduct cross account mounts via ip address. Use client AZ-ID to choose mount target.
 

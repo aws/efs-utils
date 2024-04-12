@@ -11,7 +11,7 @@ set -ex
 
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
-VERSION=1.36.0
+VERSION=2.0.0
 RELEASE=1
 DEB_SYSTEM_RELEASE_PATH=/etc/os-release
 
@@ -28,12 +28,18 @@ mkdir -p ${BUILD_ROOT}/usr/bin
 mkdir -p ${BUILD_ROOT}/var/log/amazon/efs
 mkdir -p ${BUILD_ROOT}/usr/share/man/man8
 
+echo 'Building efs-proxy'
+cd src/proxy
+cargo build --release --manifest-path ${BASE_DIR}/src/proxy/Cargo.toml
+cd ${BASE_DIR}
+
 echo 'Copying application files'
 install -p -m 644 dist/amazon-efs-mount-watchdog.conf ${BUILD_ROOT}/etc/init
 install -p -m 644 dist/amazon-efs-mount-watchdog.service ${BUILD_ROOT}/etc/systemd/system
 install -p -m 444 dist/efs-utils.crt ${BUILD_ROOT}/etc/amazon/efs
 install -p -m 644 dist/efs-utils.conf ${BUILD_ROOT}/etc/amazon/efs
 install -p -m 755 src/mount_efs/__init__.py ${BUILD_ROOT}/sbin/mount.efs
+install -p -m 755 src/proxy/target/release/efs-proxy ${BUILD_ROOT}/usr/bin/efs-proxy
 install -p -m 755 src/watchdog/__init__.py ${BUILD_ROOT}/usr/bin/amazon-efs-mount-watchdog
 
 echo 'Copying install scripts'
