@@ -22,7 +22,7 @@ FILES = ["/tmp/foo", "/tmp/bar"]
 DATETIME_FORMAT = "%y%m%d%H%M%SZ"
 
 
-def test_write_tls_tunnel_state_file_netns(tmpdir):
+def test_write_tunnel_state_file_netns(tmpdir):
     state_file_dir = str(tmpdir)
 
     mount_point = "/home/user/foo/mount"
@@ -42,7 +42,7 @@ def test_write_tls_tunnel_state_file_netns(tmpdir):
         "useIam": True,
     }
 
-    state_file = mount_efs.write_tls_tunnel_state_file(
+    state_file = mount_efs.write_tunnel_state_file(
         FS_ID,
         mount_point,
         PORT,
@@ -80,7 +80,7 @@ def test_write_tls_tunnel_state_file_netns(tmpdir):
     assert cert_details["useIam"] == state.get("useIam")
 
 
-def test_write_tls_tunnel_state_file(tmpdir):
+def test_write_tunnel_state_file(tmpdir):
     state_file_dir = str(tmpdir)
 
     mount_point = "/home/user/foo/mount"
@@ -100,7 +100,7 @@ def test_write_tls_tunnel_state_file(tmpdir):
         "useIam": True,
     }
 
-    state_file = mount_efs.write_tls_tunnel_state_file(
+    state_file = mount_efs.write_tunnel_state_file(
         FS_ID, mount_point, PORT, PID, COMMAND, FILES, state_file_dir, cert_details
     )
 
@@ -131,12 +131,12 @@ def test_write_tls_tunnel_state_file(tmpdir):
     assert cert_details["useIam"] == state.get("useIam")
 
 
-def test_write_tls_tunnel_state_file_no_cert(tmpdir):
+def test_write_tunnel_state_file_no_cert(tmpdir):
     state_file_dir = str(tmpdir)
 
     mount_point = "/home/user/foo/mount"
 
-    state_file = mount_efs.write_tls_tunnel_state_file(
+    state_file = mount_efs.write_tunnel_state_file(
         FS_ID, mount_point, PORT, PID, COMMAND, FILES, state_file_dir
     )
 
