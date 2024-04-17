@@ -73,7 +73,11 @@ Requires(preun)  : /sbin/service /sbin/chkconfig
 Requires(postun) : /sbin/service
 %endif
 
+# RHEL 7 doesn't provide a Rust or Cargo package,
+# so users are expected to install it through rustup.
+%if ! 0%{?rhel} == 7
 BuildRequires  : cargo rust
+%endif
 BuildRequires: openssl-devel
 
 Source0    : %{name}.tar.gz

@@ -115,6 +115,13 @@ for more guidance.)
 
 Other distributions require building the package from source and installing it.
 
+If your distribution doesn't provide a rust or cargo package, or it provides versions
+that are older than 1.68, then you can install rust and cargo through rustup:
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+. "$HOME/.cargo/env"
+```
+
 - To build and install an RPM:
 
 If the distribution is not OpenSUSE or SLES
@@ -161,8 +168,37 @@ $ sudo apt-get -y install ./build/amazon-efs-utils*deb
 If your Debian distribution doesn't provide a rust or cargo package, or your distribution provides versions
 that are older than 1.68, then you can install rust and cargo through rustup:
 ```bash
-$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 . "$HOME/.cargo/env"
+```
+
+### Common installation issues with efs-utils v2.0.0
+**`make rpm` fails due to "feature `edition2021` is required"**:
+
+Update to a version of rust and cargo
+that is newer than 1.68. To install a new version of rust and cargo, run
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+. "$HOME/.cargo/env"
+```
+
+**You installed a new version of rust with the above command, but your system is still using the rust installed by the package manager**:
+
+When installing rust with the rustup script above, the script will fail if it detects a rust already exists on the system.
+Un-install the package manager's rust, and re-install rust through rustup. Once done, you will need to install rust through the package manager again to satisfy
+the RPM's dependencies.
+```bash
+yum remove cargo rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+yum install cargo rust
+. "$HOME/.cargo/env"
+```
+
+**When you run `make rpm`, compilation of efs-proxy fails due to `error: linker cc not found`**:
+
+Make sure that you have a linker installed on your system. For example, on Amazon Linux or RHEL, install gcc with
+```bash
+yum install gcc
 ```
 
 ### On MacOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura distribution
@@ -321,8 +357,9 @@ assist you if relevant logs are provided.  You can find the log file at `/var/lo
 Often times, enabling debug level logging can help us find problems more easily.  To do this, run  
 `sed -i '/logging_level = INFO/s//logging_level = DEBUG/g' /etc/amazon/efs/efs-utils.conf`.  
 
-You can also enable stunnel debug logs with  
+You can also enable stunnel and efs-proxy debug logs with  
 `sed -i '/stunnel_debug_enabled = false/s//stunnel_debug_enabled = true/g' /etc/amazon/efs/efs-utils.conf`.   
+These logs files will also be in `/var/log/amazon/efs/`.
 
 Make sure to perform the failed mount again after running the prior commands before pulling the logs.
 
