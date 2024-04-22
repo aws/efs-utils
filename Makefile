@@ -10,7 +10,6 @@ PACKAGE_NAME = amazon-efs-utils
 SOURCE_TARBALL = $(PACKAGE_NAME).tar.gz
 SPECFILE = $(PACKAGE_NAME).spec
 BUILD_DIR = build/rpmbuild
-PROXY_VERSION = 2.0.0
 export PYTHONPATH := $(shell pwd)/src
 
 .PHONY: clean
@@ -18,6 +17,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -rf $(PACKAGE_NAME)
 	rm -f $(SOURCE_TARBALL)
+	rm -f $(SPECFILE)
 
 .PHONY: tarball
 tarball: clean
@@ -32,23 +32,25 @@ tarball: clean
 	mkdir -p $(PACKAGE_NAME)/src
 	cp -rp src/mount_efs $(PACKAGE_NAME)/src
 	cp -rp src/watchdog $(PACKAGE_NAME)/src
-	cp -rp src/proxy $(PACKAGE_NAME)/src
 
 	mkdir -p ${PACKAGE_NAME}/man
 	cp -rp man/mount.efs.8 ${PACKAGE_NAME}/man
 
 	tar -czf $(SOURCE_TARBALL) $(PACKAGE_NAME)/*
 
+.PHONY: specfile
+specfile: clean
+	ln -sf dist/$(SPECFILE) $(SPECFILE)
+
 .PHONY: sources
-sources: tarball
+sources: tarball specfile
 
 .PHONY: rpm-only
 rpm-only:
 	mkdir -p $(BUILD_DIR)/{SPECS,COORD_SOURCES,DATA_SOURCES,BUILD,RPMS,SOURCES,SRPMS}
 	cp $(SPECFILE) $(BUILD_DIR)/SPECS
 	cp $(SOURCE_TARBALL) $(BUILD_DIR)/SOURCES
-	cp config.toml $(BUILD_DIR)/SOURCES
-	rpmbuild -ba --define "_topdir `pwd`/$(BUILD_DIR)" --define "include_vendor_tarball false" $(BUILD_DIR)/SPECS/$(SPECFILE)
+	rpmbuild -ba --define "_topdir `pwd`/$(BUILD_DIR)" $(BUILD_DIR)/SPECS/$(SPECFILE)
 	cp $(BUILD_DIR)/RPMS/*/*rpm build
 
 .PHONY: rpm

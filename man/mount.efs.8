@@ -7,13 +7,10 @@
 .SH "DESCRIPTION"
 .sp
 \fBmount\&.efs\fR is part of the \fBamazon\-efs\-utils\fR \
-package. It improves mount performance and simplifies using EFS file systems\&.
+package, which simplifies using EFS file systems\&.
 .sp
 \fBmount\&.efs\fR is meant to be used through the \
 \fBmount\fR(8) command for mounting EFS file systems\&.
-.sp
-\fBmount\&.efs\fR launches a proxy process that forwards NFS traffic from the kernel's NFS client to EFS. \
-This proxy is responsible for TLS encryption, and for providing improved throughput performance.
 .sp
 \fIfs-id-or-dns-name\fR has to be of one of the following \
 two forms:
@@ -24,8 +21,7 @@ when the file system is created\&.
 .IP \(bu
 A domain name that has a resolvable DNS-CNAME record, \
 which in turn points to a fully-qualified EFS DNS name \
-in the form of "fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com" \
-or "us\-east\-1a\&.fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com"\&.
+in the form of "fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com"\&.
 .P
 \fImount-point\fR is the local directory \
 on which the file system will be mounted\&.
@@ -43,15 +39,14 @@ hard
 timeo=600
 retrans=2
 noresvport
-tls (for Mac distributions)
 .fi
 .if n \{\
 .RE
 .\}
 .sp
 By default, when using the Amazon EFS mount helper with Transport \
-Layer Security (TLS), the mount helper enforces the certificate hostname \
-checking and disables the use of Online Certificate Status Protocol (OCSP). \
+Layer Security (TLS), the mount helper enforces the use of Online \
+Certificate Status Protocol (OCSP) and certificate hostname checking\&. \
 These options can be configured in the config file located at \
 \fI/etc/amazon/efs/efs\-utils\&.conf\&\fR.
 .sp
@@ -73,77 +68,14 @@ options:
 .\}
 .TP
 \fBtls\fR
-Mounts the EFS file system over TLS\&. For EC2 instances using Mac distributions, \
-this option is by default passed and the EFS file system is mounted over TLS\&.
-.TP
-\fBnotls\fR
-Mounts the EFS file system without TLS, applies for Mac distributions only\&.
+Mounts the EFS file system over TLS\&.
 .TP
 \fBtlsport=\fR\fIn\fR
-Configures the proxy process to listen for connections from the NFS client on the specified port\&. This is applicable to both non-tls and tls mounts.
- By default, the \
-tlsport is chosen randomly from port range defined in the config file located \
-at \fI/etc/amazon/efs/efs\-utils\&.conf\&\fR.
+Configure the TLS relay to listen on the specified port\&.
 .TP
 \fBverify=\fR\fIn\fR
 Verify TLS certificates using the specified stunnel verify level\&. For \
 more information, see \fBstunnel(8)\fR\&.
-.TP
-\fBocsp / noocsp\fR
-Selects whether to perform OCSP validation on TLS certificates\&, \
-overriding /etc/amazon/efs/efs-utils.conf. By default OCSP is disabled. \
-For more information, see \fBstunnel(8)\fR\&. \
-The ocsp mount option is incompatible with the efs-proxy process, and will revert efs-utils \
-to the legacy "stunnel" mode, which does not support improved per-client throughput performance.
-.TP
-\fBiam\fR
-Use the system's IAM identity to authenticate with EFS. The mount helper will try \
-to retrieve the required IAM credentials from the following locations: the aws credentials \
-URI passed by mount option, the AWS CLI credentials file (~/.aws/credentials), and the
-AWS CLI config file (~/.aws/config), the AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
-environment variable, the AssumeRoleWithWebIdentity, the EC2 instance profile\&.
-The first location that has credentials will be used. This option requires the \fBtls\fR option\&.
-.TP
-\fBrolearn\fR
-Role ARN for IAM authentication with AssumeRoleWithWebIdentity API\&.
-.TP
-\fBjwtpath\fR
-Identity token for IAM authentication with AssumeRoleWithWebIdentity API\&.
-.TP
-\fBaccesspoint\fR
-Mount the EFS file system using the specified access point. This option requires the \
-\fBtls\fR option\&. The access point must be in the "available" state before it \
-can be used to mount EFS\&.
-.TP
-\fBawsprofile\fR
-Use the named profile used to lookup IAM credentials in the AWS CLI credentials file \
-(~/.aws/credentials) or AWS CLI config file (~/.aws/config). If botocore is installed, \
-assume the named profile and use the credentials of the assumed profile. If "awsprofile" \
-is not specified, the "default" profile is used\&.
-.TP
-\fBawscredsuri\fR
-Use the relative uri to lookup IAM credentials from ecs task metadata endpoint\&.
-.TP
-\fBcafile\fR
-Use the cafile as the stunnel certificate authority file\&.
-.TP
-\fBnetns\fR
-Mount the EFS file system to the specified network namespace\&.
-.TP
-\fBaz\fR
-Mount the EFS file system to the specified availability zone mount target\&.
-.TP
-\fBmountport\fR
-Use the port 2049 to bypass portmapper daemon on EC2 Mac instances running macOS Big Sur\&.
-.TP
-\fBmounttargetip\fR
-Mount the EFS file system to the specified mount target ip address\&.
-.TP
-\fBstunnel\fR
-Forward NFS traffic from the local NFS client to EFS using stunnel instead of efs-proxy.
-This will enable compatibility with the ocsp mount option, but will not
-deliver the increased throughput performance provided by efs-proxy. \
-This option is enabled by default for Mac clients.
 .if n \{\
 .RE
 .\}
@@ -152,20 +84,6 @@ This option is enabled by default for Mac clients.
 sudo mount -t efs fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 "/mnt/efs" without encryption of data in transit\&.
-.TP
-sudo mount -t efs -o mounttargetip=192.0.0.1 /mnt/efs
-Mount an EFS file system with file system ID "fs-abcd1234" on the mount target \
-that belongs to the file system with address "192.0.0.1" without encryption of \
-data in transit\&.
-.TP
-sudo mount -t efs -o netns=/proc/1/net/ns fs-abcd1234 /mnt/efs
-Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
-"/mnt/efs" without encryption of data in transit in given network namespace \
-'/proc/1/net/ns'
-.TP
-sudo mount -t efs -o az=us-east-1a fs-abcd1234 /mnt/efs
-Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
-"/mnt/efs" to the mount target in availability zone us-east-1a
 .TP
 sudo mount -t efs fs-abcd1234:/child /mnt/efs
 Mount a non-root directory of an EFS file system with file system ID \
@@ -178,10 +96,6 @@ Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 sudo mount -t efs -o tls,verify=0 fs-abcd1234 /mnt/efs
 Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
 "/mnt/efs" using encryption of data in transit and a verify level of 0\&.
-.TP
-sudo mount -t efs -o tls,ocsp fs-abcd1234 /mnt/efs
-Mount an EFS file system with file system ID "fs-abcd1234" at mount point \
-"/mnt/efs" using encryption of data in transit and with OCSP validation enabled\&.
 .TP
 sudo mount -t efs custom-cname.example.com /mnt/efs
 Mount an EFS file system using the custom DNS name \
@@ -198,31 +112,6 @@ resolve to a fully-qualified EFS DNS name such as \
 "fs\-abcd1234\&.efs\&.us-east-1\&.amazonaws\&.com" \
 \(em at mount point "/mnt/efs" using encryption \
 of data in transit\&.
-.TP
-sudo mount -t efs -o tls,iam fs-abcd1234 /mnt/efs
-Mount an EFS file system with file system ID "fs-abcd1234" at mount point "/mnt/efs" \
-with encryption of data in transit. The mount helper will authenticate with EFS using \
-the system's IAM identity\&.
-.TP
-sudo mount -t efs -o tls,iam,rolearn="ROLE_ARN",jwtpath="PATH/JWT_TOKEN_FILE" fs-abcd1234 /mnt/efs
-Mount an EFS file system with file system ID "fs-abcd1234" at mount point "/mnt/efs" \
-with encryption of data in transit. The mount helper will assume the role "ROLE_ARN" by calling \
-the AssumeRoleWithWebIdentity API with the identity token at "PATH/JWT_TOKEN_FILE"\&.
-.TP
-sudo mount -t efs -o tls,iam,awsprofile=test-profile fs-abcd1234 /mnt/efs
-Mount an EFS file system with file system ID "fs-abcd1234" at mount point "/mnt/efs" \
-with encryption of data in transit. The mount helper will authenticate with EFS using \
-the system's IAM identity named profile "test profile", for which the credentials are retrieved \
-either from /root/.aws/credentials or /root/.aws/config. If the credentials are not present \
-in the credentials or config files, and there is a "[profile test-profile]" section in the \
-/root/.aws/config file, the mount helper will assume the named profile "test-profile" based \
-on the profile section configuration in root/.aws/config and use the credentials retrieved \
-with botocore to mount (botocore must be pre-installed)\&.
-.TP
-sudo mount -t efs -o tls,accesspoint=fsap-12345678 fs-abcd1234 /mnt/efs
-Mount an EFS file system with file system ID "fs-abcd1234" at mount point "/mnt/efs" \
-with encryption of data in transit. The file system is mounted using the access point \
-"fsap-12345678"\&.
 .SH "FILES"
 .TP
 \fI/sbin/mount.efs\fR
@@ -251,8 +140,6 @@ The man page for the Amazon EFS mount helper\&.
 For more information on using the \fBamazon\-efs\-utils\fR package, see \
 \fIhttps://docs\&.aws\&.amazon\&.com/efs/latest/ug/using\-amazon\-efs\-utils\&.html\fR \
 in the Amazon EFS User Guide\&.
-.sp
-The paths on EC2 MacOS instances are relocated under /usr/local/Cellar/amazon-efs-utils/<version>/libexec directory.
 .SH "SEE ALSO"
 .sp
 \fBnfs(8)\fR, \fBstunnel(8)\fR, \fBfstab(5)\fR
