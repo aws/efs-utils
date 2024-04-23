@@ -37,12 +37,12 @@
 %endif
 
 %global proxy_name efs-proxy
-%global proxy_version 2.0.0
+%global proxy_version 2.0.1
 
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 2.0.0
+Version   : 2.0.1
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -169,6 +169,9 @@ fi
 %clean
 
 %changelog
+* Mon Apr 23 2024 Ryan Stankiewicz <rjstank@amazon.com> - 2.0.1
+- Disable Nagle's algorithm for efs-proxy TLS mounts to improve latencies 
+
 * Mon Apr 08 2024 Ryan Stankiewicz <rjstank@amazon.com> - 2.0.0
 - Replace stunnel, which provides TLS encryptions for mounts, with efs-proxy, a component built in-house at AWS. Efs-proxy lays the foundation for upcoming feature launches at EFS. 
 
