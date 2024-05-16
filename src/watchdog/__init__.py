@@ -25,7 +25,7 @@ import sys
 import time
 from collections import namedtuple
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from signal import SIGHUP, SIGKILL, SIGTERM
 
@@ -1401,7 +1401,7 @@ def check_certificate(
 ):
     certificate_creation_time = datetime.strptime(
         state["certificateCreationTime"], CERT_DATETIME_FORMAT
-    )
+    ).replace(tzinfo=timezone.utc)
     certificate_exists = os.path.isfile(state["certificate"])
     certificate_renewal_interval_secs = (
         get_certificate_renewal_interval_mins(config) * 60
@@ -2060,7 +2060,7 @@ def get_utc_now():
     """
     Wrapped for patching purposes in unit tests
     """
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 def check_process_name(pid):
