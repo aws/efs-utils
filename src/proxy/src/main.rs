@@ -6,6 +6,7 @@ use controller::Controller;
 use log::{debug, error, info};
 use std::path::Path;
 use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
 use tokio::signal;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -46,6 +47,9 @@ async fn main() {
     }
 
     info!("Running with configuration: {:?}", proxy_config);
+
+    let pid_file_path = Path::new(&proxy_config.pid_file_path);
+    let _ = write_pid_file(&pid_file_path).await;
 
     // This "status reporter" is currently only used in tests
     let (_status_requester, status_reporter) = status_reporter::create_status_channel();
@@ -90,6 +94,28 @@ async fn main() {
             sigterm_cancellation_token.cancel();
         },
     }
+    if pid_file_path.exists() {
+        match tokio::fs::remove_file(&pid_file_path).await {
+            Ok(()) => info!("Removed pid file"),
+            Err(e) => error!("Unable to remove pid_file: {e}"),
+        }
+    }
+}
+
+async fn write_pid_file(pid_file_path: &Path) -> Result<(), anyhow::Error> {
+    let mut pid_file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o644)
+        .open(pid_file_path)
+        .await?;
+    pid_file
+        .write_all(&std::process::id().to_string().as_bytes())
+        .await?;
+    pid_file.write_u8(b'\x0A').await?;
+    pid_file.flush().await?;
+    Ok(())
 }
 
 async fn get_tls_config(proxy_config: &ProxyConfig) -> Result<TlsConfig, anyhow::Error> {
@@ -135,4 +161,23 @@ pub struct Args {
 
     #[arg(long, default_value_t = false)]
     pub tls: bool,
+}
+
+#[cfg(test)]
+pub mod tests {
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_write_pid_file() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let pid_file = tempfile::NamedTempFile::new()?;
+        let pid_file_path = pid_file.path();
+
+        write_pid_file(pid_file_path).await?;
+
+        let expected_pid = std::process::id().to_string();
+        let read_pid = tokio::fs::read_to_string(pid_file_path).await?;
+        assert_eq!(expected_pid + "\n", read_pid);
+        Ok(())
+    }
 }
