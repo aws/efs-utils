@@ -54,7 +54,7 @@ def test_malformed_state_file(mocker, tmpdir):
         mocker, state_files={"mnt": state_file}, process_name_output=PROCESS_NAME_OUTPUT
     )
 
-    watchdog.clean_up_previous_stunnel_pids(state_file_dir)
+    watchdog.clean_up_previous_tunnel_pids(state_file_dir)
 
     utils.assert_not_called(rewrite_state_file_mock)
 
@@ -66,7 +66,7 @@ def test_clean_up_active_stunnel_from_previous_watchdog(mocker, tmpdir):
         mocker, state_files={"mnt": state_file}, process_name_output=PROCESS_NAME_OUTPUT
     )
 
-    watchdog.clean_up_previous_stunnel_pids(state_file_dir)
+    watchdog.clean_up_previous_tunnel_pids(state_file_dir)
 
     utils.assert_not_called(rewrite_state_file_mock)
 
@@ -80,7 +80,7 @@ def test_clean_up_active_LWP_from_driver(mocker, tmpdir):
         process_name_output=PROCESS_NAME_OUTPUT_LWP,
     )
 
-    watchdog.clean_up_previous_stunnel_pids(state_file_dir)
+    watchdog.clean_up_previous_tunnel_pids(state_file_dir)
 
     utils.assert_called_once(rewrite_state_file_mock)
 
@@ -94,7 +94,7 @@ def test_clean_up_stunnel_pid_from_previous_driver(mocker, tmpdir):
         process_name_output=PROCESS_NAME_OUTPUT_ERR,
     )
 
-    watchdog.clean_up_previous_stunnel_pids(state_file_dir)
+    watchdog.clean_up_previous_tunnel_pids(state_file_dir)
 
     utils.assert_called_once(rewrite_state_file_mock)
 
@@ -104,7 +104,7 @@ def test_no_state_files_from_previous_driver(mocker, tmpdir):
         mocker, state_files={}, process_name_output=PROCESS_NAME_OUTPUT
     )
 
-    watchdog.clean_up_previous_stunnel_pids(tmpdir)
+    watchdog.clean_up_previous_tunnel_pids(tmpdir)
 
     utils.assert_not_called(rewrite_state_file_mock)
 
@@ -122,7 +122,7 @@ def test_clean_up_multiple_stunnel_pids(mocker, tmpdir):
         process_name_output=PROCESS_NAME_OUTPUT_ERR,
     )
 
-    watchdog.clean_up_previous_stunnel_pids(state_file_dir)
+    watchdog.clean_up_previous_tunnel_pids(state_file_dir)
 
     utils.assert_called(rewrite_state_file_mock)
 
@@ -139,6 +139,6 @@ def test_clean_up_stunnel_no_pid(mocker, tmpdir):
         process_name_output=PROCESS_NAME_OUTPUT_LWP,
     )
 
-    watchdog.clean_up_previous_stunnel_pids(state_file_dir)
+    watchdog.clean_up_previous_tunnel_pids(state_file_dir)
 
     utils.assert_not_called(rewrite_state_file_mock)

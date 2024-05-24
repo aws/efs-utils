@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "2.0.1"
+VERSION = "2.0.2"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -2119,11 +2119,11 @@ def clean_up_certificate_lock_file(state_file_dir=STATE_FILE_DIR):
     check_and_remove_file(lock_file)
 
 
-def clean_up_previous_stunnel_pids(state_file_dir=STATE_FILE_DIR):
+def clean_up_previous_tunnel_pids(state_file_dir=STATE_FILE_DIR):
     """
-    Cleans up stunnel pids created by mount watchdog spawned by a previous efs-csi-driver pod after driver restart, upgrade
-    or crash. This method attempts to clean PIDs from persisted state files after efs-csi-driver restart to
-    ensure watchdog creates a new stunnel.
+    Cleans up efs-proxy/stunnel pids created by mount watchdog spawned by a previous efs-csi-driver
+    pod after driver restart, upgrade, or crash. This method attempts to clean PIDs from persisted
+    state files after efs-csi-driver restart to ensure watchdog creates a new tunnel.
     """
     state_files = get_state_files(state_file_dir)
     logging.debug(
@@ -2147,7 +2147,7 @@ def clean_up_previous_stunnel_pids(state_file_dir=STATE_FILE_DIR):
 
             out = check_process_name(pid)
 
-            if out and "stunnel" in str(out):
+            if out and ("stunnel" in str(out) or "efs-proxy" in str(out)):
                 logging.debug(
                     "PID %s in state file %s is active. Skipping clean up",
                     pid,
@@ -2189,7 +2189,7 @@ def main():
             CONFIG_SECTION, "unmount_grace_period_sec"
         )
 
-        clean_up_previous_stunnel_pids()
+        clean_up_previous_tunnel_pids()
         clean_up_certificate_lock_file()
 
         while True:
