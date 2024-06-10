@@ -22,6 +22,7 @@ The `efs-utils` package has been verified against the following Linux distributi
 | Ubuntu 16.04         | `deb` | `systemd` |
 | Ubuntu 18.04         | `deb` | `systemd` |
 | Ubuntu 20.04         | `deb` | `systemd` |
+| Ubuntu 22.04         | `deb` | `systemd` |
 | OpenSUSE Leap        | `rpm` | `systemd` |
 | OpenSUSE Tumbleweed  | `rpm` | `systemd` |
 | Oracle8              | `rpm` | `systemd` |
