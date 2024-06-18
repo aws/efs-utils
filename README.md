@@ -80,7 +80,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
 
 * `nfs-utils` (RHEL/CentOS/Amazon Linux/Fedora) or `nfs-common` (Debian/Ubuntu)
 * OpenSSL-devel 1.0.2+
-* Python 3.4+
+* Python 3.7/3.8
 * `stunnel` 4.56+
 - `rust` 1.68+
 - `cargo`
