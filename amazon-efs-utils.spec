@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 2.0.2
+Version   : 2.0.3
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -168,6 +168,10 @@ fi
 %clean
 
 %changelog
+* Tue Jun 18 2024 Arnav Gupta <arnavgup@amazon.com> - 2.0.3
+- Upgrade py version
+- Replace deprecated usage of datetime 
+
 * Mon May 20 2024 Anthony Tse <anthotse@amazon.com> - 2.0.2
 - Check for efs-proxy PIDs when cleaning tunnel state files
 - Add PID to log entries

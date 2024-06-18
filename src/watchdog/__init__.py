@@ -25,7 +25,7 @@ import sys
 import time
 from collections import namedtuple
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from signal import SIGHUP, SIGKILL, SIGTERM
 
@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "2.0.2"
+VERSION = "2.0.3"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -1408,7 +1408,7 @@ def check_certificate(
     )
     # creation instead of NOT_BEFORE datetime is used for refresh of cert because NOT_BEFORE derives from creation datetime
     should_refresh_cert = (
-        get_utc_now() - certificate_creation_time
+        get_utc_now() - certificate_creation_time.replace(tzinfo=timezone.utc)
     ).total_seconds() > certificate_renewal_interval_secs
 
     if certificate_exists and not should_refresh_cert:
@@ -2060,7 +2060,7 @@ def get_utc_now():
     """
     Wrapped for patching purposes in unit tests
     """
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 def check_process_name(pid):
