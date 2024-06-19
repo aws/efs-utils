@@ -7,7 +7,7 @@
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -34,7 +34,7 @@ CREDENTIALS_SOURCE = "credentials:default"
 ACCESS_KEY_ID_VAL = "FAKE_AWS_ACCESS_KEY_ID"
 SECRET_ACCESS_KEY_VAL = "FAKE_AWS_SECRET_ACCESS_KEY"
 SESSION_TOKEN_VAL = "FAKE_SESSION_TOKEN"
-FIXED_DT = datetime(2000, 1, 1, 12, 0, 0)
+FIXED_DT = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 CLIENT_INFO = {"source": "test", "efs_utils_version": watchdog.VERSION}
 CREDENTIALS = {
     "AccessKeyId": ACCESS_KEY_ID_VAL,
@@ -472,7 +472,9 @@ def test_refresh_self_signed_certificate_send_sighup(mocker, tmpdir, caplog):
 
     config = _get_config()
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
-    four_hours_back = (datetime.utcnow() - timedelta(hours=4)).strftime(DT_PATTERN)
+    four_hours_back = (datetime.now(timezone.utc) - timedelta(hours=4)).strftime(
+        DT_PATTERN
+    )
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     state = _create_certificate_and_state(
         tls_dict, str(tmpdir), pk_path, four_hours_back, ap_id=AP_ID
@@ -494,7 +496,9 @@ def test_refresh_self_signed_certificate_pid_not_running(mocker, tmpdir, caplog)
 
     config = _get_config()
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
-    four_hours_back = (datetime.utcnow() - timedelta(hours=4)).strftime(DT_PATTERN)
+    four_hours_back = (datetime.now(timezone.utc) - timedelta(hours=4)).strftime(
+        DT_PATTERN
+    )
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     state = _create_certificate_and_state(
         tls_dict, str(tmpdir), pk_path, four_hours_back, False, ap_id=AP_ID

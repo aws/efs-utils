@@ -47,7 +47,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 
 try:
@@ -85,7 +85,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "2.0.2"
+VERSION = "2.0.3"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -2540,7 +2540,7 @@ def get_utc_now():
     """
     Wrapped for patching purposes in unit tests
     """
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 def assert_root():
