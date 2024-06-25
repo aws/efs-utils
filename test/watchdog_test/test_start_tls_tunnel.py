@@ -36,12 +36,14 @@ def _initiate_state_file(tmpdir, cmd=None, efs_proxy_enabled=False):
 
     state = {
         "pid": PID - 1,
-        "cmd": cmd
-        if cmd
-        else [
-            tunnel_executable,
-            "/var/run/efs/stunnel-config.fs-deadbeef.mnt.21007",
-        ],
+        "cmd": (
+            cmd
+            if cmd
+            else [
+                tunnel_executable,
+                "/var/run/efs/stunnel-config.fs-deadbeef.mnt.21007",
+            ]
+        ),
     }
     state_file = tempfile.mkstemp(prefix="state", dir=str(tmpdir))[1]
     with open(state_file, "w") as f:

@@ -165,9 +165,12 @@ def test_get_instance_az_id_without_token(mocker):
 # Reproduce https://github.com/aws/efs-utils/issues/46
 def test_get_instance_az_id_token_fetch_time_out(mocker):
     # get_aws_ec2_metadata_token timeout, fallback to call without session token
-    mocker.patch(
-        "mount_efs.urlopen", side_effect=[socket.timeout, MockUrlLibResponse()]
-    )
+    side_effect = [
+        socket.timeout
+        for _ in range(0, mount_efs.DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT)
+    ]
+    side_effect.append(MockUrlLibResponse())
+    mocker.patch("mount_efs.urlopen", side_effect=side_effect)
     assert INSTANCE_AZ_ID == test_get_instance_az_id_helper()
 
 
