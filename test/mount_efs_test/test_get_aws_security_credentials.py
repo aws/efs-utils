@@ -211,7 +211,14 @@ def test_get_aws_security_credentials_get_instance_metadata_role_name_str_with_t
         Exception("Unknown Error"),
     ]:
         _test_get_aws_security_credentials_get_instance_metadata_role_name(
-            mocker, is_name_str=True, token_effects=[token_effect]
+            mocker,
+            is_name_str=True,
+            token_effects=[
+                token_effect
+                for _ in range(
+                    0, mount_efs.DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT
+                )
+            ],
         )
 
 
@@ -230,7 +237,14 @@ def test_get_aws_security_credentials_get_instance_metadata_role_name_bytes_with
         Exception("Unknown Error"),
     ]:
         _test_get_aws_security_credentials_get_instance_metadata_role_name(
-            mocker, is_name_str=False, token_effects=[token_effect]
+            mocker,
+            is_name_str=False,
+            token_effects=[
+                token_effect
+                for _ in range(
+                    0, mount_efs.DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT
+                )
+            ],
         )
 
 

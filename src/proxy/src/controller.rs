@@ -439,7 +439,7 @@ pub mod tests {
         }
 
         pub async fn new_with_throughput_scale_up_threshold(threshold: i32, tls: bool) -> Self {
-            let mut config = super::DEFAULT_SCALE_UP_CONFIG.clone();
+            let mut config = super::DEFAULT_SCALE_UP_CONFIG;
             config.scale_up_bytes_per_sec_threshold = threshold;
             TestService::new_with_partition_count_and_scale_up_config(PARTITION_COUNT, config, tls)
                 .await
@@ -450,7 +450,7 @@ pub mod tests {
             threshold: i32,
             tls: bool,
         ) -> Self {
-            let mut config = super::DEFAULT_SCALE_UP_CONFIG.clone();
+            let mut config = super::DEFAULT_SCALE_UP_CONFIG;
             config.scale_up_bytes_per_sec_threshold = threshold;
             TestService::new_with_partition_count_and_scale_up_config(count, config, tls).await
         }
@@ -472,7 +472,7 @@ pub mod tests {
 
             let mut counter = HashMap::new();
             for id in partition_ids.iter() {
-                counter.insert(id.clone(), Vec::new());
+                counter.insert(*id, Vec::new());
             }
             let request_counter = Arc::new(Mutex::new(counter));
 
@@ -531,6 +531,7 @@ pub mod tests {
             *consumable_action = Some(new_action);
         }
 
+        #[allow(clippy::too_many_arguments)]
         fn run(
             listener: TcpListener,
             scale_up_config: ScaleUpConfig,
@@ -575,7 +576,7 @@ pub mod tests {
             stream: S,
             scale_up_config: ScaleUpConfig,
             partition_idx: &mut usize,
-            partition_ids: &Vec<PartitionId>,
+            partition_ids: &[PartitionId],
             stopped_partitions: Arc<Mutex<HashSet<PartitionId>>>,
             request_counter: Arc<Mutex<HashMap<PartitionId, Vec<Arc<AtomicU32>>>>>,
             posted_action: Arc<Mutex<Option<ServiceAction>>>,
@@ -599,7 +600,7 @@ pub mod tests {
                 for i in 0..partition_ids.len() {
                     *partition_idx = (*partition_idx + i + 1) % partition_ids.len();
                     if !stopped.contains(&partition_ids[*partition_idx]) {
-                        next_id = Some(partition_ids[*partition_idx].clone());
+                        next_id = Some(partition_ids[*partition_idx]);
                         break;
                     }
                 }
@@ -725,6 +726,7 @@ pub mod tests {
             }
         }
 
+        #[allow(clippy::type_complexity)]
         fn parse_bind_client_to_partition_request(
             request: &Vec<u8>,
         ) -> Result<RpcMessage<&[u8], &[u8]>, Box<dyn std::error::Error + Send + Sync>> {
@@ -765,7 +767,7 @@ pub mod tests {
                     .expect("No message found")
                     .expect("failed to parse");
 
-            let rpc = payload_result.rpcs.get(0).expect("No RPCs found");
+            let rpc = payload_result.rpcs.first().expect("No RPCs found");
             assert_eq!(expected_data, rpc.to_vec()[RPC_HEADER_SIZE..]);
             Ok(())
         }
@@ -810,7 +812,7 @@ pub mod tests {
                     proxy_id: ProxyIdentifier::new(),
                     scale_up_attempt_count: 0,
                     restart_count: 0,
-                    scale_up_config: scale_up_config,
+                    scale_up_config,
                     status_reporter,
                 };
 
@@ -827,7 +829,7 @@ pub mod tests {
                     proxy_id: ProxyIdentifier::new(),
                     scale_up_attempt_count: 0,
                     restart_count: 0,
-                    scale_up_config: scale_up_config,
+                    scale_up_config,
                     status_reporter,
                 };
 
@@ -1601,7 +1603,7 @@ pub mod tests {
         let mut proxy = ProxyUnderTest::new(tls_enabled, service.listen_port).await;
         let mut port_health_check = TestClient::new(proxy.listen_port).await;
         // Mimic efs-utils's port test which checks whether efs-proxy is alive.
-        let _ = port_health_check.stream.shutdown().await.unwrap();
+        port_health_check.stream.shutdown().await.unwrap();
         let mut client = TestClient::new(proxy.listen_port).await;
         client.send_message_with_size(10).await.unwrap();
         client.send_message_with_size(1024).await.unwrap();

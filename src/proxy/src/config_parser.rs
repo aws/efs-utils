@@ -95,12 +95,12 @@ pub mod tests {
     pub static TEST_CONFIG_PATH: &str = "tests/certs/test_config.ini";
 
     pub fn get_test_config() -> ProxyConfig {
-        ProxyConfig::from_path(&Path::new(TEST_CONFIG_PATH)).expect("Could not parse test config.")
+        ProxyConfig::from_path(Path::new(TEST_CONFIG_PATH)).expect("Could not parse test config.")
     }
 
     #[test]
     fn test_read_config_from_file() {
-        assert!(ProxyConfig::from_path(&Path::new(TEST_CONFIG_PATH)).is_ok());
+        assert!(ProxyConfig::from_path(Path::new(TEST_CONFIG_PATH)).is_ok());
     }
 
     #[test]
@@ -131,7 +131,7 @@ key = /etc/amazon/efs/privateKey.pem
 checkHost = fs-12341234.efs.us-east-1.amazonaws.com
 "#;
 
-        let result_config = ProxyConfig::from_str(&config_string).unwrap();
+        let result_config = ProxyConfig::from_str(config_string).unwrap();
         let expected_proxy_config = ProxyConfig {
             fips: true,
             pid_file_path: String::from(
@@ -184,7 +184,7 @@ key = /etc/amazon/efs/privateKey.pem
 checkHost = fs-12341234.efs.us-east-1.amazonaws.com
 "#;
 
-        let result_config = ProxyConfig::from_str(&config_string).unwrap();
+        let result_config = ProxyConfig::from_str(config_string).unwrap();
         let expected_proxy_config = ProxyConfig {
             fips: false,
             pid_file_path: String::from(

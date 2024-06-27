@@ -85,7 +85,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "2.0.3"
+VERSION = "2.0.4"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -110,6 +110,7 @@ DEFAULT_UNKNOWN_VALUE = "unknown"
 # 50ms
 DEFAULT_TIMEOUT = 0.05
 DEFAULT_MACOS_VALUE = "macos"
+DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT = 3
 DEFAULT_NFS_MOUNT_COMMAND_RETRY_COUNT = 3
 DEFAULT_NFS_MOUNT_COMMAND_TIMEOUT_SEC = 15
 DISABLE_FETCH_EC2_METADATA_TOKEN_ITEM = "disable_fetch_ec2_metadata_token"
@@ -612,44 +613,73 @@ def fetch_ec2_metadata_token_disabled(config):
     )
 
 
-def get_aws_ec2_metadata_token(timeout=DEFAULT_TIMEOUT):
-    # Normally the session token is fetched within 10ms, setting a timeout of 50ms here to abort the request
-    # and return None if the token has not returned within 50ms
-    try:
-        opener = build_opener(HTTPHandler)
-        request = Request(INSTANCE_METADATA_TOKEN_URL)
+def get_aws_ec2_metadata_token(
+    request_timeout=0.5,
+    max_retries=DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT,
+    retry_delay=0.5,
+):
+    """
+    Retrieves the AWS EC2 metadata token. Typically, the token is fetched
+    within 10ms. We set a default timeout of 0.5 seconds to prevent mount
+    failures caused by slow requests.
 
-        request.add_header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
-        request.get_method = lambda: "PUT"
+    Args:
+        max_retries (int): The maximum number of retries.
+        retry_delay (int): The delay in seconds between retries.
+
+    Returns:
+        The AWS EC2 metadata token str or None if it cannot be retrieved.
+    """
+
+    def get_token(timeout):
         try:
-            res = opener.open(request, timeout=timeout)
-            return res.read()
-        except socket.timeout:
-            exception_message = "Timeout when getting the aws ec2 metadata token"
-        except HTTPError as e:
-            exception_message = "Failed to fetch token due to %s" % e
-        except Exception as e:
-            exception_message = (
-                "Unknown error when fetching aws ec2 metadata token, %s" % e
+            opener = build_opener(HTTPHandler)
+            request = Request(INSTANCE_METADATA_TOKEN_URL)
+            request.add_header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+            request.get_method = lambda: "PUT"
+            try:
+                response = opener.open(request, timeout=timeout)
+                return response.read()
+            finally:
+                opener.close()
+
+        except NameError:
+            headers = {"X-aws-ec2-metadata-token-ttl-seconds": "21600"}
+            request = Request(
+                INSTANCE_METADATA_TOKEN_URL, headers=headers, method="PUT"
             )
-        logging.debug(exception_message)
-        return None
-    except NameError:
-        headers = {"X-aws-ec2-metadata-token-ttl-seconds": "21600"}
-        req = Request(INSTANCE_METADATA_TOKEN_URL, headers=headers, method="PUT")
+            response = urlopen(request, timeout=timeout)
+            return response.read()
+
+    retries = 0
+    while retries < max_retries:
         try:
-            res = urlopen(req, timeout=timeout)
-            return res.read()
+            return get_token(timeout=request_timeout)
         except socket.timeout:
-            exception_message = "Timeout when getting the aws ec2 metadata token"
-        except HTTPError as e:
-            exception_message = "Failed to fetch token due to %s" % e
-        except Exception as e:
-            exception_message = (
-                "Unknown error when fetching aws ec2 metadata token, %s" % e
+            logging.debug(
+                "Timeout when getting the aws ec2 metadata token. Attempt: %s/%s"
+                % (retries + 1, max_retries)
             )
-        logging.debug(exception_message)
-        return None
+        except HTTPError as e:
+            logging.debug(
+                "Failed to fetch token due to %s. Attempt: %s/%s"
+                % (e, retries + 1, max_retries)
+            )
+        except Exception as e:
+            logging.debug(
+                "Unknown error when fetching aws ec2 metadata token, %s. Attempt: %s/%s"
+                % (e, retries + 1, max_retries)
+            )
+
+        retries += 1
+        if retries < max_retries:
+            logging.debug("Retrying in %s seconds", retry_delay)
+            time.sleep(retry_delay)
+        else:
+            logging.debug(
+                "Unable to retrieve AWS EC2 metadata token. Maximum number of retries reached."
+            )
+            return None
 
 
 def get_aws_security_credentials(

@@ -49,7 +49,7 @@ async fn main() {
     info!("Running with configuration: {:?}", proxy_config);
 
     let pid_file_path = Path::new(&proxy_config.pid_file_path);
-    let _ = write_pid_file(&pid_file_path).await;
+    let _ = write_pid_file(pid_file_path).await;
 
     // This "status reporter" is currently only used in tests
     let (_status_requester, status_reporter) = status_reporter::create_status_channel();
@@ -111,7 +111,7 @@ async fn write_pid_file(pid_file_path: &Path) -> Result<(), anyhow::Error> {
         .open(pid_file_path)
         .await?;
     pid_file
-        .write_all(&std::process::id().to_string().as_bytes())
+        .write_all(std::process::id().to_string().as_bytes())
         .await?;
     pid_file.write_u8(b'\x0A').await?;
     pid_file.flush().await?;

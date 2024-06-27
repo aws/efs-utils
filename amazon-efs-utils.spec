@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 2.0.3
+Version   : 2.0.4
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -168,6 +168,9 @@ fi
 %clean
 
 %changelog
+* Tue Jun 25 2024 Anthony Tse <anthotse@amazon.com> - 2.0.4
+- Add retry logic to and increase timeout for EC2 metadata token retrieval requests
+
 * Tue Jun 18 2024 Arnav Gupta <arnavgup@amazon.com> - 2.0.3
 - Upgrade py version
 - Replace deprecated usage of datetime 

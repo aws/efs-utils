@@ -33,7 +33,7 @@ mod tests {
     #[test]
     fn test_increment() {
         let mut proxy_id = ProxyIdentifier::new();
-        let proxy_id_original = proxy_id.clone();
+        let proxy_id_original = proxy_id;
         for i in 0..5 {
             assert_eq!(i, proxy_id.incarnation);
             proxy_id.increment();
@@ -45,7 +45,7 @@ mod tests {
     #[test]
     fn test_wrap_around() {
         let mut proxy_id = ProxyIdentifier::new();
-        let proxy_id_original = proxy_id.clone();
+        let proxy_id_original = proxy_id;
         proxy_id.incarnation = i64::MAX;
         proxy_id.increment();
         assert_eq!(proxy_id_original.uuid, proxy_id.uuid);

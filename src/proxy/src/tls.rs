@@ -121,9 +121,9 @@ impl TlsConfig {
         }
         TlsConfig::new(
             config.fips,
-            &ca_file,
-            &ca_cert_pem,
-            &private_key_pem,
+            ca_file,
+            ca_cert_pem,
+            private_key_pem,
             efs_config.mount_target_addr.as_str(),
             efs_config.expected_server_hostname_tls.as_str(),
         )

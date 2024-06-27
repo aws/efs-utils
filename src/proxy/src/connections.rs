@@ -405,7 +405,7 @@ mod tests {
     use uuid::Uuid;
 
     const PROXY_ID: ProxyIdentifier = ProxyIdentifier {
-        uuid: Uuid::from_u128(1 as u128),
+        uuid: Uuid::from_u128(1_u128),
         incarnation: 0,
     };
 
@@ -430,7 +430,7 @@ mod tests {
             let partition_finder = TlsPartitionFinder::new(Arc::new(Mutex::new(tls_config)));
 
             let (_s, id, _) = partition_finder
-                .establish_connection(PROXY_ID.clone())
+                .establish_connection(PROXY_ID)
                 .await
                 .expect("Failed to connect to server");
 
@@ -440,7 +440,7 @@ mod tests {
 
             MultiplexTest {
                 service,
-                partition_finder: partition_finder,
+                partition_finder,
                 initial_partition_id,
             }
         }
@@ -455,8 +455,8 @@ mod tests {
         let (new_connnection_id, connections, _) = test
             .partition_finder
             .inner_establish_multiplex_connection(
-                PROXY_ID.clone(),
-                Some(test.initial_partition_id.clone()),
+                PROXY_ID,
+                Some(test.initial_partition_id),
                 shutdown_handle,
             )
             .await
@@ -479,15 +479,15 @@ mod tests {
 
         test.service
             .post_action(ServiceAction::StopPartitionAcceptor(
-                test.initial_partition_id.clone(),
+                test.initial_partition_id,
             ))
             .await;
 
         let (new_connnection_id, connections, _) = test
             .partition_finder
             .inner_establish_multiplex_connection(
-                PROXY_ID.clone(),
-                Some(test.initial_partition_id.clone()),
+                PROXY_ID,
+                Some(test.initial_partition_id),
                 shutdown_handle,
             )
             .await
@@ -510,7 +510,7 @@ mod tests {
 
         let (new_connnection_id, connections, _) = test
             .partition_finder
-            .inner_establish_multiplex_connection(PROXY_ID.clone(), None, shutdown_handle)
+            .inner_establish_multiplex_connection(PROXY_ID, None, shutdown_handle)
             .await
             .expect("Could not establish a multiplex connection");
 
@@ -531,9 +531,7 @@ mod tests {
             let partition_finder = PlainTextPartitionFinder {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
             };
-            partition_finder
-                .establish_connection(PROXY_ID.clone())
-                .await
+            partition_finder.establish_connection(PROXY_ID).await
         })
         .await
         .expect("join err");
@@ -552,7 +550,7 @@ mod tests {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
             };
             partition_finder
-                .inner_establish_multiplex_connection(PROXY_ID.clone(), None, shutdown_handle)
+                .inner_establish_multiplex_connection(PROXY_ID, None, shutdown_handle)
                 .await
         })
         .await
@@ -573,7 +571,7 @@ mod tests {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
             };
             partition_finder
-                .inner_establish_multiplex_connection(PROXY_ID.clone(), None, shutdown_handle_clone)
+                .inner_establish_multiplex_connection(PROXY_ID, None, shutdown_handle_clone)
                 .await
         });
 
@@ -598,8 +596,8 @@ mod tests {
         let error = test
             .partition_finder
             .inner_establish_multiplex_connection(
-                PROXY_ID.clone(),
-                Some(test.initial_partition_id.clone()),
+                PROXY_ID,
+                Some(test.initial_partition_id),
                 shutdown_handle.clone(),
             )
             .await;
@@ -610,6 +608,7 @@ mod tests {
         ));
     }
 
+    #[allow(clippy::enum_variant_names)]
     enum BrokenPartitionFinderType {
         _ConnectIoError,
         _RpcIoError,
@@ -666,7 +665,7 @@ mod tests {
 
         let (shutdown_handle, _waiter) = ShutdownHandle::new(CancellationToken::new());
         let error = partition_finder
-            .inner_establish_multiplex_connection(PROXY_ID.clone(), None, shutdown_handle.clone())
+            .inner_establish_multiplex_connection(PROXY_ID, None, shutdown_handle.clone())
             .await;
 
         assert!(matches!(error, Err((ConnectError::MultiplexFailure, None))));
@@ -678,7 +677,7 @@ mod tests {
         let mut sigs_hangup_listener =
             signal::unix::signal(signal::unix::SignalKind::hangup()).unwrap();
         let config_file_path = Path::new("tests/certs/test_config.ini");
-        let config_contents = std::fs::read_to_string(&config_file_path).unwrap();
+        let config_contents = std::fs::read_to_string(config_file_path).unwrap();
         let proxy_config = ProxyConfig::from_str(&config_contents).unwrap();
         let mut tls_config = TlsConfig::new_from_config(&proxy_config).await.unwrap();
         tls_config.client_cert = vec![1, 2];

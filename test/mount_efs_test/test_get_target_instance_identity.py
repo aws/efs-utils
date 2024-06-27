@@ -113,28 +113,32 @@ def test_get_target_region_without_token(mocker):
 # Reproduce https://github.com/aws/efs-utils/issues/46
 def test_get_target_region_token_endpoint_fetching_timeout(mocker):
     # get_aws_ec2_metadata_token timeout, fallback to call without session token
-    mocker.patch(
-        "mount_efs.urlopen", side_effect=[socket.timeout, MockUrlLibResponse()]
-    )
+    side_effect = [
+        socket.timeout
+        for _ in range(0, mount_efs.DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT)
+    ]
+    side_effect.append(MockUrlLibResponse())
+    mocker.patch("mount_efs.urlopen", side_effect=side_effect)
     assert "us-east-1" == get_target_region_helper()
 
 
 def test_get_target_region_token_fetch_httperror(mocker):
-    mocker.patch(
-        "mount_efs.urlopen",
-        side_effect=[
-            HTTPError("url", 405, "Now Allowed", None, None),
-            MockUrlLibResponse(),
-        ],
-    )
+    side_effect = [
+        HTTPError("url", 405, "Now Allowed", None, None)
+        for _ in range(0, mount_efs.DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT)
+    ]
+    side_effect.append(MockUrlLibResponse())
+    mocker.patch("mount_efs.urlopen", side_effect=side_effect)
     assert "us-east-1" == get_target_region_helper()
 
 
 def test_get_target_region_token_fetch_unknownerror(mocker):
-    mocker.patch(
-        "mount_efs.urlopen",
-        side_effect=[Exception("Unknown Exception"), MockUrlLibResponse()],
-    )
+    side_effect = [
+        Exception("Unknown Exception")
+        for _ in range(0, mount_efs.DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT)
+    ]
+    side_effect.append(MockUrlLibResponse())
+    mocker.patch("mount_efs.urlopen", side_effect=side_effect)
     assert "us-east-1" == get_target_region_helper()
 
 
