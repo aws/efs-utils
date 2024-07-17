@@ -72,7 +72,7 @@ except ImportError:
 
 try:
     import botocore.config
-    import botocore.session
+    from botocore.session import Session
     from botocore.exceptions import (
         ClientError,
         EndpointConnectionError,
@@ -956,7 +956,7 @@ def botocore_credentials_helper(awsprofile):
             % awsprofile
         )
         return credentials
-    session = botocore.session.get_session()
+    session = Session()
     session.set_config_variable("profile", awsprofile)
 
     try:
@@ -3379,7 +3379,7 @@ def get_botocore_client(config, service, options):
     if get_fips_config(config):
         botocore_config = botocore.config.Config(use_fips_endpoint=True)
 
-    session = botocore.session.get_session()
+    session = Session()
     region = get_target_region(config)
 
     if options and options.get("awsprofile"):
