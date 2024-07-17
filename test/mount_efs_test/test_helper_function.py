@@ -261,7 +261,7 @@ def test_get_botocore_client_fips_enabled_use_awsprofile(mocker):
     boto_session_mock = MagicMock()
     boto_session_mock.set_config_variable.return_value = None
     boto_session_mock.create_client.return_value = "fake-client"
-    mocker.patch("botocore.session.get_session", return_value=boto_session_mock)
+    mocker.patch("Session", return_value=boto_session_mock)
 
     client = mount_efs.get_botocore_client(
         config, "efs", {"awsprofile": "test_profile"}
@@ -287,7 +287,7 @@ def test_get_botocore_client_fips_enabled(mocker):
     mount_efs.BOTOCORE_PRESENT = True
     boto_session_mock = MagicMock()
     boto_session_mock.create_client.return_value = "fake-client"
-    mocker.patch("botocore.session.get_session", return_value=boto_session_mock)
+    mocker.patch("session", return_value=boto_session_mock)
 
     client = mount_efs.get_botocore_client(config, "efs", {})
 
@@ -307,7 +307,7 @@ def test_get_botocore_client_use_awsprofile(mocker):
     boto_session_mock = MagicMock()
     boto_session_mock.set_config_variable.return_value = None
     boto_session_mock.create_client.return_value = "fake-client"
-    mocker.patch("botocore.session.get_session", return_value=boto_session_mock)
+    mocker.patch("session", return_value=boto_session_mock)
 
     client = mount_efs.get_botocore_client(
         config, "efs", {"awsprofile": "test_profile"}
@@ -334,7 +334,7 @@ def test_get_botocore_client_use_awsprofile_profile_not_found(mocker, capsys):
     boto_session_mock.create_client.side_effect = [
         ProfileNotFound(profile="test_profile")
     ]
-    mocker.patch("botocore.session.get_session", return_value=boto_session_mock)
+    mocker.patch("session", return_value=boto_session_mock)
 
     with pytest.raises(SystemExit) as ex:
         mount_efs.get_botocore_client(config, "efs", {"awsprofile": "test_profile"})
@@ -358,7 +358,7 @@ def test_get_botocore_client_botocore_not_present(mocker):
     )
     mount_efs.BOTOCORE_PRESENT = False
     boto_session_mock = MagicMock()
-    mocker.patch("botocore.session.get_session", return_value=boto_session_mock)
+    mocker.patch("session", return_value=boto_session_mock)
 
     client = mount_efs.get_botocore_client(config, "efs", {})
 
@@ -376,7 +376,7 @@ def test_get_botocore_client_botocore_present(mocker):
     boto_session_mock = MagicMock()
     boto_session_mock.set_config_variable.return_value = None
     boto_session_mock.create_client.return_value = "fake-client"
-    mocker.patch("botocore.session.get_session", return_value=boto_session_mock)
+    mocker.patch("session", return_value=boto_session_mock)
 
     client = mount_efs.get_botocore_client(config, "efs", {})
 
@@ -394,7 +394,7 @@ def test_get_assumed_profile_credentials_via_botocore_botocore_not_present(mocke
 
     boto_session_mock = MagicMock()
     boto_session_mock.set_config_variable.return_value = None
-    mocker.patch("botocore.session.get_session", return_value=boto_session_mock)
+    mocker.patch("session", return_value=boto_session_mock)
 
     credentials = mount_efs.botocore_credentials_helper("test_profile")
     assert credentials == expected_credentials
@@ -424,7 +424,7 @@ def test_get_assumed_profile_credentials_via_botocore_botocore_present(mocker):
     boto_session_mock.get_credentials.return_value = get_credential_session_mock
     get_credential_session_mock.get_frozen_credentials.return_value = frozen_credentials
 
-    mocker.patch("botocore.session.get_session", return_value=boto_session_mock)
+    mocker.patch("session", return_value=boto_session_mock)
 
     credentials = mount_efs.botocore_credentials_helper("test_profile")
     assert credentials == expected_credentials
@@ -448,7 +448,7 @@ def test_get_assumed_profile_credentials_via_botocore_botocore_present_profile_n
         ProfileNotFound(profile="test_profile")
     ]
 
-    mocker.patch("botocore.session.get_session", return_value=boto_session_mock)
+    mocker.patch("session", return_value=boto_session_mock)
 
     with pytest.raises(SystemExit) as ex:
         mount_efs.botocore_credentials_helper("test_profile")
