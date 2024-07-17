@@ -329,7 +329,7 @@ def botocore_credentials_helper(awsprofile):
     credentials = {"AccessKeyId": None, "SecretAccessKey": None, "Token": None}
 
     try:
-        import botocore.session
+        from botocore.session import Session
         from botocore.exceptions import ProfileNotFound
     except ImportError:
         logging.error(
@@ -337,7 +337,7 @@ def botocore_credentials_helper(awsprofile):
         )
         return credentials
 
-    session = botocore.session.get_session()
+    session = Session()
     session.set_config_variable("profile", awsprofile)
 
     try:
