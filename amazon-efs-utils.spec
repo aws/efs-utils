@@ -179,7 +179,7 @@ fi
 - Check for efs-proxy PIDs when cleaning tunnel state files
 - Add PID to log entries
 
-* Mon Apr 23 2024 Ryan Stankiewicz <rjstank@amazon.com> - 2.0.1
+* Tue Apr 23 2024 Ryan Stankiewicz <rjstank@amazon.com> - 2.0.1
 - Disable Nagle's algorithm for efs-proxy TLS mounts to improve latencies 
 
 * Mon Apr 08 2024 Ryan Stankiewicz <rjstank@amazon.com> - 2.0.0
@@ -203,7 +203,7 @@ fi
 - Add debug statement for size of state file write
 - Add parameters in mount options for assume web role with web identity
 
-* Wed Jan 1 2023 Ryan Stankiewicz <rjstank@amazon.com> - 1.34.5
+* Wed Jan 4 2023 Ryan Stankiewicz <rjstank@amazon.com> - 1.34.5
 - Watchdog detect empty private key and regenerate
 - Update man page
 - Avoid redundant get_target_region call
