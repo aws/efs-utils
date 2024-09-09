@@ -242,6 +242,7 @@ EFS_ONLY_OPTIONS = [
     "noocsp",
     "notls",
     "ocsp",
+    "region",
     "tls",
     "tlsport",
     "verify",
@@ -370,13 +371,17 @@ def fatal_error(user_message, log_message=None, exit_code=1):
     sys.exit(exit_code)
 
 
-def get_target_region(config):
+def get_target_region(config, options):
     def _fatal_error(message):
         fatal_error(
             'Error retrieving region. Please set the "region" parameter '
-            "in the efs-utils configuration file.",
+            "in the efs-utils configuration file or specify it as a "
+            "mount option.",
             message,
         )
+
+    if "region" in options:
+        return options.get("region")
 
     try:
         return config.get(CONFIG_SECTION, "region")
@@ -1747,7 +1752,7 @@ def bootstrap_proxy(
         cert_details = None
         security_credentials = None
         client_info = get_client_info(config)
-        region = get_target_region(config)
+        region = get_target_region(config, options)
 
         if tls_enabled(options):
             cert_details = {}
@@ -2662,7 +2667,7 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
     if options and "crossaccount" in options:
         try:
             az_id = get_az_id_from_instance_metadata(config, options)
-            region = get_target_region(config)
+            region = get_target_region(config, options)
             dns_name = "%s.%s.efs.%s.amazonaws.com" % (az_id, fs_id, region)
         except RuntimeError:
             err_msg = "Cannot retrieve AZ-ID from metadata service. This is required for the crossaccount mount option."
@@ -2687,7 +2692,7 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
 
         if "{region}" in dns_name_format:
             expected_replacement_field_ct += 1
-            format_args["region"] = get_target_region(config)
+            format_args["region"] = get_target_region(config, options)
 
         if "{dns_name_suffix}" in dns_name_format:
             expected_replacement_field_ct += 1
@@ -3380,7 +3385,7 @@ def get_botocore_client(config, service, options):
         botocore_config = botocore.config.Config(use_fips_endpoint=True)
 
     session = botocore.session.get_session()
-    region = get_target_region(config)
+    region = get_target_region(config, options)
 
     if options and options.get("awsprofile"):
         profile = options.get("awsprofile")
