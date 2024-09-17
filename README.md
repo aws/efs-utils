@@ -82,7 +82,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
 * OpenSSL-devel 1.0.2+
 * Python 3.7/3.8
 * `stunnel` 4.56+
-- `rust` 1.68+
+- `rust` 1.70+
 - `cargo`
 
 ## Optional
@@ -117,7 +117,7 @@ for more guidance.)
 Other distributions require building the package from source and installing it.
 
 If your distribution doesn't provide a rust or cargo package, or it provides versions
-that are older than 1.68, then you can install rust and cargo through rustup:
+that are older than 1.70, then you can install rust and cargo through rustup:
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 . "$HOME/.cargo/env"
@@ -167,7 +167,7 @@ $ sudo apt-get -y install ./build/amazon-efs-utils*deb
 ```
 
 If your Debian distribution doesn't provide a rust or cargo package, or your distribution provides versions
-that are older than 1.68, then you can install rust and cargo through rustup:
+that are older than 1.70, then you can install rust and cargo through rustup:
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 . "$HOME/.cargo/env"
@@ -177,7 +177,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 **`make rpm` fails due to "feature `edition2021` is required"**:
 
 Update to a version of rust and cargo
-that is newer than 1.68. To install a new version of rust and cargo, run
+that is newer than 1.70. To install a new version of rust and cargo, run
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 . "$HOME/.cargo/env"
@@ -372,7 +372,7 @@ To utilize the improved performance benefits of efs-proxy, you must re-mount any
 
 Efs-proxy is not compatible with OCSP or Mac clients. In these cases, efs-utils will automatically revert back to using stunnel.  
 
-If you are building efs-utils v2.0.0 from source, then you need Rust and Cargo >= 1.68.
+If you are building efs-utils v2.0.0 from source, then you need Rust and Cargo >= 1.70.
 
 ## Upgrading stunnel for RHEL/CentOS
 

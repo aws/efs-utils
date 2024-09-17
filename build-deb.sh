@@ -12,7 +12,7 @@ set -ex
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
 VERSION=2.0.4
-RELEASE=1
+RELEASE=2
 DEB_SYSTEM_RELEASE_PATH=/etc/os-release
 
 echo 'Cleaning deb build workspace'

@@ -42,7 +42,7 @@
 
 Name      : amazon-efs-utils
 Version   : 2.0.4
-Release   : 1%{platform}
+Release   : 2%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
 Group     : Amazon/Tools
@@ -72,16 +72,21 @@ Requires(preun)  : /sbin/service /sbin/chkconfig
 Requires(postun) : /sbin/service
 %endif
 
-# RHEL 7 doesn't provide a Rust or Cargo package,
-# so users are expected to install it through rustup.
-%if ! 0%{?rhel} == 7
-BuildRequires  : cargo rust
+# Conditional to allow building without
+# rust installed with yum
+%bcond_without system_rust
+
+# If yum provides rust and cargo
+# use rpmbuild --with system_rust
+%if %{with system_rust}
+BuildRequires: cargo rust
 %endif
+
 BuildRequires: openssl-devel
 
 Source0    : %{name}.tar.gz
 %if "%{include_vendor_tarball}" == "true"
-Source1    : %{proxy_name}-%{$Version}-vendor.tar.xz
+Source1    : %{proxy_name}-%{version}-vendor.tar.xz
 Source2    : config.toml
 %endif
 
@@ -91,6 +96,25 @@ This package provides utilities for simplifying the use of EFS file systems
 %global debug_package %{nil}
 
 %prep
+
+# If yum doesn't provides rust and cargo
+# use rpmbuild --without system_rust
+%if %{without system_rust}
+source $HOME/.cargo/env || true
+%endif
+
+# Ensure cargo is installed
+if ! command -v cargo &> /dev/null; then
+    echo "Error: cargo is not in PATH. Please install cargo."
+    exit 1
+fi
+
+# Ensure rustc is installed
+if ! command -v rustc &> /dev/null; then
+    echo "Error: rustc is not PATH. Please install rustc."
+    exit 1
+fi
+
 %setup -n %{name}
 mkdir -p %{_builddir}/%{name}/src/proxy/.cargo
 %if "%{include_vendor_tarball}" == "true"
@@ -173,17 +197,17 @@ fi
 
 * Tue Jun 18 2024 Arnav Gupta <arnavgup@amazon.com> - 2.0.3
 - Upgrade py version
-- Replace deprecated usage of datetime 
+- Replace deprecated usage of datetime
 
 * Mon May 20 2024 Anthony Tse <anthotse@amazon.com> - 2.0.2
 - Check for efs-proxy PIDs when cleaning tunnel state files
 - Add PID to log entries
 
-* Mon Apr 23 2024 Ryan Stankiewicz <rjstank@amazon.com> - 2.0.1
-- Disable Nagle's algorithm for efs-proxy TLS mounts to improve latencies 
+* Tue Apr 23 2024 Ryan Stankiewicz <rjstank@amazon.com> - 2.0.1
+- Disable Nagle's algorithm for efs-proxy TLS mounts to improve latencies
 
 * Mon Apr 08 2024 Ryan Stankiewicz <rjstank@amazon.com> - 2.0.0
-- Replace stunnel, which provides TLS encryptions for mounts, with efs-proxy, a component built in-house at AWS. Efs-proxy lays the foundation for upcoming feature launches at EFS. 
+- Replace stunnel, which provides TLS encryptions for mounts, with efs-proxy, a component built in-house at AWS. Efs-proxy lays the foundation for upcoming feature launches at EFS.
 
 * Mon Mar 18 2024 Sean Zatz <zatzsea@amazon.com> - 1.36.0
 - Support new mount option: crossaccount, conduct cross account mounts via ip address. Use client AZ-ID to choose mount target.
@@ -203,7 +227,7 @@ fi
 - Add debug statement for size of state file write
 - Add parameters in mount options for assume web role with web identity
 
-* Wed Jan 1 2023 Ryan Stankiewicz <rjstank@amazon.com> - 1.34.5
+* Wed Jan 4 2023 Ryan Stankiewicz <rjstank@amazon.com> - 1.34.5
 - Watchdog detect empty private key and regenerate
 - Update man page
 - Avoid redundant get_target_region call
