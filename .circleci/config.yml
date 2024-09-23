@@ -233,6 +233,15 @@ workflows:
   workflow:
     jobs:
       - test:
+          name: python3_12
+          image: python:3.12.4
+      - test:
+          name: python3_11
+          image: python:3.11.9
+      - test:
+          name: python3_10
+          image: python:3.10.13   
+      - test:
           name: python3_9
           image: python:3.9.13
       - test:
