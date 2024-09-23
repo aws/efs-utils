@@ -41,8 +41,8 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 2.0.4
-Release   : 2%{platform}
+Version   : 2.1.0
+Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
 Group     : Amazon/Tools
@@ -192,22 +192,26 @@ fi
 %clean
 
 %changelog
+* Wed Sep 18 2024 Julie Rakas <jrakas@amazon.com> - 2.1.0
+- Add mount option for specifying region
+- Add new ISO regions to config file
+
 * Tue Jun 25 2024 Anthony Tse <anthotse@amazon.com> - 2.0.4
 - Add retry logic to and increase timeout for EC2 metadata token retrieval requests
 
 * Tue Jun 18 2024 Arnav Gupta <arnavgup@amazon.com> - 2.0.3
 - Upgrade py version
-- Replace deprecated usage of datetime
+- Replace deprecated usage of datetime 
 
 * Mon May 20 2024 Anthony Tse <anthotse@amazon.com> - 2.0.2
 - Check for efs-proxy PIDs when cleaning tunnel state files
 - Add PID to log entries
 
 * Tue Apr 23 2024 Ryan Stankiewicz <rjstank@amazon.com> - 2.0.1
-- Disable Nagle's algorithm for efs-proxy TLS mounts to improve latencies
+- Disable Nagle's algorithm for efs-proxy TLS mounts to improve latencies 
 
 * Mon Apr 08 2024 Ryan Stankiewicz <rjstank@amazon.com> - 2.0.0
-- Replace stunnel, which provides TLS encryptions for mounts, with efs-proxy, a component built in-house at AWS. Efs-proxy lays the foundation for upcoming feature launches at EFS.
+- Replace stunnel, which provides TLS encryptions for mounts, with efs-proxy, a component built in-house at AWS. Efs-proxy lays the foundation for upcoming feature launches at EFS. 
 
 * Mon Mar 18 2024 Sean Zatz <zatzsea@amazon.com> - 1.36.0
 - Support new mount option: crossaccount, conduct cross account mounts via ip address. Use client AZ-ID to choose mount target.

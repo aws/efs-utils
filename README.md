@@ -260,10 +260,16 @@ To mount file system within a given network namespace, run:
 $ sudo mount -t efs -o netns=netns-path file-system-id efs-mount-point/
 ```
 
-To mount file system to the mount target in specific availability zone (e.g. us-east-1a), run:
+To mount file system to the mount target in a specific availability zone (e.g. us-east-1a), run:
 
 ```bash
 $ sudo mount -t efs -o az=az-name file-system-id efs-mount-point/
+```
+
+To mount file system to the mount target in a specific region (e.g. us-east-1), run:
+
+```bash
+$ sudo mount -t efs -o region=region-name file-system-id efs-mount-point/
 ```
 
 **Note: The [prequisites in the crossaccount section below](#crossaccount-option-prerequisites) must be completed before using the crossaccount option.**
