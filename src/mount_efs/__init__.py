@@ -1766,7 +1766,7 @@ def bootstrap_proxy(
         cert_details = None
         security_credentials = None
         client_info = get_client_info(config)
-        region = get_target_region(config)
+        region = get_target_region(config, options)
         dns_name_suffix = get_target_domain_suffix(config)
 
         if tls_enabled(options):
