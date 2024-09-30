@@ -19,8 +19,8 @@ log4rs = { version = "0", features = ["rolling_file_appender", "compound_policy"
 nix = { version = "0.26.2", features = ["signal"]}
 onc-rpc = "0.2.3"
 rand = "0.8.5"
-s2n-tls = "0.0"
-s2n-tls-tokio = "0.0"
+s2n-tls = "0.2.9"
+s2n-tls-tokio = "0.2.9"
 s2n-tls-sys = "0.0"
 serde = {version="1.0.175",features=["derive"]}
 serde_ini = "0.2.0"
