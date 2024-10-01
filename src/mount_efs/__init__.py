@@ -1772,10 +1772,7 @@ def bootstrap_proxy(
         security_credentials = None
         client_info = get_client_info(config)
         region = get_target_region(config, options)
-<<<<<<< HEAD
         dns_name_suffix = get_target_domain_suffix(config)
-=======
->>>>>>> upstream/master
 
         if tls_enabled(options):
             cert_details = {}
@@ -2690,14 +2687,9 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
     if options and "crossaccount" in options:
         try:
             az_id = get_az_id_from_instance_metadata(config, options)
-<<<<<<< HEAD
             region = get_target_region(config)
             dns_name_suffix = get_target_domain_suffix(config)
             dns_name = "%s.%s.efs.%s.%s" % (az_id, fs_id, region, dns_name_suffix)
-=======
-            region = get_target_region(config, options)
-            dns_name = "%s.%s.efs.%s.amazonaws.com" % (az_id, fs_id, region)
->>>>>>> upstream/master
         except RuntimeError:
             err_msg = "Cannot retrieve AZ-ID from metadata service. This is required for the crossaccount mount option."
             fatal_error(err_msg)
