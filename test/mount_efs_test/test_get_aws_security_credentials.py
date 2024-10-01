@@ -102,7 +102,7 @@ def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_wit
     mocker.patch("mount_efs.credentials_file_helper", return_value=file_helper_resp)
 
     credentials, credentials_source = mount_efs.get_aws_security_credentials(
-        config, True, "us-east-1", "amazonaws.com", "test_profile"
+        config, True, "us-east-1", "test_profile"
     )
 
     assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
@@ -126,7 +126,7 @@ def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_wit
     mocker.patch("mount_efs.credentials_file_helper", return_value=file_helper_resp)
 
     credentials, credentials_source = mount_efs.get_aws_security_credentials(
-        config, True, "us-east-1", "amazonaws.com", "test_profile"
+        config, True, "us-east-1", "test_profile"
     )
 
     assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
@@ -138,7 +138,7 @@ def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_wit
 def test_get_aws_security_credentials_do_not_use_iam():
     config = get_fake_config()
     credentials, credentials_source = mount_efs.get_aws_security_credentials(
-        config, False, "us-east-1", "amazonaws.com", "test_profile"
+        config, False, "us-east-1", "test_profile"
     )
 
     assert not credentials
@@ -165,7 +165,7 @@ def _test_get_aws_security_credentials_get_ecs_from_env_url(mocker):
     mocker.patch("mount_efs.urlopen", return_value=MockUrlLibResponse(data=response))
 
     credentials, credentials_source = mount_efs.get_aws_security_credentials(
-        config, True, "us-east-1", "amazonaws.com", None
+        config, True, "us-east-1", None
     )
 
     assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
@@ -187,7 +187,7 @@ def test_get_aws_security_credentials_get_ecs_from_option_url(mocker):
     )
     mocker.patch("mount_efs.urlopen", return_value=MockUrlLibResponse(data=response))
     credentials, credentials_source = mount_efs.get_aws_security_credentials(
-        config, True, "us-east-1", "amazonaws.com", None, AWSCREDSURI
+        config, True, "us-east-1", None, AWSCREDSURI
     )
 
     assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
@@ -279,7 +279,7 @@ def _test_get_aws_security_credentials_get_instance_metadata_role_name(
     mocker.patch("mount_efs.urlopen", side_effect=side_effects)
 
     credentials, credentials_source = mount_efs.get_aws_security_credentials(
-        config, True, "us-east-1", "amazonaws.com", None
+        config, True, "us-east-1", None
     )
 
     assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
@@ -295,7 +295,7 @@ def test_get_aws_security_credentials_no_credentials_found(mocker, capsys):
     mocker.patch("mount_efs.urlopen")
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.get_aws_security_credentials(config, True, "us-east-1", "amazonaws.com", None)
+        mount_efs.get_aws_security_credentials(config, True, "us-east-1", None)
 
     assert 0 != ex.value.code
 
@@ -320,7 +320,7 @@ def test_get_aws_security_credentials_credentials_not_found_in_files_and_botocor
     mount_efs.BOTOCORE_PRESENT = False
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.get_aws_security_credentials(config, True, "us-east-1", "amazonaws.com", "default")
+        mount_efs.get_aws_security_credentials(config, True, "us-east-1", "default")
 
     assert 0 != ex.value.code
 
@@ -348,7 +348,7 @@ def test_get_aws_security_credentials_botocore_present_get_assumed_profile_crede
     )
 
     credentials, credentials_source = mount_efs.get_aws_security_credentials(
-        config, True, "us-east-1", "amazonaws.com", awsprofile="test-profile"
+        config, True, "us-east-1", awsprofile="test-profile"
     )
     assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
     assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
@@ -365,7 +365,7 @@ def test_get_aws_security_credentials_credentials_not_found_in_aws_creds_uri(
 
     with pytest.raises(SystemExit) as ex:
         mount_efs.get_aws_security_credentials(
-            config, True, "us-east-1", "amazonaws.com", "default", AWSCREDSURI
+            config, True, "us-east-1", "default", AWSCREDSURI
         )
 
     assert 0 != ex.value.code
@@ -474,7 +474,6 @@ def test_get_aws_security_credentials_from_webidentity_passed_in_both_params(moc
         config,
         True,
         "us-east-1",
-        "amazonaws.com",
         jwt_path=WEB_IDENTITY_TOKEN_FILE,
         role_arn=WEB_IDENTITY_ROLE_ARN,
     )
@@ -507,7 +506,7 @@ def test_get_aws_security_credentials_from_webidentity_passed_in_one_param(
 
     with pytest.raises(SystemExit) as ex:
         mount_efs.get_aws_security_credentials(
-            config, True, "us-east-1", "amazonaws.com", jwt_path=WEB_IDENTITY_TOKEN_FILE
+            config, True, "us-east-1", jwt_path=WEB_IDENTITY_TOKEN_FILE
         )
 
     assert 0 != ex.value.code

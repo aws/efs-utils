@@ -28,14 +28,9 @@ SPECIAL_REGION_DNS_DICT = {
     "cn-north-1": "amazonaws.com.cn",
     "cn-northwest-1": "amazonaws.com.cn",
     "us-iso-east-1": "c2s.ic.gov",
-    "us-iso-west-1": "c2s.ic.gov",
     "us-isob-east-1": "sc2s.sgov.gov",
-    "us-isob-west-1": "sc2s.sgov.gov",
-    "us-isof-south-1": "csp.hci.ic.gov",
-    "us-isof-east-1": "csp.hci.ic.gov",
-    "eu-isoe-west-1": "cloud.adc-e.uk"
 }
-SPECIAL_REGIONS = ["cn-north-1", "cn-northwest-1", "us-iso-east-1", "us-iso-west-1", "us-isob-east-1", "us-isob-west-1", "us-isof-south-1", "us-isof-east-1", "eu-isoe-west-1"]
+SPECIAL_REGIONS = ["cn-north-1", "cn-northwest-1", "us-iso-east-1", "us-isob-east-1"]
 DEFAULT_NFS_OPTIONS = {}
 OPTIONS_WITH_AZ = {"az": DEFAULT_AZ}
 OPTIONS_WITH_IP = {"mounttargetip": IP_ADDRESS}
