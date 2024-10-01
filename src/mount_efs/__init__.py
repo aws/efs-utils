@@ -195,7 +195,7 @@ AP_ID_RE = re.compile("^fsap-[0-9a-f]{17}$")
 
 CREDENTIALS_KEYS = ["AccessKeyId", "SecretAccessKey", "Token"]
 ECS_TASK_METADATA_API = "http://169.254.170.2"
-STS_ENDPOINT_URL_FORMAT = "https://sts.{}.amazonaws.com/"
+STS_ENDPOINT_URL_FORMAT = "https://sts.{}.{}/"
 INSTANCE_METADATA_TOKEN_URL = "http://169.254.169.254/latest/api/token"
 INSTANCE_METADATA_SERVICE_URL = (
     "http://169.254.169.254/latest/dynamic/instance-identity/document/"
@@ -408,6 +408,22 @@ def get_target_region(config, options):
         logging.warning('Legacy check for region in "dns_name_format" failed')
 
     _fatal_error(metadata_exception)
+
+def get_target_domain_suffix(config):
+    def _fatal_error():
+        fatal_error(
+            'Error retrieving region. Please set the "dns_name_suffix" parameter '
+            "in the efs-utils configuration file."
+        )
+    region = get_target_region(config)
+    config_section = get_config_section(config, region)
+
+    try:
+        return config.get(config_section, "dns_name_suffix")
+    except NoOptionError:
+        pass
+
+    _fatal_error()
 
 
 def get_target_az(config, options):
@@ -691,6 +707,7 @@ def get_aws_security_credentials(
     config,
     use_iam,
     region,
+    dns_name_suffix,
     awsprofile=None,
     aws_creds_uri=None,
     jwt_path=None,
@@ -735,6 +752,7 @@ def get_aws_security_credentials(
             role_arn,
             jwt_path,
             region,
+            dns_name_suffix,
             False,
         )
         if credentials and credentials_source:
@@ -749,6 +767,7 @@ def get_aws_security_credentials(
             os.environ[WEB_IDENTITY_ROLE_ARN_ENV],
             os.environ[WEB_IDENTITY_TOKEN_FILE_ENV],
             region,
+            dns_name_suffix,
             False,
         )
         if credentials and credentials_source:
@@ -822,7 +841,7 @@ def get_aws_security_credentials_from_ecs(config, aws_creds_uri, is_fatal=False)
 
 
 def get_aws_security_credentials_from_webidentity(
-    config, role_arn, token_file, region, is_fatal=False
+    config, role_arn, token_file, region, dns_name_suffix, is_fatal=False
 ):
     try:
         with open(token_file, "r") as f:
@@ -834,7 +853,7 @@ def get_aws_security_credentials_from_webidentity(
         else:
             return None, None
 
-    STS_ENDPOINT_URL = STS_ENDPOINT_URL_FORMAT.format(region)
+    STS_ENDPOINT_URL = STS_ENDPOINT_URL_FORMAT.format(region,dns_name_suffix)
     webidentity_url = (
         STS_ENDPOINT_URL
         + "?"
@@ -1753,6 +1772,10 @@ def bootstrap_proxy(
         security_credentials = None
         client_info = get_client_info(config)
         region = get_target_region(config, options)
+<<<<<<< HEAD
+        dns_name_suffix = get_target_domain_suffix(config)
+=======
+>>>>>>> upstream/master
 
         if tls_enabled(options):
             cert_details = {}
@@ -1769,7 +1792,7 @@ def bootstrap_proxy(
                     kwargs = {"awsprofile": get_aws_profile(options, use_iam)}
 
                 security_credentials, credentials_source = get_aws_security_credentials(
-                    config, use_iam, region, **kwargs
+                    config, use_iam, region, dns_name_suffix, **kwargs
                 )
 
                 if credentials_source:
@@ -2667,8 +2690,14 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
     if options and "crossaccount" in options:
         try:
             az_id = get_az_id_from_instance_metadata(config, options)
+<<<<<<< HEAD
+            region = get_target_region(config)
+            dns_name_suffix = get_target_domain_suffix(config)
+            dns_name = "%s.%s.efs.%s.%s" % (az_id, fs_id, region, dns_name_suffix)
+=======
             region = get_target_region(config, options)
             dns_name = "%s.%s.efs.%s.amazonaws.com" % (az_id, fs_id, region)
+>>>>>>> upstream/master
         except RuntimeError:
             err_msg = "Cannot retrieve AZ-ID from metadata service. This is required for the crossaccount mount option."
             fatal_error(err_msg)
