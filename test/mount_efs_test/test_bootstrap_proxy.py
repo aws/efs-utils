@@ -16,6 +16,7 @@ CLIENT_SOURCE = "test"
 DNS_NAME = "%s.efs.us-east-1.amazonaws.com" % FS_ID
 MOUNT_POINT = "/mnt"
 REGION = "us-east-1"
+DOMAIN_SUFFIX = "amazonaws.com"
 
 
 DEFAULT_TLS_PORT = 20049
@@ -40,6 +41,7 @@ def setup_mocks(mocker):
         return_value=(DNS_NAME, None),
     )
     mocker.patch("mount_efs.get_target_region", return_value=REGION)
+    mocker.patch("mount_efs.get_target_domain_suffix", return_value=DOMAIN_SUFFIX)
     mocker.patch("mount_efs.write_tunnel_state_file", return_value="~mocktempfile")
     mocker.patch("mount_efs.create_certificate")
     mocker.patch("os.rename")
@@ -139,6 +141,7 @@ def test_bootstrap_proxy_cert_created_tls_mount(mocker, tmpdir):
     setup_mocks_without_popen(mocker)
     mocker.patch("mount_efs.get_mount_specific_filename", return_value=DNS_NAME)
     mocker.patch("mount_efs.get_target_region", return_value=REGION)
+    mocker.patch("mount_efs.get_target_domain_suffix", return_value=DOMAIN_SUFFIX)
     state_file_dir = str(tmpdir)
     tls_dict = mount_efs.tls_paths_dictionary(DNS_NAME + "+", state_file_dir)
     mocker.patch("mount_efs.is_ocsp_enabled", return_value=False)
@@ -184,6 +187,7 @@ def test_bootstrap_proxy_cert_not_created_non_tls_mount(mocker, tmpdir):
     setup_mocks_without_popen(mocker)
     mocker.patch("mount_efs.get_mount_specific_filename", return_value=DNS_NAME)
     mocker.patch("mount_efs.get_target_region", return_value=REGION)
+    mocker.patch("mount_efs.get_target_domain_suffix", return_value=DOMAIN_SUFFIX)
     state_file_dir = str(tmpdir)
     tls_dict = mount_efs.tls_paths_dictionary(DNS_NAME + "+", state_file_dir)
 

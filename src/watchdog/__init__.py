@@ -146,7 +146,7 @@ REQUEST_PAYLOAD = ""
 AP_ID_RE = re.compile("^fsap-[0-9a-f]{17}$")
 
 ECS_TASK_METADATA_API = "http://169.254.170.2"
-STS_ENDPOINT_URL_FORMAT = "https://sts.{}.amazonaws.com/"
+STS_ENDPOINT_URL_FORMAT = "https://sts.{}.{}/"
 INSTANCE_IAM_URL = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
 INSTANCE_METADATA_TOKEN_URL = "http://169.254.169.254/latest/api/token"
 SECURITY_CREDS_ECS_URI_HELP_URL = (
@@ -383,8 +383,10 @@ def get_aws_security_credentials_from_webidentity(config, role_arn, token_file, 
     except Exception as e:
         logging.error("Error reading token file %s: %s", token_file, e)
         return None
+    
+    dns_name_suffix = get_target_domain_suffix(config, region)
 
-    STS_ENDPOINT_URL = STS_ENDPOINT_URL_FORMAT.format(region)
+    STS_ENDPOINT_URL = STS_ENDPOINT_URL_FORMAT.format(region, dns_name_suffix)
     webidentity_url = (
         STS_ENDPOINT_URL
         + "?"
@@ -497,6 +499,29 @@ def credentials_file_helper(file_path, awsprofile):
 
     return credentials
 
+def get_target_domain_suffix(config, region):
+    def _fatal_error():
+        fatal_error(
+            'Error retrieving DNS domain suffix for region. Please set the "dns_name_suffix" parameter '
+            "in the efs-utils configuration file."
+        )
+
+    config_section = get_config_section(config, region)
+
+    try:
+        return config.get(config_section, "dns_name_suffix")
+    except NoOptionError:
+        pass
+
+    _fatal_error()
+
+def get_config_section(config, region):
+    region_specific_config_section = "%s.%s" % (MOUNT_CONFIG_SECTION, region)
+    if config.has_section(region_specific_config_section):
+        config_section = region_specific_config_section
+    else:
+        config_section = MOUNT_CONFIG_SECTION
+    return config_section
 
 def is_instance_metadata_url(url):
     return url.startswith("http://169.254.169.254")
