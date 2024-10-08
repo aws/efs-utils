@@ -37,6 +37,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
 | MacOS Monterey | `launchd`     |
 | MacOS Ventura  | `launchd`     |
 | MacOS Sonoma   | `launchd`     |
+| MacOS Sequoia  | `launchd`     |
 
 ## README contents
   - [Prerequisites](#prerequisites)
@@ -202,11 +203,11 @@ Make sure that you have a linker installed on your system. For example, on Amazo
 yum install gcc
 ```
 
-### On MacOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura distribution
+### On macOS Sequoia, macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura distribution
 
-For EC2 Mac instances running macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura, you can install amazon-efs-utils from the 
+For EC2 Mac instances running macOS Sequoia, macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura, you can install amazon-efs-utils from the 
 [homebrew-aws](https://github.com/aws/homebrew-aws) respository. **Note that this will ONLY work on EC2 instances
-running macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura, not local Mac computers.**
+running macOS Sequoia, macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura, not local Mac computers.**
 ```bash
 brew install amazon-efs-utils
 ```
