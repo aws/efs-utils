@@ -1,5 +1,6 @@
 /amazon-efs-utils*
-!amazon-efs-utils.spec
+!amazon-efs-utils.rpm.spec
+!amazon-efs-utils.deb.spec
 
 .coverage
 .pytest_cache

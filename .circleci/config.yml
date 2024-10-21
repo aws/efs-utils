@@ -45,12 +45,11 @@ commands:
           name: Install latest Rust
           command: |
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            . "$HOME/.cargo/env"
       - run:
           name: Install dependencies
           command: |
             DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata
-            apt-get -y install binutils git rustc cargo pkg-config libssl-dev
+            apt-get -y install binutils git pkg-config libssl-dev
       - run:
           name: Add local build repo as safe git directory
           command: |
@@ -62,7 +61,7 @@ commands:
             . "$HOME/.cargo/env"
             rustc --version
             cargo --version
-            ./build-deb.sh
+            make deb
       - run:
           name: Install package
           command: |

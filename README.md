@@ -163,7 +163,7 @@ $ sudo apt-get update
 $ sudo apt-get -y install git binutils rustc cargo pkg-config libssl-dev
 $ git clone https://github.com/aws/efs-utils
 $ cd efs-utils
-$ ./build-deb.sh
+$ make deb
 $ sudo apt-get -y install ./build/amazon-efs-utils*deb
 ```
 
