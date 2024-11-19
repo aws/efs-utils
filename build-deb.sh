@@ -13,7 +13,9 @@ BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
 VERSION=2.1.0
 RELEASE=1
+ARCH=$(dpkg-architecture -qDEB_BUILD_ARCH)
 DEB_SYSTEM_RELEASE_PATH=/etc/os-release
+export VERSION RELEASE ARCH
 
 echo 'Cleaning deb build workspace'
 rm -rf ${BUILD_ROOT}
@@ -47,8 +49,9 @@ install -p -m 755 dist/scriptlets/after-install-upgrade ${BUILD_ROOT}/postinst
 install -p -m 755 dist/scriptlets/before-remove ${BUILD_ROOT}/prerm
 install -p -m 755 dist/scriptlets/after-remove ${BUILD_ROOT}/postrm
 
-echo 'Copying control file'
-install -p -m 644 dist/amazon-efs-utils.control ${BUILD_ROOT}/control
+echo 'Generating control file'
+envsubst < dist/amazon-efs-utils.control > ${BUILD_ROOT}/control
+chmod 644 ${BUILD_ROOT}/control
 
 echo 'Copying conffiles'
 install -p -m 644 dist/amazon-efs-utils.conffiles ${BUILD_ROOT}/conffiles
@@ -69,7 +72,7 @@ tar czf data.tar.gz etc sbin usr var --owner=0 --group=0
 cd ${BASE_DIR}
 
 echo 'Building deb'
-DEB=${BUILD_ROOT}/amazon-efs-utils-${VERSION}-${RELEASE}_all.deb
+DEB=${BUILD_ROOT}/amazon-efs-utils-${VERSION}-${RELEASE}_${ARCH}.deb
 ar r ${DEB} ${BUILD_ROOT}/debian-binary
 ar r ${DEB} ${BUILD_ROOT}/control.tar.gz
 ar r ${DEB} ${BUILD_ROOT}/data.tar.gz
