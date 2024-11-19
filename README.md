@@ -22,6 +22,7 @@ The `efs-utils` package has been verified against the following Linux distributi
 | Ubuntu 16.04         | `deb` | `systemd` |
 | Ubuntu 18.04         | `deb` | `systemd` |
 | Ubuntu 20.04         | `deb` | `systemd` |
+| Ubuntu 22.04         | `deb` | `systemd` |
 | OpenSUSE Leap        | `rpm` | `systemd` |
 | OpenSUSE Tumbleweed  | `rpm` | `systemd` |
 | Oracle8              | `rpm` | `systemd` |
@@ -36,6 +37,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
 | MacOS Monterey | `launchd`     |
 | MacOS Ventura  | `launchd`     |
 | MacOS Sonoma   | `launchd`     |
+| MacOS Sequoia  | `launchd`     |
 
 ## README contents
   - [Prerequisites](#prerequisites)
@@ -79,9 +81,9 @@ The `efs-utils` package has been verified against the following MacOS distributi
 
 * `nfs-utils` (RHEL/CentOS/Amazon Linux/Fedora) or `nfs-common` (Debian/Ubuntu)
 * OpenSSL-devel 1.0.2+
-* Python 3.4+
+* Python 3.7/3.8
 * `stunnel` 4.56+
-- `rust` 1.68+
+- `rust` 1.70+
 - `cargo`
 
 ## Optional
@@ -116,7 +118,7 @@ for more guidance.)
 Other distributions require building the package from source and installing it.
 
 If your distribution doesn't provide a rust or cargo package, or it provides versions
-that are older than 1.68, then you can install rust and cargo through rustup:
+that are older than 1.70, then you can install rust and cargo through rustup:
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 . "$HOME/.cargo/env"
@@ -166,7 +168,7 @@ $ sudo apt-get -y install ./build/amazon-efs-utils*deb
 ```
 
 If your Debian distribution doesn't provide a rust or cargo package, or your distribution provides versions
-that are older than 1.68, then you can install rust and cargo through rustup:
+that are older than 1.70, then you can install rust and cargo through rustup:
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 . "$HOME/.cargo/env"
@@ -176,7 +178,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 **`make rpm` fails due to "feature `edition2021` is required"**:
 
 Update to a version of rust and cargo
-that is newer than 1.68. To install a new version of rust and cargo, run
+that is newer than 1.70. To install a new version of rust and cargo, run
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 . "$HOME/.cargo/env"
@@ -201,11 +203,11 @@ Make sure that you have a linker installed on your system. For example, on Amazo
 yum install gcc
 ```
 
-### On MacOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura distribution
+### On macOS Sequoia, macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura distribution
 
-For EC2 Mac instances running macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura, you can install amazon-efs-utils from the 
+For EC2 Mac instances running macOS Sequoia, macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura, you can install amazon-efs-utils from the 
 [homebrew-aws](https://github.com/aws/homebrew-aws) respository. **Note that this will ONLY work on EC2 instances
-running macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura, not local Mac computers.**
+running macOS Sequoia, macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura, not local Mac computers.**
 ```bash
 brew install amazon-efs-utils
 ```
@@ -259,10 +261,16 @@ To mount file system within a given network namespace, run:
 $ sudo mount -t efs -o netns=netns-path file-system-id efs-mount-point/
 ```
 
-To mount file system to the mount target in specific availability zone (e.g. us-east-1a), run:
+To mount file system to the mount target in a specific availability zone (e.g. us-east-1a), run:
 
 ```bash
 $ sudo mount -t efs -o az=az-name file-system-id efs-mount-point/
+```
+
+To mount file system to the mount target in a specific region (e.g. us-east-1), run:
+
+```bash
+$ sudo mount -t efs -o region=region-name file-system-id efs-mount-point/
 ```
 
 **Note: The [prequisites in the crossaccount section below](#crossaccount-option-prerequisites) must be completed before using the crossaccount option.**
@@ -371,7 +379,7 @@ To utilize the improved performance benefits of efs-proxy, you must re-mount any
 
 Efs-proxy is not compatible with OCSP or Mac clients. In these cases, efs-utils will automatically revert back to using stunnel.  
 
-If you are building efs-utils v2.0.0 from source, then you need Rust and Cargo >= 1.68.
+If you are building efs-utils v2.0.0 from source, then you need Rust and Cargo >= 1.70.
 
 ## Upgrading stunnel for RHEL/CentOS
 

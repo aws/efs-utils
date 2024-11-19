@@ -47,7 +47,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 
 try:
@@ -85,7 +85,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -110,6 +110,7 @@ DEFAULT_UNKNOWN_VALUE = "unknown"
 # 50ms
 DEFAULT_TIMEOUT = 0.05
 DEFAULT_MACOS_VALUE = "macos"
+DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT = 3
 DEFAULT_NFS_MOUNT_COMMAND_RETRY_COUNT = 3
 DEFAULT_NFS_MOUNT_COMMAND_TIMEOUT_SEC = 15
 DISABLE_FETCH_EC2_METADATA_TOKEN_ITEM = "disable_fetch_ec2_metadata_token"
@@ -241,6 +242,7 @@ EFS_ONLY_OPTIONS = [
     "noocsp",
     "notls",
     "ocsp",
+    "region",
     "tls",
     "tlsport",
     "verify",
@@ -283,6 +285,7 @@ MACOS_BIG_SUR_RELEASE = "macOS-11"
 MACOS_MONTEREY_RELEASE = "macOS-12"
 MACOS_VENTURA_RELEASE = "macOS-13"
 MACOS_SONOMA_RELEASE = "macOS-14"
+MACOS_SEQUOIA_RELEASE = "macOS-15"
 
 
 # Multiplier for max read ahead buffer size
@@ -297,11 +300,12 @@ SKIP_NO_SO_BINDTODEVICE_RELEASES = [
     MACOS_MONTEREY_RELEASE,
     MACOS_VENTURA_RELEASE,
     MACOS_SONOMA_RELEASE,
+    MACOS_SEQUOIA_RELEASE,
 ]
 
 MAC_OS_PLATFORM_LIST = ["darwin"]
-# MacOS Versions : Sonoma - 23.*, Ventura - 22.*, Monterey - 21.*, Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
-MAC_OS_SUPPORTED_VERSION_LIST = ["20", "21", "22", "23"]
+# MacOS Versions : Sequoia - 24.*, Sonoma - 23.*, Ventura - 22.*, Monterey - 21.*, Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
+MAC_OS_SUPPORTED_VERSION_LIST = ["20", "21", "22", "23", "24"]
 
 AWS_FIPS_ENDPOINT_CONFIG_ENV = "AWS_USE_FIPS_ENDPOINT"
 ECS_URI_ENV = "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
@@ -369,13 +373,17 @@ def fatal_error(user_message, log_message=None, exit_code=1):
     sys.exit(exit_code)
 
 
-def get_target_region(config):
+def get_target_region(config, options):
     def _fatal_error(message):
         fatal_error(
             'Error retrieving region. Please set the "region" parameter '
-            "in the efs-utils configuration file.",
+            "in the efs-utils configuration file or specify it as a "
+            "mount option.",
             message,
         )
+
+    if "region" in options:
+        return options.get("region")
 
     try:
         return config.get(CONFIG_SECTION, "region")
@@ -612,44 +620,73 @@ def fetch_ec2_metadata_token_disabled(config):
     )
 
 
-def get_aws_ec2_metadata_token(timeout=DEFAULT_TIMEOUT):
-    # Normally the session token is fetched within 10ms, setting a timeout of 50ms here to abort the request
-    # and return None if the token has not returned within 50ms
-    try:
-        opener = build_opener(HTTPHandler)
-        request = Request(INSTANCE_METADATA_TOKEN_URL)
+def get_aws_ec2_metadata_token(
+    request_timeout=0.5,
+    max_retries=DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT,
+    retry_delay=0.5,
+):
+    """
+    Retrieves the AWS EC2 metadata token. Typically, the token is fetched
+    within 10ms. We set a default timeout of 0.5 seconds to prevent mount
+    failures caused by slow requests.
 
-        request.add_header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
-        request.get_method = lambda: "PUT"
+    Args:
+        max_retries (int): The maximum number of retries.
+        retry_delay (int): The delay in seconds between retries.
+
+    Returns:
+        The AWS EC2 metadata token str or None if it cannot be retrieved.
+    """
+
+    def get_token(timeout):
         try:
-            res = opener.open(request, timeout=timeout)
-            return res.read()
-        except socket.timeout:
-            exception_message = "Timeout when getting the aws ec2 metadata token"
-        except HTTPError as e:
-            exception_message = "Failed to fetch token due to %s" % e
-        except Exception as e:
-            exception_message = (
-                "Unknown error when fetching aws ec2 metadata token, %s" % e
+            opener = build_opener(HTTPHandler)
+            request = Request(INSTANCE_METADATA_TOKEN_URL)
+            request.add_header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+            request.get_method = lambda: "PUT"
+            try:
+                response = opener.open(request, timeout=timeout)
+                return response.read()
+            finally:
+                opener.close()
+
+        except NameError:
+            headers = {"X-aws-ec2-metadata-token-ttl-seconds": "21600"}
+            request = Request(
+                INSTANCE_METADATA_TOKEN_URL, headers=headers, method="PUT"
             )
-        logging.debug(exception_message)
-        return None
-    except NameError:
-        headers = {"X-aws-ec2-metadata-token-ttl-seconds": "21600"}
-        req = Request(INSTANCE_METADATA_TOKEN_URL, headers=headers, method="PUT")
+            response = urlopen(request, timeout=timeout)
+            return response.read()
+
+    retries = 0
+    while retries < max_retries:
         try:
-            res = urlopen(req, timeout=timeout)
-            return res.read()
+            return get_token(timeout=request_timeout)
         except socket.timeout:
-            exception_message = "Timeout when getting the aws ec2 metadata token"
-        except HTTPError as e:
-            exception_message = "Failed to fetch token due to %s" % e
-        except Exception as e:
-            exception_message = (
-                "Unknown error when fetching aws ec2 metadata token, %s" % e
+            logging.debug(
+                "Timeout when getting the aws ec2 metadata token. Attempt: %s/%s"
+                % (retries + 1, max_retries)
             )
-        logging.debug(exception_message)
-        return None
+        except HTTPError as e:
+            logging.debug(
+                "Failed to fetch token due to %s. Attempt: %s/%s"
+                % (e, retries + 1, max_retries)
+            )
+        except Exception as e:
+            logging.debug(
+                "Unknown error when fetching aws ec2 metadata token, %s. Attempt: %s/%s"
+                % (e, retries + 1, max_retries)
+            )
+
+        retries += 1
+        if retries < max_retries:
+            logging.debug("Retrying in %s seconds", retry_delay)
+            time.sleep(retry_delay)
+        else:
+            logging.debug(
+                "Unable to retrieve AWS EC2 metadata token. Maximum number of retries reached."
+            )
+            return None
 
 
 def get_aws_security_credentials(
@@ -1717,7 +1754,7 @@ def bootstrap_proxy(
         cert_details = None
         security_credentials = None
         client_info = get_client_info(config)
-        region = get_target_region(config)
+        region = get_target_region(config, options)
 
         if tls_enabled(options):
             cert_details = {}
@@ -2540,7 +2577,7 @@ def get_utc_now():
     """
     Wrapped for patching purposes in unit tests
     """
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 def assert_root():
@@ -2632,7 +2669,7 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
     if options and "crossaccount" in options:
         try:
             az_id = get_az_id_from_instance_metadata(config, options)
-            region = get_target_region(config)
+            region = get_target_region(config, options)
             dns_name = "%s.%s.efs.%s.amazonaws.com" % (az_id, fs_id, region)
         except RuntimeError:
             err_msg = "Cannot retrieve AZ-ID from metadata service. This is required for the crossaccount mount option."
@@ -2657,7 +2694,7 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
 
         if "{region}" in dns_name_format:
             expected_replacement_field_ct += 1
-            format_args["region"] = get_target_region(config)
+            format_args["region"] = get_target_region(config, options)
 
         if "{dns_name_suffix}" in dns_name_format:
             expected_replacement_field_ct += 1
@@ -3350,7 +3387,7 @@ def get_botocore_client(config, service, options):
         botocore_config = botocore.config.Config(use_fips_endpoint=True)
 
     session = botocore.session.get_session()
-    region = get_target_region(config)
+    region = get_target_region(config, options)
 
     if options and options.get("awsprofile"):
         profile = options.get("awsprofile")

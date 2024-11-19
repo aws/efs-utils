@@ -41,7 +41,7 @@ pub fn init(config: &ProxyConfig) {
 
     let log_file = RollingFileAppender::builder()
         .encoder(Box::new(PatternEncoder::new(
-            "{d(%Y-%m-%dT%H:%M:%S%.3fZ)(utc)} {l} {M} {m}{n}",
+            "{d(%Y-%m-%dT%H:%M:%S%.3fZ)(utc)} {P} {l} {M} {m}{n}",
         )))
         .build(log_file_path, Box::new(policy))
         .expect("Unable to create log file");

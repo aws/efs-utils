@@ -5,6 +5,7 @@ use anyhow::{Error, Result};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::time::Instant;
 
+#[allow(dead_code)]
 pub struct Report {
     pub proxy_id: ProxyIdentifier,
     pub partition_id: Option<PartitionId>,
@@ -88,7 +89,7 @@ mod tests {
                 .await
                 .expect("Request channel closed");
             let report = Report {
-                proxy_id: proxy_id.clone(),
+                proxy_id,
                 partition_id: None,
                 connection_state: ConnectionSearchState::Idle,
                 num_connections: 1,
@@ -101,9 +102,9 @@ mod tests {
 
         let r = status_requester._request_status().await?;
         assert_eq!(proxy_id, r.proxy_id);
-        assert!(matches!(r.partition_id, None));
+        assert!(r.partition_id.is_none());
         assert_eq!(r.connection_state, ConnectionSearchState::Idle);
-        assert!(matches!(r.last_proxy_update, None));
+        assert!(r.last_proxy_update.is_none());
         assert_eq!(1, r.num_connections);
         Ok(())
     }

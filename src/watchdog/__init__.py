@@ -25,7 +25,7 @@ import sys
 import time
 from collections import namedtuple
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from signal import SIGHUP, SIGKILL, SIGTERM
 
@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -1408,7 +1408,7 @@ def check_certificate(
     )
     # creation instead of NOT_BEFORE datetime is used for refresh of cert because NOT_BEFORE derives from creation datetime
     should_refresh_cert = (
-        get_utc_now() - certificate_creation_time
+        get_utc_now() - certificate_creation_time.replace(tzinfo=timezone.utc)
     ).total_seconds() > certificate_renewal_interval_secs
 
     if certificate_exists and not should_refresh_cert:
@@ -2060,7 +2060,7 @@ def get_utc_now():
     """
     Wrapped for patching purposes in unit tests
     """
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 def check_process_name(pid):
@@ -2119,11 +2119,11 @@ def clean_up_certificate_lock_file(state_file_dir=STATE_FILE_DIR):
     check_and_remove_file(lock_file)
 
 
-def clean_up_previous_stunnel_pids(state_file_dir=STATE_FILE_DIR):
+def clean_up_previous_tunnel_pids(state_file_dir=STATE_FILE_DIR):
     """
-    Cleans up stunnel pids created by mount watchdog spawned by a previous efs-csi-driver pod after driver restart, upgrade
-    or crash. This method attempts to clean PIDs from persisted state files after efs-csi-driver restart to
-    ensure watchdog creates a new stunnel.
+    Cleans up efs-proxy/stunnel pids created by mount watchdog spawned by a previous efs-csi-driver
+    pod after driver restart, upgrade, or crash. This method attempts to clean PIDs from persisted
+    state files after efs-csi-driver restart to ensure watchdog creates a new tunnel.
     """
     state_files = get_state_files(state_file_dir)
     logging.debug(
@@ -2147,7 +2147,7 @@ def clean_up_previous_stunnel_pids(state_file_dir=STATE_FILE_DIR):
 
             out = check_process_name(pid)
 
-            if out and "stunnel" in str(out):
+            if out and ("stunnel" in str(out) or "efs-proxy" in str(out)):
                 logging.debug(
                     "PID %s in state file %s is active. Skipping clean up",
                     pid,
@@ -2189,7 +2189,7 @@ def main():
             CONFIG_SECTION, "unmount_grace_period_sec"
         )
 
-        clean_up_previous_stunnel_pids()
+        clean_up_previous_tunnel_pids()
         clean_up_certificate_lock_file()
 
         while True:

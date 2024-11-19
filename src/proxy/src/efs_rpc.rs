@@ -135,8 +135,8 @@ pub mod tests {
         let mut payload_buf = Vec::new();
 
         let response = BindClientResponse {
-            bind_response: bind_response,
-            scale_up_config: scale_up_config,
+            bind_response,
+            scale_up_config,
         };
         xdr_codec::pack(&response, &mut payload_buf)?;
 
@@ -224,7 +224,7 @@ pub mod tests {
     #[test]
     fn test_response_serde() -> Result<(), RpcError> {
         let partition_id = generate_partition_id();
-        let partition_id_copy = efs_prot::PartitionId(partition_id.0.clone());
+        let partition_id_copy = efs_prot::PartitionId(partition_id.0);
 
         let response = create_bind_client_to_partition_response(
             XID,

@@ -99,7 +99,7 @@ commands:
       - run:
           name: Install dependencies
           command: |
-            yum install -y curl
+            yum install --skip-broken -y curl
       - run:
           name: Install latest Rust
           command: |
@@ -233,23 +233,20 @@ workflows:
   workflow:
     jobs:
       - test:
+          name: python3_12
+          image: python:3.12.4
+      - test:
+          name: python3_11
+          image: python:3.11.9
+      - test:
+          name: python3_10
+          image: python:3.10.13   
+      - test:
           name: python3_9
           image: python:3.9.13
       - test:
           name: python3_8
           image: python:3.8.13
-      - test:
-          name: python3_7
-          image: python:3.7.13
-      - test:
-          name: python3_6
-          image: python:3.6.15
-      - test:
-          name: python3_5
-          image: python:3.5.10
-      - test:
-          name: python3_4
-          image: python:3.4.10
       - build-deb-package:
           name: ubuntu-latest
           image: ubuntu:latest
@@ -277,10 +274,10 @@ workflows:
       - build-rpm-package:
           name: rocky8
           image: rockylinux/rockylinux:8
-      - build-rpm-package:
+      - build-rpm-package-rustup:
           name: amazon-linux-latest
           image: amazonlinux:latest
-      - build-rpm-package:
+      - build-rpm-package-rustup:
           name: amazon-linux-2
           image: amazonlinux:2
       - build-rpm-package:
@@ -304,10 +301,10 @@ workflows:
       - build-rpm-package-rustup:
           name: fedora34
           image: fedora:34
-      - build-rpm-package:
+      - build-rpm-package-rustup:
           name: fedora35
           image: fedora:35
-      - build-rpm-package:
+      - build-rpm-package-rustup:
           name: fedora36
           image: fedora:36
       - build-suse-rpm-package:
