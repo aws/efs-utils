@@ -20,7 +20,6 @@ FILE_LIST = [
     "build-deb.sh",
     "src/watchdog/__init__.py",
     "src/mount_efs/__init__.py",
-    "dist/amazon-efs-utils.control",
     "build-deb.sh",
     "amazon-efs-utils.spec",
 ]

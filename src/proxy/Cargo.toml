@@ -5,6 +5,7 @@ build = "build.rs"
 # The version of efs-proxy is tied to efs-utils.
 version = "2.1.0"
 publish = false
+license = "MIT"
 
 [dependencies]
 anyhow = "1.0.72"

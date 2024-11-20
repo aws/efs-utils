@@ -11,9 +11,9 @@ set -ex
 
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
-VERSION=2.1.0
+VERSION=2.2.0
 RELEASE=1
-ARCH=$(dpkg-architecture -qDEB_BUILD_ARCH)
+ARCH=$(dpkg --print-architecture)
 DEB_SYSTEM_RELEASE_PATH=/etc/os-release
 export VERSION RELEASE ARCH
 
