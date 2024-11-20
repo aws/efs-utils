@@ -50,7 +50,7 @@ commands:
           name: Install dependencies
           command: |
             DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata
-            apt-get -y install binutils git rustc cargo pkg-config libssl-dev
+            apt-get -y install binutils git rustc cargo pkg-config libssl-dev gettext
       - run:
           name: Add local build repo as safe git directory
           command: |
@@ -280,9 +280,6 @@ workflows:
       - build-rpm-package-rustup:
           name: amazon-linux-2
           image: amazonlinux:2
-      - build-rpm-package:
-          name: fedora-latest
-          image: fedora:latest
       - build-rpm-package-rustup:
           name: fedora29
           image: fedora:29

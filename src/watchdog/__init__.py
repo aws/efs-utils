@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -146,7 +146,7 @@ REQUEST_PAYLOAD = ""
 AP_ID_RE = re.compile("^fsap-[0-9a-f]{17}$")
 
 ECS_TASK_METADATA_API = "http://169.254.170.2"
-STS_ENDPOINT_URL_FORMAT = "https://sts.{}.amazonaws.com/"
+STS_ENDPOINT_URL_FORMAT = "https://sts.{}.{}/"
 INSTANCE_IAM_URL = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
 INSTANCE_METADATA_TOKEN_URL = "http://169.254.169.254/latest/api/token"
 SECURITY_CREDS_ECS_URI_HELP_URL = (
@@ -384,9 +384,9 @@ def get_aws_security_credentials_from_webidentity(config, role_arn, token_file, 
         logging.error("Error reading token file %s: %s", token_file, e)
         return None
 
-    STS_ENDPOINT_URL = STS_ENDPOINT_URL_FORMAT.format(region)
+    sts_endpoint_url = get_sts_endpoint_url(config, region)
     webidentity_url = (
-        STS_ENDPOINT_URL
+        sts_endpoint_url
         + "?"
         + urlencode(
             {
@@ -400,11 +400,11 @@ def get_aws_security_credentials_from_webidentity(config, role_arn, token_file, 
     )
 
     unsuccessful_resp = (
-        "Unsuccessful retrieval of AWS security credentials at %s." % STS_ENDPOINT_URL
+        "Unsuccessful retrieval of AWS security credentials at %s." % sts_endpoint_url
     )
     url_error_msg = (
         "Unable to reach %s to retrieve AWS security credentials. See %s for more info."
-        % (STS_ENDPOINT_URL, SECURITY_CREDS_WEBIDENTITY_HELP_URL)
+        % (sts_endpoint_url, SECURITY_CREDS_WEBIDENTITY_HELP_URL)
     )
     resp = url_request_helper(
         config,
@@ -428,6 +428,39 @@ def get_aws_security_credentials_from_webidentity(config, role_arn, token_file, 
             }
 
     return None
+
+
+def get_sts_endpoint_url(config, region):
+    dns_name_suffix = get_dns_name_suffix(config, region)
+    return STS_ENDPOINT_URL_FORMAT.format(region, dns_name_suffix)
+
+
+def get_dns_name_suffix(config, region):
+    return get_mount_config(config, region, "dns_name_suffix")
+
+
+def get_mount_config(config, region, config_name):
+    try:
+        config_section = get_mount_config_section(config, region)
+        return config.get(config_section, config_name)
+    except NoOptionError:
+        pass
+
+    try:
+        return config.get(MOUNT_CONFIG_SECTION, config_name)
+    except NoOptionError:
+        fatal_error(
+            "Error retrieving config. Please set the {} configuration in efs-utils.conf".format(config_name)
+        )
+
+
+def get_mount_config_section(config, region):
+    region_specific_config_section = "%s.%s" % (MOUNT_CONFIG_SECTION, region)
+    if config.has_section(region_specific_config_section):
+        config_section = region_specific_config_section
+    else:
+        config_section = MOUNT_CONFIG_SECTION
+    return config_section
 
 
 def get_aws_security_credentials_from_instance_metadata(config):

@@ -85,7 +85,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -188,14 +188,14 @@ REQUEST_PAYLOAD = ""
 
 FS_ID_RE = re.compile("^(?P<fs_id>fs-[0-9a-f]+)$")
 EFS_FQDN_RE = re.compile(
-    r"^((?P<az>[a-z0-9-]+)\.)?(?P<fs_id>fs-[0-9a-f]+)\.efs\."
+    r"^((?P<az>[a-z0-9-]+)\.)?(?P<fs_id>fs-[0-9a-f]+)\.(?:[a-z-]+\.)+"
     r"(?P<region>[a-z0-9-]+)\.(?P<dns_name_suffix>[a-z0-9.]+)$"
 )
 AP_ID_RE = re.compile("^fsap-[0-9a-f]{17}$")
 
 CREDENTIALS_KEYS = ["AccessKeyId", "SecretAccessKey", "Token"]
 ECS_TASK_METADATA_API = "http://169.254.170.2"
-STS_ENDPOINT_URL_FORMAT = "https://sts.{}.amazonaws.com/"
+STS_ENDPOINT_URL_FORMAT = "https://sts.{}.{}/"
 INSTANCE_METADATA_TOKEN_URL = "http://169.254.169.254/latest/api/token"
 INSTANCE_METADATA_SERVICE_URL = (
     "http://169.254.169.254/latest/dynamic/instance-identity/document/"
@@ -836,9 +836,9 @@ def get_aws_security_credentials_from_webidentity(
         else:
             return None, None
 
-    STS_ENDPOINT_URL = STS_ENDPOINT_URL_FORMAT.format(region)
+    sts_endpoint_url = get_sts_endpoint_url(config, region)
     webidentity_url = (
-        STS_ENDPOINT_URL
+        sts_endpoint_url
         + "?"
         + urlencode(
             {
@@ -852,11 +852,11 @@ def get_aws_security_credentials_from_webidentity(
     )
 
     unsuccessful_resp = (
-        "Unsuccessful retrieval of AWS security credentials at %s." % STS_ENDPOINT_URL
+        "Unsuccessful retrieval of AWS security credentials at %s." % sts_endpoint_url
     )
     url_error_msg = (
         "Unable to reach %s to retrieve AWS security credentials. See %s for more info."
-        % (STS_ENDPOINT_URL, SECURITY_CREDS_WEBIDENTITY_HELP_URL)
+        % (sts_endpoint_url, SECURITY_CREDS_WEBIDENTITY_HELP_URL)
     )
     resp = url_request_helper(
         config,
@@ -884,6 +884,30 @@ def get_aws_security_credentials_from_webidentity(
         fatal_error(unsuccessful_resp, unsuccessful_resp)
     else:
         return None, None
+
+
+def get_sts_endpoint_url(config, region):
+    dns_name_suffix = get_dns_name_suffix(config, region)
+    return STS_ENDPOINT_URL_FORMAT.format(region, dns_name_suffix)
+
+
+def get_dns_name_suffix(config, region):
+    return get_mount_config(config, region, "dns_name_suffix")
+
+
+def get_mount_config(config, region, config_name):
+    try:
+        config_section = get_config_section(config, region)
+        return config.get(config_section, config_name)
+    except NoOptionError:
+        pass
+
+    try:
+        return config.get(CONFIG_SECTION, config_name)
+    except NoOptionError:
+        fatal_error(
+            "Error retrieving config. Please set the {} configuration in efs-utils.conf".format(config_name)
+        )
 
 
 def get_aws_security_credentials_from_instance_metadata(config, iam_role_name):
@@ -2670,7 +2694,8 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
         try:
             az_id = get_az_id_from_instance_metadata(config, options)
             region = get_target_region(config, options)
-            dns_name = "%s.%s.efs.%s.amazonaws.com" % (az_id, fs_id, region)
+            dns_name_suffix = get_dns_name_suffix(config, region)
+            dns_name = "%s.%s.efs.%s.%s" % (az_id, fs_id, region, dns_name_suffix)
         except RuntimeError:
             err_msg = "Cannot retrieve AZ-ID from metadata service. This is required for the crossaccount mount option."
             fatal_error(err_msg)
@@ -2692,27 +2717,18 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
             else:
                 dns_name_format = dns_name_format.replace("{az}.", "")
 
+        region = None
         if "{region}" in dns_name_format:
+            region = get_target_region(config, options)
             expected_replacement_field_ct += 1
-            format_args["region"] = get_target_region(config, options)
+            format_args["region"] = region
 
         if "{dns_name_suffix}" in dns_name_format:
             expected_replacement_field_ct += 1
-            config_section = CONFIG_SECTION
-            region = format_args.get("region")
-
-            if region:
-                config_section = get_config_section(config, region)
-
-            format_args["dns_name_suffix"] = config.get(
-                config_section, "dns_name_suffix"
-            )
-
-            logging.debug(
-                "Using dns_name_suffix %s in config section [%s]",
-                format_args.get("dns_name_suffix"),
-                config_section,
-            )
+            region = region or get_target_region(config, options)
+            dns_name_suffix = get_dns_name_suffix(config, region)
+            format_args["dns_name_suffix"] = dns_name_suffix
+            logging.debug("Using dns_name_suffix %s", dns_name_suffix)
 
         _validate_replacement_field_count(
             dns_name_format, expected_replacement_field_ct

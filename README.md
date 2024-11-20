@@ -160,7 +160,7 @@ sudo zypper refresh
 
 ```bash
 $ sudo apt-get update
-$ sudo apt-get -y install git binutils rustc cargo pkg-config libssl-dev
+$ sudo apt-get -y install git binutils rustc cargo pkg-config libssl-dev gettext
 $ git clone https://github.com/aws/efs-utils
 $ cd efs-utils
 $ ./build-deb.sh

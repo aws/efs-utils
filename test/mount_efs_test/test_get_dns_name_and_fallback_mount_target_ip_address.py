@@ -28,9 +28,14 @@ SPECIAL_REGION_DNS_DICT = {
     "cn-north-1": "amazonaws.com.cn",
     "cn-northwest-1": "amazonaws.com.cn",
     "us-iso-east-1": "c2s.ic.gov",
+    "us-iso-west-1": "c2s.ic.gov",
     "us-isob-east-1": "sc2s.sgov.gov",
+    "us-isob-west-1": "sc2s.sgov.gov",
+    "us-isof-south-1": "csp.hci.ic.gov",
+    "us-isof-east-1": "csp.hci.ic.gov",
+    "eu-isoe-west-1": "cloud.adc-e.uk",
 }
-SPECIAL_REGIONS = ["cn-north-1", "cn-northwest-1", "us-iso-east-1", "us-isob-east-1"]
+SPECIAL_REGIONS = SPECIAL_REGION_DNS_DICT.keys()
 DEFAULT_NFS_OPTIONS = {}
 OPTIONS_WITH_AZ = {"az": DEFAULT_AZ}
 OPTIONS_WITH_IP = {"mounttargetip": IP_ADDRESS}
@@ -158,7 +163,8 @@ def test_get_dns_name_region_hardcoded(mocker):
         config, FS_ID, DEFAULT_NFS_OPTIONS
     )
 
-    utils.assert_not_called(get_target_region_mock)
+    # get_target_region will be called 1 time to get dns_name_suffix
+    utils.assert_called_n_times(get_target_region_mock, 1)
 
     assert "%s.efs.%s.amazonaws.com" % (FS_ID, DEFAULT_REGION) == dns_name
     assert None == ip_address
@@ -271,13 +277,14 @@ def test_get_dns_name_region_in_suffix(mocker):
             config, FS_ID, DEFAULT_NFS_OPTIONS
         )
 
-        utils.assert_not_called(get_target_region_mock)
-
         assert (
             "%s.efs.%s.%s" % (FS_ID, special_region, special_dns_name_suffix)
             == dns_name
         )
         assert None == ip_address
+
+    # get_target_region will be called 1 time for each region to get dns_name_suffix
+    utils.assert_called_n_times(get_target_region_mock, len(SPECIAL_REGIONS))
 
 
 def test_dns_name_can_be_resolved_dns_resolve_failure(mocker):
