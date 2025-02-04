@@ -203,6 +203,18 @@ Make sure that you have a linker installed on your system. For example, on Amazo
 yum install gcc
 ```
 
+**Installation Issue - Failed Build Dependencies**
+
+If rust dependencies was installed using rustup and the package manager does not have a rust and/or cargo package installed, you may see an error like this.
+
+```
+error: Failed build dependencies:
+    cargo is needed by amazon-efs-utils-2.1.0-1.el7_9.x86_64
+    rust is needed by amazon-efs-utils-2.1.0-1.el7_9.x86_64
+```
+
+In this case, the 'make rpm' command in the installation script above should be replaced by 'make rpm-without-system-rust' to remove the rpmbuild dependency check.
+
 ### On macOS Sequoia, macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura distribution
 
 For EC2 Mac instances running macOS Sequoia, macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura, you can install amazon-efs-utils from the 
