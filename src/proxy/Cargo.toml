@@ -3,7 +3,7 @@ name = "efs-proxy"
 edition = "2021"
 build = "build.rs"
 # The version of efs-proxy is tied to efs-utils.
-version = "2.1.0"
+version = "2.2.1"
 publish = false
 license = "MIT"
 
