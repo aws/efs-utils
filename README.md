@@ -128,22 +128,22 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 If the distribution is not OpenSUSE or SLES
 
 ```bash
-$ sudo yum -y install git rpm-build make rust cargo openssl-devel
-$ git clone https://github.com/aws/efs-utils
-$ cd efs-utils
-$ make rpm
-$ sudo yum -y install build/amazon-efs-utils*rpm
+sudo yum -y install git rpm-build make rust cargo openssl-devel
+git clone https://github.com/aws/efs-utils
+cd efs-utils
+make rpm
+sudo yum -y install build/amazon-efs-utils*rpm
 ```
 
 Otherwise
 
 ```bash
-$ sudo zypper refresh
-$ sudo zypper install -y git rpm-build make rust cargo openssl-devel
-$ git clone https://github.com/aws/efs-utils
-$ cd efs-utils
-$ make rpm
-$ sudo zypper --no-gpg-checks install -y build/amazon-efs-utils*rpm
+sudo zypper refresh
+sudo zypper install -y git rpm-build make rust cargo openssl-devel
+git clone https://github.com/aws/efs-utils
+cd efs-utils
+make rpm
+sudo zypper --no-gpg-checks install -y build/amazon-efs-utils*rpm
 ```
 
 On OpenSUSE, if you see error like `File './suse/noarch/bash-completion-2.11-2.1.noarch.rpm' not found on medium 'http://download.opensuse.org/tumbleweed/repo/oss/'`
@@ -158,12 +158,12 @@ sudo zypper refresh
 - To build and install a Debian package:
 
 ```bash
-$ sudo apt-get update
-$ sudo apt-get -y install git binutils rustc cargo pkg-config libssl-dev gettext
-$ git clone https://github.com/aws/efs-utils
-$ cd efs-utils
-$ ./build-deb.sh
-$ sudo apt-get -y install ./build/amazon-efs-utils*deb
+sudo apt-get update
+sudo apt-get -y install git binutils rustc cargo pkg-config libssl-dev gettext
+git clone https://github.com/aws/efs-utils
+cd efs-utils
+./build-deb.sh
+sudo apt-get -y install ./build/amazon-efs-utils*deb
 ```
 
 If your Debian distribution doesn't provide a rust or cargo package, or your distribution provides versions
@@ -235,15 +235,15 @@ brew info amazon-efs-utils
 - [Set up a virtualenv](http://libzx.so/main/learning/2016/03/13/best-practice-for-virtualenv-and-git-repos.html) for efs-utils
 
 ```bash
-$ virtualenv ~/.envs/efs-utils
-$ source ~/.envs/efs-utils/bin/activate
-$ pip install -r requirements.txt
+virtualenv ~/.envs/efs-utils
+source ~/.envs/efs-utils/bin/activate
+pip install -r requirements.txt
 ```
 
 - Run tests
 
 ```bash
-$ make test
+make test
 ```
 
 ## Usage
@@ -257,57 +257,57 @@ This proxy is responsible for TLS encryption, and for providing improved through
 To mount with the recommended default options, simply run:
 
 ```bash
-$ sudo mount -t efs file-system-id efs-mount-point/
+sudo mount -t efs file-system-id efs-mount-point/
 ```
 
 To mount file system to a specific mount target of the file system, run:
 
 ```bash
-$ sudo mount -t efs -o mounttargetip=mount-target-ip-address file-system-id efs-mount-point/
+sudo mount -t efs -o mounttargetip=mount-target-ip-address file-system-id efs-mount-point/
 ```
 
 To mount file system within a given network namespace, run:
 
 ```bash
-$ sudo mount -t efs -o netns=netns-path file-system-id efs-mount-point/
+sudo mount -t efs -o netns=netns-path file-system-id efs-mount-point/
 ```
 
 To mount file system to the mount target in a specific availability zone (e.g. us-east-1a), run:
 
 ```bash
-$ sudo mount -t efs -o az=az-name file-system-id efs-mount-point/
+sudo mount -t efs -o az=az-name file-system-id efs-mount-point/
 ```
 
 To mount file system to the mount target in a specific region (e.g. us-east-1), run:
 
 ```bash
-$ sudo mount -t efs -o region=region-name file-system-id efs-mount-point/
+sudo mount -t efs -o region=region-name file-system-id efs-mount-point/
 ```
 
 **Note: The [prequisites in the crossaccount section below](#crossaccount-option-prerequisites) must be completed before using the crossaccount option.**
 
 To mount the filesystem mount target in the same physical availability zone ID (e.g. use1-az1) as the client instance over cross-AWS-account mounts, run:
 ```
-$ sudo mount -t efs -o crossaccount file-system-id efs-mount-point/
+sudo mount -t efs -o crossaccount file-system-id efs-mount-point/
 ```
 
 To mount over TLS, simply add the `tls` option:
 
 ```bash
-$ sudo mount -t efs -o tls file-system-id efs-mount-point/
+sudo mount -t efs -o tls file-system-id efs-mount-point/
 ```
 
 To authenticate with EFS using the system’s IAM identity, add the `iam` option. This option requires the `tls` option.
 
 ```bash
-$ sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
+sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
 ```
 
 To mount using an access point, use the `accesspoint=` option. This option requires the `tls` option.
 The access point must be in the "available" state before it can be used to mount EFS.
 
 ```bash
-$ sudo mount -t efs -o tls,accesspoint=access-point-id file-system-id efs-mount-point/
+sudo mount -t efs -o tls,accesspoint=access-point-id file-system-id efs-mount-point/
 ```
 
 To mount your file system automatically with any of the options above, you can add entries to `/efs/fstab` like:
@@ -342,7 +342,7 @@ Given a client instance in Account A/VPC A and an EFS instance in Account B/VPC 
 
 Once the above steps have been completed, to mount the filesystem mount target in the same physical availability zone ID (e.g. use1-az1) as the client instance over cross-AWS-account mounts, run:
 ```
-$ sudo mount -t efs -o crossaccount file-system-id efs-mount-point/
+sudo mount -t efs -o crossaccount file-system-id efs-mount-point/
 ```
 
 
@@ -351,17 +351,17 @@ $ sudo mount -t efs -o crossaccount file-system-id efs-mount-point/
 For EC2 instances using Mac distribution, the recommended default options will perform a tls mount:
 
 ```bash
-$ sudo mount -t efs file-system-id efs-mount-point/
+sudo mount -t efs file-system-id efs-mount-point/
 ```
  or
 ```bash
-$ sudo mount -t efs -o tls file-system-id efs-mount-point/
+sudo mount -t efs -o tls file-system-id efs-mount-point/
 ```
 
 To mount without TLS, simply add the `notls` option:
 
 ```bash
-$ sudo mount -t efs -o notls file-system-id efs-mount-point/
+sudo mount -t efs -o notls file-system-id efs-mount-point/
 ```
 
 
@@ -541,13 +541,13 @@ sed -i "s/optimize_readahead = true/optimize_readahead = false/" /etc/amazon/efs
 You can mount file system with a given rsize, run:
 
 ```bash
-$ sudo mount -t efs -o rsize=rsize-value-in-bytes file-system-id efs-mount-point/
+sudo mount -t efs -o rsize=rsize-value-in-bytes file-system-id efs-mount-point/
 ```
 
 You can also manually chose a value of read_ahead_kb to optimize read throughput on Linux 5.4+ after mount.
 
 ```bash
-$ sudo bash -c "echo read-ahead-value-in-kb > /sys/class/bdi/0:$(stat -c '%d' efs-mount-point)/read_ahead_kb"
+sudo bash -c "echo read-ahead-value-in-kb > /sys/class/bdi/0:$(stat -c '%d' efs-mount-point)/read_ahead_kb"
 ```
 
 ## Using botocore to retrieve mount target ip address when dns name cannot be resolved
@@ -585,7 +585,7 @@ To authenticate with EFS using the system’s IAM identity of an awsprofile, add
 `awsprofile` option. These options require the `tls` option.
 
 ```bash
-$ sudo mount -t efs -o tls,iam,awsprofile=test-profile file-system-id efs-mount-point/
+sudo mount -t efs -o tls,iam,awsprofile=test-profile file-system-id efs-mount-point/
 ```
 
 To configure the named profile, see the [Named Profiles doc](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-profiles.html)
@@ -636,13 +636,13 @@ You can use [web identity to assume a role](https://docs.aws.amazon.com/STS/late
 1) By setting environment variable the path to the file containing the JWT token in `AWS_WEB_IDENTITY_TOKEN_FILE` and by setting `ROLE_ARN` environment variable. The command below shows an example of to leverage it.
 
 ```bash
-$ sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
+sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
 ```
 
 2) By passing the JWT token file path and the role arn as parameters to the mount command. The command below shows an example of to leverage it.
 
 ```bash
-$ sudo mount -t efs -o tls,iam,rolearn="ROLE_ARN",jwtpath="PATH/JWT_TOKEN_FILE" file-system-id efs-mount-point/
+sudo mount -t efs -o tls,iam,rolearn="ROLE_ARN",jwtpath="PATH/JWT_TOKEN_FILE" file-system-id efs-mount-point/
 ```
 
 ## Enabling FIPS Mode
@@ -656,7 +656,7 @@ Note: FIPS mode requires that the installed version of OpenSSL is compiled with 
 
 To verify that the installed version is compiled with FIPS, look for `OpenSSL X.X.Xx-fips` in the `stunnel -version` command output e.g.
 ```bash
-$ stunnel -version
+stunnel -version
 stunnel 4.56 on x86_64-koji-linux-gnu platform
 Compiled/running with OpenSSL 1.0.2k-fips  26 Jan 2017
 Threading:PTHREAD Sockets:POLL,IPv6 SSL:ENGINE,OCSP,FIPS Auth:LIBWRAP
