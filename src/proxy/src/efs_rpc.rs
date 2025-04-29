@@ -3,14 +3,13 @@ use tokio::io::AsyncWriteExt;
 
 use crate::connections::ProxyStream;
 use crate::efs_prot;
-use crate::efs_prot::BindClientResponse;
-use crate::efs_prot::OperationType;
+use crate::efs_prot::{BindClientResponse, OperationType};
 use crate::error::RpcError;
 use crate::proxy_identifier::ProxyIdentifier;
 use crate::rpc;
 
-const PROGRAM_NUMBER: u32 = 100200;
-const PROGRAM_VERSION: u32 = 1;
+pub const EFS_PROGRAM_NUMBER: u32 = 100200;
+pub const EFS_PROGRAM_VERSION: u32 = 1;
 
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub struct PartitionId {
@@ -42,8 +41,8 @@ pub fn create_bind_client_to_partition_request(
     xdr_codec::pack(&payload, &mut payload_buf)?;
 
     let call_body = onc_rpc::CallBody::new(
-        PROGRAM_NUMBER,
-        PROGRAM_VERSION,
+        EFS_PROGRAM_NUMBER,
+        EFS_PROGRAM_VERSION,
         OperationType::OP_BIND_CLIENT_TO_PARTITION as u32,
         onc_rpc::auth::AuthFlavor::AuthNone::<Vec<_>>(None),
         onc_rpc::auth::AuthFlavor::AuthNone::<Vec<_>>(None),
@@ -86,127 +85,13 @@ pub fn parse_bind_client_to_partition_response(
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::controller::tests::TestService;
-    use crate::controller::DEFAULT_SCALE_UP_CONFIG;
     use crate::efs_prot::BindResponse;
-    use crate::efs_prot::ScaleUpConfig;
-    use crate::tls::tests::get_client_config;
+
+    use crate::controller::DEFAULT_SCALE_UP_CONFIG;
+    use crate::test_utils::*;
     use onc_rpc::{AuthError, RejectedReply};
-    use rand::RngCore;
-    use s2n_tls_tokio::TlsConnector;
-    use tokio::net::TcpStream;
 
     const XID: u32 = 1;
-
-    pub fn parse_bind_client_to_partition_request(
-        request: &onc_rpc::RpcMessage<&[u8], &[u8]>,
-    ) -> Result<ProxyIdentifier, RpcError> {
-        let call_body = request.call_body().expect("not a call rpc");
-
-        if PROGRAM_NUMBER != call_body.program() || PROGRAM_VERSION != call_body.program_version() {
-            return Err(RpcError::GarbageArgs);
-        }
-
-        let mut payload = Cursor::new(call_body.payload());
-        let raw_proxy_id = xdr_codec::unpack::<_, efs_prot::ProxyIdentifier>(&mut payload)?;
-
-        Ok(ProxyIdentifier {
-            uuid: uuid::Builder::from_bytes(
-                raw_proxy_id
-                    .identifier
-                    .try_into()
-                    .expect("Failed not convert vec to sized array"),
-            )
-            .into_uuid(),
-            incarnation: i64::from_be_bytes(
-                raw_proxy_id
-                    .incarnation
-                    .try_into()
-                    .expect("Failed to convert vec to sized array"),
-            ),
-        })
-    }
-
-    pub fn create_bind_client_to_partition_response(
-        xid: u32,
-        bind_response: BindResponse,
-        scale_up_config: ScaleUpConfig,
-    ) -> Result<Vec<u8>, RpcError> {
-        let mut payload_buf = Vec::new();
-
-        let response = BindClientResponse {
-            bind_response,
-            scale_up_config,
-        };
-        xdr_codec::pack(&response, &mut payload_buf)?;
-
-        create_bind_client_to_partition_response_from_accepted_status(
-            xid,
-            onc_rpc::AcceptedStatus::Success(payload_buf),
-        )
-    }
-
-    pub fn create_bind_client_to_partition_response_from_accepted_status(
-        xid: u32,
-        accepted_status: onc_rpc::AcceptedStatus<Vec<u8>>,
-    ) -> Result<Vec<u8>, RpcError> {
-        let reply_body = onc_rpc::ReplyBody::Accepted(onc_rpc::AcceptedReply::new(
-            onc_rpc::auth::AuthFlavor::AuthNone::<Vec<_>>(None),
-            accepted_status,
-        ));
-
-        onc_rpc::RpcMessage::new(xid, onc_rpc::MessageType::Reply(reply_body))
-            .serialise()
-            .map_err(|e| e.into())
-    }
-
-    fn generate_parse_bind_client_to_partition_response_result(
-        accepted_status: onc_rpc::AcceptedStatus<Vec<u8>>,
-    ) -> Result<BindClientResponse, RpcError> {
-        let response =
-            create_bind_client_to_partition_response_from_accepted_status(XID, accepted_status)?;
-        let deserialized = onc_rpc::RpcMessage::try_from(response.as_slice())?;
-        parse_bind_client_to_partition_response(&deserialized)
-    }
-
-    pub fn generate_partition_id() -> efs_prot::PartitionId {
-        let mut bytes = [0u8; efs_prot::PARTITION_ID_LENGTH as usize];
-        rand::thread_rng().fill_bytes(&mut bytes);
-        efs_prot::PartitionId(bytes)
-    }
-
-    #[tokio::test]
-    async fn test_bind_client_to_partition() {
-        let server = TestService::new(true).await;
-        let tcp_stream = TcpStream::connect(("127.0.0.1", server.listen_port))
-            .await
-            .expect("Could not connect to test server.");
-
-        let connector =
-            TlsConnector::new(get_client_config().await.expect("Failed to read config"));
-        let mut tls_stream = connector
-            .connect("localhost", tcp_stream)
-            .await
-            .expect("Failed to establish TLS Connection");
-
-        let response = bind_client_to_partition(ProxyIdentifier::new(), &mut tls_stream)
-            .await
-            .expect("bind_client_to_partition request failed");
-
-        let partition_id = match response.bind_response {
-            BindResponse::READY(id) => PartitionId { id: id.0 },
-            _ => panic!(),
-        };
-
-        assert_eq!(
-            server
-                .partition_ids
-                .get(1)
-                .expect("Service has no partition IDs"),
-            &partition_id
-        );
-        server.shutdown().await;
-    }
 
     #[test]
     fn test_request_serde() -> Result<(), RpcError> {

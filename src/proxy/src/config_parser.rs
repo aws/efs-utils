@@ -90,13 +90,8 @@ pub struct EfsConfig {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::test_utils::TEST_CONFIG_PATH;
     use std::{path::Path, string::String};
-
-    pub static TEST_CONFIG_PATH: &str = "tests/certs/test_config.ini";
-
-    pub fn get_test_config() -> ProxyConfig {
-        ProxyConfig::from_path(Path::new(TEST_CONFIG_PATH)).expect("Could not parse test config.")
-    }
 
     #[test]
     fn test_read_config_from_file() {

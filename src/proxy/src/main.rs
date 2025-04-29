@@ -1,5 +1,6 @@
 use crate::config_parser::ProxyConfig;
 use crate::connections::{PlainTextPartitionFinder, TlsPartitionFinder};
+use crate::tls::get_tls_config;
 use crate::tls::TlsConfig;
 use clap::Parser;
 use controller::Controller;
@@ -12,6 +13,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 mod config_parser;
+mod connection_task;
 mod connections;
 mod controller;
 mod efs_rpc;
@@ -19,9 +21,11 @@ mod error;
 mod logger;
 mod proxy;
 mod proxy_identifier;
+mod proxy_task;
 mod rpc;
 mod shutdown;
 mod status_reporter;
+mod test_utils;
 mod tls;
 
 #[allow(clippy::all)]
@@ -116,20 +120,6 @@ async fn write_pid_file(pid_file_path: &Path) -> Result<(), anyhow::Error> {
     pid_file.write_u8(b'\x0A').await?;
     pid_file.flush().await?;
     Ok(())
-}
-
-async fn get_tls_config(proxy_config: &ProxyConfig) -> Result<TlsConfig, anyhow::Error> {
-    let tls_config = TlsConfig::new(
-        proxy_config.fips,
-        Path::new(&proxy_config.nested_config.ca_file),
-        Path::new(&proxy_config.nested_config.client_cert_pem_file),
-        Path::new(&proxy_config.nested_config.client_private_key_pem_file),
-        &proxy_config.nested_config.mount_target_addr,
-        &proxy_config.nested_config.expected_server_hostname_tls,
-    )
-    .await;
-    let tls_config = tls_config?;
-    Ok(tls_config)
 }
 
 fn run_sighup_handler(proxy_config: ProxyConfig, tls_config: Arc<Mutex<TlsConfig>>) {

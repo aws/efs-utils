@@ -44,6 +44,13 @@ AWSCREDSURI = "/v2/credentials/{uuid}"
 WEB_IDENTITY_ROLE_ARN = "FAKE_ROLE_ARN"
 WEB_IDENTITY_TOKEN_FILE = "WEB_IDENTITY_TOKEN_FILE"
 
+AWS_CONTAINER_CREDS_FULL_URI_ENV = "AWS_CONTAINER_CREDENTIALS_FULL_URI"
+AWS_CONTAINER_AUTH_TOKEN_FILE_ENV = "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"
+POD_IDENTITY_CREDS_URI = "http://169.254.170.23/v1/credentials"
+POD_IDENTITY_TOKEN_FILE = (
+    "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token"
+)
+
 
 class MockHeaders(object):
     def __init__(self, content_charset=None):
@@ -520,3 +527,62 @@ def test_get_aws_security_credentials_from_webidentity_passed_in_one_param(
         "from ECS credentials relative uri, or from the instance security credentials service"
         in err
     )
+
+
+def test_get_aws_security_credentials_pod_identity(mocker):
+    config = get_fake_config()
+    token_content = "fake-token"
+    response = json.dumps(
+        {
+            "AccessKeyId": ACCESS_KEY_ID_VAL,
+            "SecretAccessKey": SECRET_ACCESS_KEY_VAL,
+            "Token": SESSION_TOKEN_VAL,
+        }
+    )
+
+    mocker.patch.dict(
+        os.environ,
+        {
+            AWS_CONTAINER_CREDS_FULL_URI_ENV: POD_IDENTITY_CREDS_URI,
+            AWS_CONTAINER_AUTH_TOKEN_FILE_ENV: POD_IDENTITY_TOKEN_FILE,
+        },
+    )
+
+    mock_open = mocker.patch("builtins.open", mocker.mock_open(read_data=token_content))
+
+    mocker.patch("mount_efs.url_request_helper", return_value=json.loads(response))
+    mocker.patch("os.path.exists", return_value=False)
+    mocker.patch("mount_efs.get_iam_role_name", return_value=None)
+
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(
+        config, True, "us-east-1"
+    )
+
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] == SESSION_TOKEN_VAL
+    assert (
+        credentials_source
+        == f"podidentity:{POD_IDENTITY_CREDS_URI},{POD_IDENTITY_TOKEN_FILE}"
+    )
+
+
+def test_get_aws_security_credentials_pod_identity_invalid_token_file(mocker):
+    config = get_fake_config()
+    creds_uri = "http://169.254.170.23/v1/credentials"
+    token_file = "/nonexistent/file"
+
+    mocker.patch.dict(
+        os.environ,
+        {
+            AWS_CONTAINER_CREDS_FULL_URI_ENV: creds_uri,
+            AWS_CONTAINER_AUTH_TOKEN_FILE_ENV: token_file,
+        },
+    )
+
+    mocker.patch("builtins.open", side_effect=IOError("File not found"))
+
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.get_aws_security_credentials(config, True, "us-east-1")
+
+    assert ex.value.code == 1

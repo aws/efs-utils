@@ -52,12 +52,18 @@ DEFAULT_REGION = "us-east-1"
 DEFAULT_NFS_OPTIONS = {}
 FS_ID = "fs-deadbeef"
 OPTIONS_WITH_AZ = {"az": DEFAULT_AZ}
+TEST_SOCKET_GET_ADDR_INFO_RETURN = [
+    (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))
+]
 
 
 @pytest.fixture(autouse=True)
 def setup(mocker):
     mocker.patch("mount_efs.get_target_region", return_value=DEFAULT_REGION)
-    mocker.patch("socket.gethostbyname")
+    mocker.patch(
+        "socket.getaddrinfo",
+        return_value=TEST_SOCKET_GET_ADDR_INFO_RETURN,
+    )
 
 
 def _get_mock_config(

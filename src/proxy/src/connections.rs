@@ -390,11 +390,10 @@ impl PartitionFinder<TlsStream<TcpStream>> for TlsPartitionFinder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config_parser::tests::get_test_config;
+    use crate::config_parser::ProxyConfig;
     use crate::connections::PartitionFinder;
-    use crate::controller::tests::{find_available_port, ServiceAction, TestService};
-    use crate::controller::DEFAULT_SCALE_UP_CONFIG;
-    use crate::ProxyConfig;
+    use crate::test_utils::find_available_port;
+    use crate::tls::get_tls_config;
     use nix::sys::signal::kill;
     use nix::sys::signal::Signal;
     use std::path::Path;
@@ -408,120 +407,6 @@ mod tests {
         uuid: Uuid::from_u128(1_u128),
         incarnation: 0,
     };
-
-    struct MultiplexTest {
-        service: TestService,
-        partition_finder: TlsPartitionFinder,
-        initial_partition_id: PartitionId,
-    }
-
-    impl MultiplexTest {
-        async fn new() -> Self {
-            let service = TestService::new(true).await;
-            MultiplexTest::new_with_service(service).await
-        }
-
-        async fn new_with_service(service: TestService) -> Self {
-            let mut tls_config = TlsConfig::new_from_config(&get_test_config())
-                .await
-                .expect("Failed to acquire TlsConfig.");
-            tls_config.remote_addr = format!("127.0.0.1:{}", service.listen_port);
-
-            let partition_finder = TlsPartitionFinder::new(Arc::new(Mutex::new(tls_config)));
-
-            let (_s, id, _) = partition_finder
-                .establish_connection(PROXY_ID)
-                .await
-                .expect("Failed to connect to server");
-
-            let Some(initial_partition_id) = id else {
-                panic!("Partition Id not found for initial connection.")
-            };
-
-            MultiplexTest {
-                service,
-                partition_finder,
-                initial_partition_id,
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_establish_multiplex_same_partition_found() {
-        let test = MultiplexTest::new().await;
-
-        let (shutdown_handle, _waiter) = ShutdownHandle::new(CancellationToken::new());
-
-        let (new_connnection_id, connections, _) = test
-            .partition_finder
-            .inner_establish_multiplex_connection(
-                PROXY_ID,
-                Some(test.initial_partition_id),
-                shutdown_handle,
-            )
-            .await
-            .expect("Could not establish a multiplex connection");
-
-        assert_eq!(test.initial_partition_id, new_connnection_id);
-        assert_eq!(
-            DEFAULT_SCALE_UP_CONFIG.max_multiplexed_connections - 1,
-            connections.len() as i32
-        );
-
-        test.service.shutdown().await;
-    }
-
-    #[tokio::test]
-    async fn test_establish_multiplex_new_partition_found() {
-        let test = MultiplexTest::new().await;
-
-        let (shutdown_handle, _waiter) = ShutdownHandle::new(CancellationToken::new());
-
-        test.service
-            .post_action(ServiceAction::StopPartitionAcceptor(
-                test.initial_partition_id,
-            ))
-            .await;
-
-        let (new_connnection_id, connections, _) = test
-            .partition_finder
-            .inner_establish_multiplex_connection(
-                PROXY_ID,
-                Some(test.initial_partition_id),
-                shutdown_handle,
-            )
-            .await
-            .expect("Could not establish a multiplex connection");
-
-        assert_eq!(
-            DEFAULT_SCALE_UP_CONFIG.max_multiplexed_connections,
-            connections.len() as i32
-        );
-        assert_ne!(test.initial_partition_id, new_connnection_id);
-
-        test.service.shutdown().await;
-    }
-
-    #[tokio::test]
-    async fn test_establish_multiplex_no_target() {
-        let test = MultiplexTest::new().await;
-
-        let (shutdown_handle, _waiter) = ShutdownHandle::new(CancellationToken::new());
-
-        let (new_connnection_id, connections, _) = test
-            .partition_finder
-            .inner_establish_multiplex_connection(PROXY_ID, None, shutdown_handle)
-            .await
-            .expect("Could not establish a multiplex connection");
-
-        assert_eq!(
-            DEFAULT_SCALE_UP_CONFIG.max_multiplexed_connections,
-            connections.len() as i32
-        );
-        assert_ne!(test.initial_partition_id, new_connnection_id);
-
-        test.service.shutdown().await;
-    }
 
     #[tokio::test]
     async fn test_establish_connection_timeout() {
@@ -579,33 +464,6 @@ mod tests {
         let error = task.await.expect("Unexpected join error");
 
         assert!(matches!(error, Err((ConnectError::Cancelled, None))));
-    }
-
-    #[tokio::test]
-    async fn test_scale_up_max_attempts() {
-        // Create a service in which the all calls of bind_client_to_partition will return a
-        // different value. Our "TestService" returns these PartitionIds in a round robin fashion,
-        // and this service will have more PartitionId than MAX_ATTEMPT_COUNT
-        let service =
-            TestService::new_with_partition_count((MAX_ATTEMPT_COUNT + 2) as usize, true).await;
-
-        let test = MultiplexTest::new_with_service(service).await;
-
-        let (shutdown_handle, _waiter) = ShutdownHandle::new(CancellationToken::new());
-
-        let error = test
-            .partition_finder
-            .inner_establish_multiplex_connection(
-                PROXY_ID,
-                Some(test.initial_partition_id),
-                shutdown_handle.clone(),
-            )
-            .await;
-
-        assert!(matches!(
-            error,
-            Err((ConnectError::MaxAttemptsExceeded, None))
-        ));
     }
 
     #[allow(clippy::enum_variant_names)]
@@ -690,7 +548,7 @@ mod tests {
                 if (sigs_hangup_listener.recv().await).is_some() {
                     //Reloading the TLS configuration
                     let mut locked_config = cloned_tls_config_ptr.lock().await;
-                    *locked_config = crate::get_tls_config(&proxy_config).await.unwrap();
+                    *locked_config = get_tls_config(&proxy_config).await.unwrap();
                     tx.send(()).unwrap();
                     break;
                 }

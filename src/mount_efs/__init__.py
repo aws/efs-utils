@@ -34,6 +34,7 @@ import base64
 import errno
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -85,7 +86,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "2.2.1"
+VERSION = "2.3.0"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -315,6 +316,16 @@ WEB_IDENTITY_TOKEN_FILE_ENV = "AWS_WEB_IDENTITY_TOKEN_FILE"
 ECS_FARGATE_TASK_METADATA_ENDPOINT_ENV = "ECS_CONTAINER_METADATA_URI_V4"
 ECS_FARGATE_TASK_METADATA_ENDPOINT_URL_EXTENSION = "/task"
 ECS_FARGATE_CLIENT_IDENTIFIER = "ecs.fargate"
+
+AWS_CONTAINER_CREDS_FULL_URI_ENV = "AWS_CONTAINER_CREDENTIALS_FULL_URI"
+AWS_CONTAINER_AUTH_TOKEN_FILE_ENV = "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"
+
+
+def is_ipv6_address(ip_address):
+    try:
+        return isinstance(ipaddress.ip_address(ip_address), ipaddress.IPv6Address)
+    except ValueError:
+        return False
 
 
 def errcheck(ret, func, args):
@@ -729,6 +740,13 @@ def get_aws_security_credentials(
         if credentials and credentials_source:
             return credentials, credentials_source
 
+    # attempt to lookup AWS security credentials through Pod Identity
+    credentials, credentials_source = get_aws_security_credentials_from_pod_identity(
+        config, False
+    )
+    if credentials and credentials_source:
+        return credentials, credentials_source
+
     # attempt to lookup AWS security credentials through AssumeRoleWithWebIdentity
     # (e.g. for IAM Role for Service Accounts (IRSA) approach on EKS)
     if jwt_path and role_arn:
@@ -886,6 +904,55 @@ def get_aws_security_credentials_from_webidentity(
         return None, None
 
 
+def get_aws_security_credentials_from_pod_identity(config, is_fatal=False):
+    if (
+        AWS_CONTAINER_CREDS_FULL_URI_ENV not in os.environ
+        or AWS_CONTAINER_AUTH_TOKEN_FILE_ENV not in os.environ
+    ):
+        return None, None
+
+    creds_uri = os.environ[AWS_CONTAINER_CREDS_FULL_URI_ENV]
+    token_file = os.environ[AWS_CONTAINER_AUTH_TOKEN_FILE_ENV]
+
+    try:
+        with open(token_file, "r") as f:
+            token = f.read().strip()
+            if "\r" in token or "\n" in token:
+                if is_fatal:
+                    unsuccessful_resp = (
+                        "AWS Container Auth Token contains invalid characters"
+                    )
+                    fatal_error(unsuccessful_resp, unsuccessful_resp)
+                return None, None
+    except Exception as e:
+        if is_fatal:
+            unsuccessful_resp = (
+                f"Error reading Aws Container Auth Token file {token_file}: {e}"
+            )
+            fatal_error(unsuccessful_resp, unsuccessful_resp)
+        return None, None
+
+    unsuccessful_resp = f"Unsuccessful retrieval of AWS security credentials from Container Credentials URI at {creds_uri}"
+    url_error_msg = f"Unable to reach Container Credentials URI at {creds_uri}"
+
+    pod_identity_security_dict = url_request_helper(
+        config,
+        creds_uri,
+        unsuccessful_resp,
+        url_error_msg,
+        headers={"Authorization": token},
+    )
+
+    if pod_identity_security_dict and all(
+        k in pod_identity_security_dict for k in CREDENTIALS_KEYS
+    ):
+        return pod_identity_security_dict, f"podidentity:{creds_uri},{token_file}"
+
+    if is_fatal:
+        fatal_error(unsuccessful_resp, unsuccessful_resp)
+    return None, None
+
+
 def get_sts_endpoint_url(config, region):
     dns_name_suffix = get_dns_name_suffix(config, region)
     return STS_ENDPOINT_URL_FORMAT.format(region, dns_name_suffix)
@@ -906,7 +973,8 @@ def get_mount_config(config, region, config_name):
         return config.get(CONFIG_SECTION, config_name)
     except NoOptionError:
         fatal_error(
-            "Error retrieving config. Please set the {} configuration in efs-utils.conf".format(config_name)
+            f"Error retrieving config. Please set the {config_name} configuration "
+            "in efs-utils.conf"
         )
 
 
@@ -1479,6 +1547,9 @@ def write_stunnel_config_file(
             else:
                 efs_config["checkHost"] = dns_name[dns_name.index(fs_id) :]
 
+        if not efs_proxy_enabled and is_ipv6_address(fallback_ip_address):
+            efs_config["sni"] = dns_name[dns_name.index(fs_id) :]
+
         # Only use the config setting if the override is not set
         if not efs_proxy_enabled and ocsp_enabled:
             if is_stunnel_option_supported(stunnel_options, b"OCSPaia"):
@@ -1801,7 +1872,7 @@ def bootstrap_proxy(
                 if credentials_source:
                     cert_details["awsCredentialsMethod"] = credentials_source
                     logging.debug(
-                        "AWS credentials source used for IAM authentication: ",
+                        "AWS credentials source used for IAM authentication: %s",
                         credentials_source,
                     )
 
@@ -2021,16 +2092,29 @@ def get_nfs_mount_options(options, config):
     return ",".join(nfs_options)
 
 
+def get_ipv6_addresses(hostname):
+    try:
+        addrinfo = socket.getaddrinfo(hostname, None, socket.AF_INET6)
+        return [addr[4][0] for addr in addrinfo]
+    except socket.gaierror:
+        return []
+
+
 def mount_nfs(config, dns_name, path, mountpoint, options, fallback_ip_address=None):
     if legacy_stunnel_mode_enabled(options, config):
         if "tls" in options:
             mount_path = "127.0.0.1:%s" % path
         elif fallback_ip_address:
-            mount_path = "%s:%s" % (fallback_ip_address, path)
+            if is_ipv6_address(fallback_ip_address):
+                mount_path = f"[{fallback_ip_address}]:{path}"
+            else:
+                mount_path = "%s:%s" % (fallback_ip_address, path)
         else:
             mount_path = "%s:%s" % (dns_name, path)
     else:
         mount_path = "127.0.0.1:%s" % path
+
+    nfs_options = get_nfs_mount_options(options, config)
 
     if not check_if_platform_is_mac():
         command = [
@@ -2038,13 +2122,13 @@ def mount_nfs(config, dns_name, path, mountpoint, options, fallback_ip_address=N
             mount_path,
             mountpoint,
             "-o",
-            get_nfs_mount_options(options, config),
+            nfs_options,
         ]
     else:
         command = [
             "/sbin/mount_nfs",
             "-o",
-            get_nfs_mount_options(options, config),
+            nfs_options,
             mount_path,
             mountpoint,
         ]
@@ -2847,8 +2931,8 @@ def check_and_remove_lock_file(path, file):
 
 def dns_name_can_be_resolved(dns_name):
     try:
-        socket.gethostbyname(dns_name)
-        return True
+        addr_info = socket.getaddrinfo(dns_name, None, socket.AF_UNSPEC)
+        return len(addr_info) > 0
     except socket.gaierror:
         return False
 
@@ -2904,10 +2988,11 @@ def get_fallback_mount_target_ip_address_helper(config, options, fs_id):
     efs_client = get_botocore_client(config, "efs", options)
 
     mount_target = get_mount_target_in_az(efs_client, ec2_client, fs_id, az_name)
-    mount_target_ip = mount_target.get("IpAddress")
-    logging.debug("Found mount target ip address %s in AZ %s", mount_target_ip, az_name)
 
-    return mount_target_ip
+    if "IpAddress" in mount_target:
+        return mount_target.get("IpAddress")
+    elif "Ipv6Address" in mount_target:
+        return mount_target.get("Ipv6Address")
 
 
 def throw_dns_resolve_failure_with_fallback_message(dns_name, fallback_message=None):

@@ -9,6 +9,7 @@ use s2n_tls_tokio::TlsStream;
 use std::path::Path;
 use tokio::net::TcpStream;
 
+use crate::config_parser::ProxyConfig;
 use crate::connections::configure_stream;
 use crate::error::ConnectError;
 
@@ -38,6 +39,20 @@ pub struct TlsConfig {
 
     /// The hostname that is expected to be on the remote server's TLS certificate
     pub server_domain: String,
+}
+
+pub async fn get_tls_config(proxy_config: &ProxyConfig) -> Result<TlsConfig, anyhow::Error> {
+    let tls_config = TlsConfig::new(
+        proxy_config.fips,
+        Path::new(&proxy_config.nested_config.ca_file),
+        Path::new(&proxy_config.nested_config.client_cert_pem_file),
+        Path::new(&proxy_config.nested_config.client_private_key_pem_file),
+        &proxy_config.nested_config.mount_target_addr,
+        &proxy_config.nested_config.expected_server_hostname_tls,
+    )
+    .await;
+    let tls_config = tls_config?;
+    Ok(tls_config)
 }
 
 // s2n-tls errors if there are comments in the certificate files. This function removes comments if
@@ -108,8 +123,7 @@ impl TlsConfig {
         })
     }
 
-    #[cfg(test)]
-    pub async fn new_from_config(config: &crate::ProxyConfig) -> Result<TlsConfig> {
+    pub async fn new_from_config(config: &ProxyConfig) -> Result<TlsConfig> {
         let efs_config = &config.nested_config;
 
         let ca_file = Path::new(&efs_config.ca_file);
@@ -149,7 +163,7 @@ pub async fn establish_tls_stream(
     Ok(tls_stream)
 }
 
-fn create_config_builder(tls_config: &TlsConfig) -> s2n_tls::config::Builder {
+pub fn create_config_builder(tls_config: &TlsConfig) -> s2n_tls::config::Builder {
     let mut config = Config::builder();
 
     let policy = if tls_config.fips_enabled {
@@ -194,29 +208,7 @@ fn create_config_builder(tls_config: &TlsConfig) -> s2n_tls::config::Builder {
 
 #[cfg(test)]
 pub mod tests {
-
-    use crate::config_parser::tests::get_test_config;
-
     use super::*;
-
-    pub async fn get_client_config() -> Result<Config> {
-        let tls_config = TlsConfig::new_from_config(&get_test_config()).await?;
-        let builder = create_config_builder(&tls_config);
-
-        let config = builder.build()?;
-        Ok(config)
-    }
-
-    pub async fn get_server_config() -> Result<Config> {
-        let tls_config = TlsConfig::new_from_config(&get_test_config()).await?;
-        let mut builder = create_config_builder(&tls_config);
-
-        // Accept all client certificates
-        builder.set_verify_host_callback(InsecureAcceptAllCertificatesHandler {})?;
-
-        let config = builder.build()?;
-        Ok(config)
-    }
 
     #[tokio::test]
     async fn test_remove_comments() {
