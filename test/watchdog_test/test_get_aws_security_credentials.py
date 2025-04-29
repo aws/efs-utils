@@ -459,3 +459,33 @@ def test_get_aws_security_credentials_webidentity(mocker):
     assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
     assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
     assert credentials["Token"] == SESSION_TOKEN_VAL
+
+
+def test_get_aws_security_credentials_pod_identity(mocker):
+    config = get_fake_config()
+    token_content = "fake-token"
+    creds_uri = "http://169.254.170.23/v1/credentials"
+    token_file = (
+        "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token"
+    )
+    credentials_source = f"podidentity:{creds_uri},{token_file}"
+
+    response = json.dumps(
+        {
+            "AccessKeyId": ACCESS_KEY_ID_VAL,
+            "SecretAccessKey": SECRET_ACCESS_KEY_VAL,
+            "Token": SESSION_TOKEN_VAL,
+        }
+    )
+
+    mock_open = mocker.patch("builtins.open", mocker.mock_open(read_data=token_content))
+
+    mocker.patch("watchdog.url_request_helper", return_value=json.loads(response))
+
+    credentials = watchdog.get_aws_security_credentials(
+        config, credentials_source, "us-east-1"
+    )
+
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] == SESSION_TOKEN_VAL

@@ -101,46 +101,10 @@ fn extract_u32_from_bytes(header: &[u8]) -> u32 {
 
 #[cfg(test)]
 pub mod test {
-    use crate::rpc::RPC_MAX_SIZE;
+    use crate::{rpc::RPC_MAX_SIZE, test_utils::generate_rpc_msg_fragments};
 
     use super::{RpcBatch, RpcFragmentParseError, RPC_HEADER_SIZE, RPC_LAST_FRAG};
     use bytes::{BufMut, BytesMut};
-    use rand::Rng;
-
-    // Generates message fragments for tests
-    //
-    // This function generates a set of message fragments from random data. The fragments are constructed
-    // in a way that they can be later assembled  into the full long message data
-    // function.
-    //
-    // # Arguments
-    // * `size` - The total size of the message.
-    // * `num_fragments` - The number of fragments to generate.
-    //
-    pub fn generate_msg_fragments(size: usize, num_fragments: usize) -> (bytes::BytesMut, Vec<u8>) {
-        let mut rng = rand::thread_rng();
-        let data: Vec<u8> = (0..size).map(|_| rng.gen()).collect();
-
-        let fragment_data_size = data.len() / num_fragments;
-
-        let mut data_buffer = bytes::BytesMut::new();
-        for i in 0..num_fragments {
-            let start_idx = i * fragment_data_size;
-            let end_idx = std::cmp::min(size, start_idx + fragment_data_size);
-            let fragment_data = &data[start_idx..end_idx];
-
-            let mut header = (end_idx - start_idx) as u32;
-            if end_idx == size {
-                header |= 1 << 31;
-            }
-
-            data_buffer.extend_from_slice(&header.to_be_bytes());
-            data_buffer.extend_from_slice(fragment_data);
-        }
-        assert_eq!(data_buffer.len(), (num_fragments * 4) + data.len());
-
-        (data_buffer, data)
-    }
 
     #[test]
     fn multiple_messages() {
@@ -167,7 +131,7 @@ pub mod test {
     #[test]
     fn test_invalid_rpc_small_fragment() {
         let num_fragments = 1;
-        let (mut input_buffer, _) = generate_msg_fragments(1, num_fragments);
+        let (mut input_buffer, _) = generate_rpc_msg_fragments(1, num_fragments);
         let result = RpcBatch::parse_batch(&mut input_buffer);
         assert!(matches!(
             result,
@@ -178,7 +142,7 @@ pub mod test {
     #[test]
     fn test_invalid_rpc_big_fragment() {
         let num_fragments = 1;
-        let (mut input_buffer, _) = generate_msg_fragments(RPC_MAX_SIZE + 1, num_fragments);
+        let (mut input_buffer, _) = generate_rpc_msg_fragments(RPC_MAX_SIZE + 1, num_fragments);
         let result = RpcBatch::parse_batch(&mut input_buffer);
         assert!(matches!(
             result,
@@ -191,7 +155,7 @@ pub mod test {
         // Create an input buffer with multiple RPC fragments
         let num_fragments = 3;
         let message_size = 12;
-        let (mut input_buffer, _) = generate_msg_fragments(message_size, num_fragments);
+        let (mut input_buffer, _) = generate_rpc_msg_fragments(message_size, num_fragments);
         let mut rpc_batch = RpcBatch::parse_batch(&mut input_buffer)
             .expect("parse batch failed")
             .expect("no rpc messages found");
@@ -208,15 +172,15 @@ pub mod test {
         // Create an input buffer with multiple RPC messages
         let num_fragments_1 = 3;
         let message_size_1 = 12;
-        let (mut input_buffer, _) = generate_msg_fragments(message_size_1, num_fragments_1);
+        let (mut input_buffer, _) = generate_rpc_msg_fragments(message_size_1, num_fragments_1);
 
         let num_fragments_2 = 6;
         let message_size_2 = 24;
-        let (input_buffer_2, _) = generate_msg_fragments(message_size_2, num_fragments_2);
+        let (input_buffer_2, _) = generate_rpc_msg_fragments(message_size_2, num_fragments_2);
 
         let num_fragments_3 = 1;
         let message_size_3 = 50;
-        let (input_buffer_3, _) = generate_msg_fragments(message_size_3, num_fragments_3);
+        let (input_buffer_3, _) = generate_rpc_msg_fragments(message_size_3, num_fragments_3);
 
         input_buffer.extend_from_slice(&input_buffer_2);
         input_buffer.extend_from_slice(&input_buffer_3);

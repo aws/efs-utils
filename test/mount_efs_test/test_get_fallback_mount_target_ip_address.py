@@ -4,6 +4,7 @@
 # for the specific language governing permissions and limitations under
 # the License.
 
+import ipaddress
 import socket
 
 import pytest
@@ -328,3 +329,26 @@ def test_get_dns_name_and_fall_back_ip_address_cannot_be_resolved(mocker, capsys
     utils.assert_called(check_fallback_enabled_mock)
     utils.assert_called(get_fallback_mount_target_ip_mock)
     utils.assert_called(check_ip_resolve_mock)
+
+
+def test_get_fallback_mount_target_ip_address_helper_prefer_ipv4(mocker):
+    config = _get_mock_config()
+
+    get_botocore_client_mock = mocker.patch(
+        "mount_efs.get_botocore_client", side_effect=[MOCK_EFS_AGENT, MOCK_EC2_AGENT]
+    )
+
+    ipv4_address = "127:0:0:1"
+    ipv6_address = "2001:db8:3333:4444:5555:6666:7777:8888"
+    mount_target_info = {"IpAddress": ipv4_address, "Ipv6Address": ipv6_address}
+    get_mount_target_az_mock = mocker.patch(
+        "mount_efs.get_mount_target_in_az",
+        return_value=mount_target_info,
+    )
+
+    options = {}
+    ip_address = mount_efs.get_fallback_mount_target_ip_address_helper(
+        config, options, FS_ID
+    )
+
+    assert ip_address == ipv4_address

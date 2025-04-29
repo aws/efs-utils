@@ -5,10 +5,11 @@
 # the License.
 
 import logging
+import socket
 import sys
 import unittest
 from collections import namedtuple
-from unittest.mock import MagicMock, mock_open
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 from botocore.exceptions import ProfileNotFound
@@ -538,3 +539,25 @@ def test_stunnel5_non_al2(mocker):
     args, _ = check_output_mock.call_args
     args = args[0]
     assert "stunnel" == args[1]
+
+
+def test_get_ipv6_addresses_success():
+    hostname = "example.com"
+    mock_addrinfo = [
+        (None, None, None, None, ("2001:db8::1", None, None, None)),
+        (None, None, None, None, ("2001:db8::2", None, None, None)),
+    ]
+
+    with patch("socket.getaddrinfo", return_value=mock_addrinfo):
+        result = mount_efs.get_ipv6_addresses(hostname)
+
+    assert result == ["2001:db8::1", "2001:db8::2"]
+
+
+def test_get_ipv6_addresses_no_ipv6():
+    hostname = "example.com"
+
+    with patch("socket.getaddrinfo", side_effect=socket.gaierror):
+        result = mount_efs.get_ipv6_addresses(hostname)
+
+    assert result == []

@@ -177,10 +177,14 @@ def _get_expected_efs_config_tls(
         expected_efs_config["connect"] = (
             expected_efs_config["connect"] % fallback_ip_address
         )
+
     expected_efs_config["verify"] = str(verify)
 
     if check_cert_hostname or efs_proxy_enabled:
         expected_efs_config["checkHost"] = dns_name[dns_name.index(FS_ID) :]
+
+    if not efs_proxy_enabled and mount_efs.is_ipv6_address(fallback_ip_address):
+        expected_efs_config["sni"] = dns_name[dns_name.index(FS_ID) :]
 
     if check_cert_validity and ocsp_override and (not efs_proxy_enabled):
         expected_efs_config["OCSPaia"] = "yes"
@@ -811,4 +815,38 @@ def test_non_tls_mount_with_proxy(mocker, tmpdir):
         config_file,
         expected_global_config,
         _get_expected_efs_config_non_tls(),
+    )
+
+
+def test_write_stunnel_config_with_ipv6_and_legacy_stunnel(mocker, tmpdir):
+    ca_mocker = mocker.patch("mount_efs.add_tunnel_ca_options")
+    state_file_dir = str(tmpdir)
+
+    test_ipv6_address = "2001:db8:3333:4444:5555:6666:7777:8888"
+
+    config_file = mount_efs.write_stunnel_config_file(
+        _get_config(mocker),
+        state_file_dir,
+        FS_ID,
+        MOUNT_POINT,
+        PORT,
+        DNS_NAME,
+        VERIFY_LEVEL,
+        OCSP_ENABLED,
+        _get_mount_options_tls(),
+        DEFAULT_REGION,
+        fallback_ip_address=test_ipv6_address,
+        efs_proxy_enabled=False,
+    )
+
+    utils.assert_called_once(ca_mocker)
+
+    _validate_config(
+        config_file,
+        _get_expected_global_config(FS_ID, MOUNT_POINT, PORT, state_file_dir),
+        _get_expected_efs_config_tls(
+            dns_name=DNS_NAME,
+            fallback_ip_address=test_ipv6_address,
+            efs_proxy_enabled=False,
+        ),
     )

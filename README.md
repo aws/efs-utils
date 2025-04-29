@@ -657,6 +657,10 @@ Note: FIPS mode requires that the installed version of OpenSSL is compiled with 
 To verify that the installed version is compiled with FIPS, look for `OpenSSL X.X.Xx-fips` in the `stunnel -version` command output e.g.
 ```bash
 stunnel -version
+```
+
+Example output for FIPS compiled stunnel
+```
 stunnel 4.56 on x86_64-koji-linux-gnu platform
 Compiled/running with OpenSSL 1.0.2k-fips  26 Jan 2017
 Threading:PTHREAD Sockets:POLL,IPv6 SSL:ENGINE,OCSP,FIPS Auth:LIBWRAP
