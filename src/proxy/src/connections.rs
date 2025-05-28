@@ -34,6 +34,7 @@ pub trait PartitionFinder<S: ProxyStream> {
     async fn establish_connection(
         &self,
         proxy_id: ProxyIdentifier,
+        csi_driver_version: Option<String>,
     ) -> Result<(S, Option<PartitionId>, Option<ScaleUpConfig>), ConnectError>;
 
     async fn spawn_establish_connection_task(
@@ -269,10 +270,11 @@ impl PlainTextPartitionFinder {
     async fn establish_plain_text_connection(
         mount_target_addr: String,
         proxy_id: ProxyIdentifier,
+        csi_driver_version: Option<String>,
     ) -> Result<(TcpStream, Result<BindClientResponse, RpcError>), ConnectError> {
         timeout(Duration::from_secs(SINGLE_CONNECTION_TIMEOUT_SEC), async {
             let mut tcp_stream = TcpStream::connect(mount_target_addr).await?;
-            let response = efs_rpc::bind_client_to_partition(proxy_id, &mut tcp_stream).await;
+            let response = efs_rpc::bind_client_to_partition(proxy_id, &mut tcp_stream, csi_driver_version).await;
             Ok((configure_stream(tcp_stream), response))
         })
         .await
@@ -285,9 +287,10 @@ impl PartitionFinder<TcpStream> for PlainTextPartitionFinder {
     async fn establish_connection(
         &self,
         proxy_id: ProxyIdentifier,
+        csi_driver_version: Option<String>,
     ) -> Result<(TcpStream, Option<PartitionId>, Option<ScaleUpConfig>), ConnectError> {
         let (s, bind_result) =
-            Self::establish_plain_text_connection(self.mount_target_addr.clone(), proxy_id).await?;
+            Self::establish_plain_text_connection(self.mount_target_addr.clone(), proxy_id, csi_driver_version).await?;
         match bind_result {
             Ok(response) => {
                 debug!(
@@ -313,7 +316,7 @@ impl PartitionFinder<TcpStream> for PlainTextPartitionFinder {
         proxy_id: ProxyIdentifier,
     ) -> JoinHandle<Result<(TcpStream, Result<BindClientResponse, RpcError>), ConnectError>> {
         let addr = self.mount_target_addr.clone();
-        tokio::spawn(Self::establish_plain_text_connection(addr, proxy_id))
+        tokio::spawn(Self::establish_plain_text_connection(addr, proxy_id, None))
     }
 }
 
@@ -329,10 +332,11 @@ impl TlsPartitionFinder {
     async fn establish_tls_connection(
         tls_config: TlsConfig,
         proxy_id: ProxyIdentifier,
+        csi_driver_version: Option<String>,
     ) -> Result<(TlsStream<TcpStream>, Result<BindClientResponse, RpcError>), ConnectError> {
         timeout(Duration::from_secs(SINGLE_CONNECTION_TIMEOUT_SEC), async {
             let mut tls_stream = establish_tls_stream(tls_config).await?;
-            let response = efs_rpc::bind_client_to_partition(proxy_id, &mut tls_stream).await;
+            let response = efs_rpc::bind_client_to_partition(proxy_id, &mut tls_stream, csi_driver_version).await;
             Ok((tls_stream, response))
         })
         .await
@@ -345,6 +349,7 @@ impl PartitionFinder<TlsStream<TcpStream>> for TlsPartitionFinder {
     async fn establish_connection(
         &self,
         proxy_id: ProxyIdentifier,
+        csi_driver_version: Option<String>,
     ) -> Result<
         (
             TlsStream<TcpStream>,
@@ -354,7 +359,7 @@ impl PartitionFinder<TlsStream<TcpStream>> for TlsPartitionFinder {
         ConnectError,
     > {
         let tls_config_copy = self.tls_config.lock().await.clone();
-        let (s, bind_result) = Self::establish_tls_connection(tls_config_copy, proxy_id).await?;
+        let (s, bind_result) = Self::establish_tls_connection(tls_config_copy, proxy_id, csi_driver_version).await?;
         let (bind_response, scale_up_config) = match bind_result {
             Ok(response) => {
                 warn!(
@@ -383,7 +388,7 @@ impl PartitionFinder<TlsStream<TcpStream>> for TlsPartitionFinder {
         Result<(TlsStream<TcpStream>, Result<BindClientResponse, RpcError>), ConnectError>,
     > {
         let tls_config_copy = self.tls_config.lock().await.clone();
-        tokio::spawn(Self::establish_tls_connection(tls_config_copy, proxy_id))
+        tokio::spawn(Self::establish_tls_connection(tls_config_copy, proxy_id, None))
     }
 }
 
@@ -416,7 +421,7 @@ mod tests {
             let partition_finder = PlainTextPartitionFinder {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
             };
-            partition_finder.establish_connection(PROXY_ID).await
+            partition_finder.establish_connection(PROXY_ID, None).await
         })
         .await
         .expect("join err");
@@ -488,6 +493,7 @@ mod tests {
         async fn establish_connection(
             &self,
             _proxy_id: ProxyIdentifier,
+            _csi_driver_version: Option<String>,
         ) -> Result<(TcpStream, Option<PartitionId>, Option<ScaleUpConfig>), ConnectError> {
             unimplemented!()
         }

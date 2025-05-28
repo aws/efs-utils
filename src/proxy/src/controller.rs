@@ -77,6 +77,7 @@ pub struct Controller<S: ProxyStream> {
     pub restart_count: u64,
     pub scale_up_config: ScaleUpConfig,
     pub status_reporter: StatusReporter,
+    pub csi_driver_version: Option<String>,
 }
 
 impl<S: ProxyStream> Controller<S> {
@@ -84,6 +85,7 @@ impl<S: ProxyStream> Controller<S> {
         listen_addr: &str,
         partition_finder: Arc<impl PartitionFinder<S> + Sync + Send + 'static>,
         status_reporter: StatusReporter,
+        csi_driver_version: Option<String>,
     ) -> Self {
         let Ok(listener) = TcpListener::bind(listen_addr).await else {
             panic!("Failed to bind {}", listen_addr);
@@ -97,6 +99,7 @@ impl<S: ProxyStream> Controller<S> {
             restart_count: 0,
             scale_up_config: DEFAULT_SCALE_UP_CONFIG,
             status_reporter,
+            csi_driver_version: csi_driver_version,
         }
     }
 
@@ -145,7 +148,7 @@ impl<S: ProxyStream> Controller<S> {
                 None => {
                     match self
                         .partition_finder
-                        .establish_connection(self.proxy_id)
+                        .establish_connection(self.proxy_id, self.csi_driver_version.clone())
                         .await
                     {
                         Ok((s, partition_id, scale_up_config)) => {

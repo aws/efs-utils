@@ -1472,6 +1472,11 @@ def write_stunnel_config_file(
     system_release_version = get_system_release_version()
     global_config = dict(STUNNEL_GLOBAL_CONFIG)
 
+    if (config.has_option(CONFIG_SECTION, "csi_driver_version")):
+        global_config["csi_driver_version"] = config.get(
+            CONFIG_SECTION, "csi_driver_version"
+        )
+
     if not efs_proxy_enabled and is_stunnel_option_supported(
         stunnel_options, b"foreground", b"quiet", emit_warning_log=False
     ):
