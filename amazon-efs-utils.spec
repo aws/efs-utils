@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 2.3.1
+Version   : 2.3.2
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -192,6 +192,9 @@ fi
 %clean
 
 %changelog
+* Fri Jul 18 2025 Anthony Tse <anthotse@amazon.com> - 2.3.2
+- Fix package version numbering 
+
 * Thu Apr 17 2025 Anthony Tse <anthotse@amazon.com> - 2.3.0
 - Add support for pod-identity credentials in the credentials chain
 - Enable mounting with IPv6 when using with the 'stunnel' mount option
