@@ -5,6 +5,7 @@
 const PROXY_ID_LENGTH = 16;
 const PROXY_INCARNATION_LENGTH = 8;
 const PARTITION_ID_LENGTH = 64;
+const CSI_DRIVER_VERSION_LEN = 32;
 
 enum OperationType {
     OP_BIND_CLIENT_TO_PARTITION = 1
@@ -15,6 +16,10 @@ typedef opaque PartitionId[PARTITION_ID_LENGTH];
 struct ProxyIdentifier {
     opaque identifier<PROXY_ID_LENGTH>;
     opaque incarnation<PROXY_INCARNATION_LENGTH>;
+};
+
+struct ConnectionMetrics {
+    opaque csi_driver_version<CSI_DRIVER_VERSION_LEN>;
 };
 
 struct ScaleUpConfig {
