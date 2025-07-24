@@ -72,6 +72,7 @@ The `efs-utils` package has been verified against the following MacOS distributi
     - [Step 2. Allow DescribeMountTargets and DescribeAvailabilityZones action in the IAM policy](#step-2-allow-describemounttargets-and-describeavailabilityzones-action-in-the-iam-policy)
   - [The way to access instance metadata](#the-way-to-access-instance-metadata)
   - [Use the assumed profile credentials for IAM](#use-the-assumed-profile-credentials-for-iam)
+  - [Environment Variable Support](#environment-variable-support)
   - [Enabling FIPS Mode](#enabling-fips-mode)
   - [License Summary](#license-summary)
 
@@ -643,6 +644,79 @@ sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
 
 ```bash
 sudo mount -t efs -o tls,iam,rolearn="ROLE_ARN",jwtpath="PATH/JWT_TOKEN_FILE" file-system-id efs-mount-point/
+```
+
+## Environment Variable Support
+
+Efs-utils supports standard AWS environment variables for configuring credentials and region settings, providing flexibility for different deployment scenarios.
+
+### AWS Profile Environment Variable
+
+You can set the AWS profile using the `AWS_PROFILE` environment variable instead of specifying it in the mount command:
+
+```bash
+export AWS_PROFILE=my-profile
+sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
+```
+
+The precedence order for AWS profile selection is:
+1. Mount option: `-o awsprofile=profile-name`
+2. Environment variable: `AWS_PROFILE`
+3. Default profile from AWS credentials/config files
+
+### AWS Region Environment Variables
+
+You can set the AWS region using standard AWS environment variables:
+
+```bash
+# Using AWS_REGION (recommended)
+export AWS_REGION=us-west-2
+sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
+
+# Using AWS_DEFAULT_REGION (fallback)
+export AWS_DEFAULT_REGION=eu-central-1
+sudo mount -t efs -o tls,iam file-system-id efs-mount-point/
+```
+
+The precedence order for region selection is:
+1. Mount option: `-o region=region-name`
+2. Environment variable: `AWS_REGION`
+3. Environment variable: `AWS_DEFAULT_REGION`
+4. Configuration file setting
+5. Instance metadata service
+6. Legacy DNS format parsing
+
+### Examples
+
+**Using environment variables for cross-region mounting:**
+
+```bash
+export AWS_REGION=us-east-1
+export AWS_PROFILE=cross-region-profile
+sudo mount -t efs -o tls,iam fs-1234567890abcdef0:/ /mnt/efs-east
+```
+
+**Using environment variables in containers or CI/CD:**
+
+```yaml
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+    - name: efs-client
+      env:
+        - name: AWS_REGION
+          value: "us-west-2"
+        - name: AWS_PROFILE
+          value: "eks-pod-profile"
+      command:
+        - mount
+        - -t
+        - efs
+        - -o
+        - tls,iam
+        - fs-1234567890abcdef0:/
+        - /mnt/efs
 ```
 
 ## Enabling FIPS Mode
