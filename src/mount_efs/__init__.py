@@ -1081,11 +1081,11 @@ def botocore_credentials_helper(awsprofile):
 def get_aws_profile(options, use_iam):
     # Check mount option first
     awsprofile = options.get("awsprofile")
-    
+
     # If not provided, check environment variable
     if not awsprofile:
         awsprofile = os.environ.get("AWS_PROFILE")
-    
+
     if not awsprofile and use_iam:
         for file_path in [AWS_CREDENTIALS_FILE, AWS_CONFIG_FILE]:
             aws_credentials_configs = read_config(file_path)
