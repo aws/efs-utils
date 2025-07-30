@@ -251,9 +251,6 @@ workflows:
           name: ubuntu-latest
           image: ubuntu:latest
       - build-deb-package:
-          name: ubuntu16
-          image: ubuntu:16.04
-      - build-deb-package:
           name: ubuntu18
           image: ubuntu:18.04
       - build-deb-package:
@@ -265,19 +262,13 @@ workflows:
       - build-deb-package:
           name: debian11
           image: debian:bullseye
-      - build-centos-rpm-package:
-          name: centos-latest
-          image: centos:latest
-      - build-centos-rpm-package:
-          name: centos8
-          image: centos:centos8
       - build-rpm-package:
           name: rocky8
           image: rockylinux/rockylinux:8
-      - build-rpm-package-rustup:
+      - build-rpm-package:
           name: amazon-linux-latest
           image: amazonlinux:latest
-      - build-rpm-package-rustup:
+      - build-rpm-package:
           name: amazon-linux-2
           image: amazonlinux:2
       - build-rpm-package-rustup:
