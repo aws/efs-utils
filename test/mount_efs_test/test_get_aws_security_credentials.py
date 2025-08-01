@@ -156,6 +156,9 @@ def _test_get_aws_security_credentials_get_ecs_from_env_url(mocker):
     config = get_fake_config()
     mocker.patch.dict(os.environ, {})
     mocker.patch("os.path.exists", return_value=False)
+    # Mock our new credential functions to return None so they don't interfere
+    mocker.patch("mount_efs.get_aws_security_credentials_from_cloudshell", return_value=(None, None))
+    mocker.patch("mount_efs.get_aws_security_credentials_from_env_vars", return_value=(None, None))
     response = json.dumps(
         {
             "AccessKeyId": ACCESS_KEY_ID_VAL,
@@ -261,6 +264,9 @@ def _test_get_aws_security_credentials_get_instance_metadata_role_name(
     config = get_fake_config()
     mocker.patch.dict(os.environ, {})
     mocker.patch("os.path.exists", return_value=False)
+    # Mock new credential functions to return None so they don't interfere
+    mocker.patch("mount_efs.get_aws_security_credentials_from_cloudshell", return_value=(None, None))
+    mocker.patch("mount_efs.get_aws_security_credentials_from_env_vars", return_value=(None, None))
     response = json.dumps(
         {
             "Code": "Success",
@@ -299,6 +305,9 @@ def test_get_aws_security_credentials_no_credentials_found(mocker, capsys):
     config = get_fake_config()
     mocker.patch.dict(os.environ, {})
     mocker.patch("os.path.exists", return_value=False)
+    # Mock our new credential functions to return None so they don't interfere
+    mocker.patch("mount_efs.get_aws_security_credentials_from_cloudshell", return_value=(None, None))
+    mocker.patch("mount_efs.get_aws_security_credentials_from_env_vars", return_value=(None, None))
     mocker.patch("mount_efs.urlopen")
 
     with pytest.raises(SystemExit) as ex:
@@ -586,3 +595,219 @@ def test_get_aws_security_credentials_pod_identity_invalid_token_file(mocker):
         mount_efs.get_aws_security_credentials(config, True, "us-east-1")
 
     assert ex.value.code == 1
+
+
+# Tests for CloudShell credential support
+def test_get_aws_security_credentials_from_cloudshell_success(mocker):
+    """Test successful CloudShell credential retrieval"""
+    config = get_fake_config()
+    token = "mock-token"
+    credentials_response = {
+        "AccessKeyId": ACCESS_KEY_ID_VAL,
+        "SecretAccessKey": SECRET_ACCESS_KEY_VAL,
+        "Token": SESSION_TOKEN_VAL,
+        "LastUpdated": "1970-01-01T00:00:00Z",
+        "Type": "",
+        "Expiration": "2025-05-15T17:06:59Z",
+        "Code": "Success"
+    }
+    
+    # Mock token request
+    mock_token_response = MockUrlLibResponse(data=token.encode('utf-8'))
+    mocker.patch("mount_efs.urlopen", return_value=mock_token_response)
+    
+    # Mock credentials request
+    mocker.patch("mount_efs.url_request_helper", return_value=credentials_response)
+    
+    credentials, credentials_source = mount_efs.get_aws_security_credentials_from_cloudshell(config, False)
+    
+    assert credentials == credentials_response
+    assert credentials_source == "cloudshell"
+
+
+def test_get_aws_security_credentials_from_cloudshell_token_failure(mocker):
+    """Test CloudShell token request failure"""
+    config = get_fake_config()
+    
+    # Mock token request failure
+    mocker.patch("mount_efs.urlopen", side_effect=Exception("Connection refused"))
+    
+    credentials, credentials_source = mount_efs.get_aws_security_credentials_from_cloudshell(config, False)
+    
+    assert credentials is None
+    assert credentials_source is None
+
+
+def test_get_aws_security_credentials_from_cloudshell_credentials_failure(mocker):
+    """Test CloudShell credentials request failure"""
+    config = get_fake_config()
+    token = "mock-token"
+    
+    # Mock successful token request
+    mock_token_response = MockUrlLibResponse(data=token.encode('utf-8'))
+    mocker.patch("mount_efs.urlopen", return_value=mock_token_response)
+    
+    # Mock credentials request failure
+    mocker.patch("mount_efs.url_request_helper", return_value=None)
+    
+    credentials, credentials_source = mount_efs.get_aws_security_credentials_from_cloudshell(config, False)
+    
+    assert credentials is None
+    assert credentials_source is None
+
+
+def test_get_aws_security_credentials_from_cloudshell_invalid_credentials(mocker):
+    """Test CloudShell with invalid credentials response"""
+    config = get_fake_config()
+    token = "mock-token"
+    invalid_credentials = {
+        "AccessKeyId": ACCESS_KEY_ID_VAL,
+        # Missing SecretAccessKey and Token
+        "LastUpdated": "1970-01-01T00:00:00Z",
+    }
+    
+    # Mock token request
+    mock_token_response = MockUrlLibResponse(data=token.encode('utf-8'))
+    mocker.patch("mount_efs.urlopen", return_value=mock_token_response)
+    
+    # Mock credentials request with invalid response
+    mocker.patch("mount_efs.url_request_helper", return_value=invalid_credentials)
+    
+    credentials, credentials_source = mount_efs.get_aws_security_credentials_from_cloudshell(config, False)
+    
+    assert credentials is None
+    assert credentials_source is None
+
+
+def test_get_aws_security_credentials_from_cloudshell_fatal_error(mocker):
+    """Test CloudShell with fatal error flag"""
+    config = get_fake_config()
+    
+    # Mock token request failure
+    mocker.patch("mount_efs.urlopen", side_effect=Exception("Connection refused"))
+    
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.get_aws_security_credentials_from_cloudshell(config, True)
+    
+    assert ex.value.code == 1
+
+
+# Tests for environment variable credential support
+def test_get_aws_security_credentials_from_env_vars_success_with_token(mocker):
+    """Test successful environment variable credential retrieval with session token"""
+    mocker.patch.dict(os.environ, {
+        "AWS_ACCESS_KEY_ID": ACCESS_KEY_ID_VAL,
+        "AWS_SECRET_ACCESS_KEY": SECRET_ACCESS_KEY_VAL,
+        "AWS_SESSION_TOKEN": SESSION_TOKEN_VAL
+    })
+    
+    credentials, credentials_source = mount_efs.get_aws_security_credentials_from_env_vars()
+    
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] == SESSION_TOKEN_VAL
+    assert credentials_source == "environment"
+
+
+def test_get_aws_security_credentials_from_env_vars_success_without_token(mocker):
+    """Test successful environment variable credential retrieval without session token"""
+    mocker.patch.dict(os.environ, {
+        "AWS_ACCESS_KEY_ID": ACCESS_KEY_ID_VAL,
+        "AWS_SECRET_ACCESS_KEY": SECRET_ACCESS_KEY_VAL
+    })
+    
+    credentials, credentials_source = mount_efs.get_aws_security_credentials_from_env_vars()
+    
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] is None
+    assert credentials_source == "environment"
+
+
+def test_get_aws_security_credentials_from_env_vars_missing_access_key(mocker):
+    """Test environment variable credentials with missing access key"""
+    mocker.patch.dict(os.environ, {
+        "AWS_SECRET_ACCESS_KEY": SECRET_ACCESS_KEY_VAL,
+        "AWS_SESSION_TOKEN": SESSION_TOKEN_VAL
+    }, clear=True)
+    
+    credentials, credentials_source = mount_efs.get_aws_security_credentials_from_env_vars()
+    
+    assert credentials is None
+    assert credentials_source is None
+
+
+def test_get_aws_security_credentials_from_env_vars_missing_secret_key(mocker):
+    """Test environment variable credentials with missing secret key"""
+    mocker.patch.dict(os.environ, {
+        "AWS_ACCESS_KEY_ID": ACCESS_KEY_ID_VAL,
+        "AWS_SESSION_TOKEN": SESSION_TOKEN_VAL
+    }, clear=True)
+    
+    credentials, credentials_source = mount_efs.get_aws_security_credentials_from_env_vars()
+    
+    assert credentials is None
+    assert credentials_source is None
+
+
+def test_get_aws_security_credentials_from_env_vars_no_env_vars(mocker):
+    """Test environment variable credentials when no environment variables are set"""
+    mocker.patch.dict(os.environ, {}, clear=True)
+    
+    credentials, credentials_source = mount_efs.get_aws_security_credentials_from_env_vars()
+    
+    assert credentials is None
+    assert credentials_source is None
+
+
+# Integration tests for the main credential function
+def test_get_aws_security_credentials_cloudshell_integration(mocker):
+    """Test that CloudShell credentials are used in the main credential chain"""
+    config = get_fake_config()
+    token = "mock-token"
+    credentials_response = {
+        "AccessKeyId": ACCESS_KEY_ID_VAL,
+        "SecretAccessKey": SECRET_ACCESS_KEY_VAL,
+        "Token": SESSION_TOKEN_VAL,
+    }
+    
+    # Mock all preceding credential methods to fail
+    mocker.patch.dict(os.environ, {}, clear=True)
+    mocker.patch("os.path.exists", return_value=False)
+    
+    # Mock CloudShell success
+    mock_token_response = MockUrlLibResponse(data=token.encode('utf-8'))
+    mocker.patch("mount_efs.urlopen", return_value=mock_token_response)
+    mocker.patch("mount_efs.url_request_helper", return_value=credentials_response)
+    
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(
+        config, True, "us-east-1"
+    )
+    
+    assert credentials == credentials_response
+    assert credentials_source == "cloudshell"
+
+
+def test_get_aws_security_credentials_env_vars_integration(mocker):
+    """Test that environment variable credentials are used in the main credential chain"""
+    config = get_fake_config()
+    
+    # Mock all preceding credential methods to fail
+    mocker.patch.dict(os.environ, {
+        "AWS_ACCESS_KEY_ID": ACCESS_KEY_ID_VAL,
+        "AWS_SECRET_ACCESS_KEY": SECRET_ACCESS_KEY_VAL,
+        "AWS_SESSION_TOKEN": SESSION_TOKEN_VAL
+    })
+    mocker.patch("os.path.exists", return_value=False)
+    
+    # Mock CloudShell failure
+    mocker.patch("mount_efs.urlopen", side_effect=Exception("Connection refused"))
+    
+    credentials, credentials_source = mount_efs.get_aws_security_credentials(
+        config, True, "us-east-1"
+    )
+    
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] == SESSION_TOKEN_VAL
+    assert credentials_source == "environment"
