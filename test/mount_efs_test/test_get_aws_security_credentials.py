@@ -156,7 +156,7 @@ def _test_get_aws_security_credentials_get_ecs_from_env_url(mocker):
     config = get_fake_config()
     mocker.patch.dict(os.environ, {})
     mocker.patch("os.path.exists", return_value=False)
-    # Mock our new credential functions to return None so they don't interfere
+    # Mock new credential functions to return None so they don't interfere
     mocker.patch("mount_efs.get_aws_security_credentials_from_cloudshell", return_value=(None, None))
     mocker.patch("mount_efs.get_aws_security_credentials_from_env_vars", return_value=(None, None))
     response = json.dumps(
@@ -305,7 +305,7 @@ def test_get_aws_security_credentials_no_credentials_found(mocker, capsys):
     config = get_fake_config()
     mocker.patch.dict(os.environ, {})
     mocker.patch("os.path.exists", return_value=False)
-    # Mock our new credential functions to return None so they don't interfere
+    # Mock new credential functions to return None so they don't interfere
     mocker.patch("mount_efs.get_aws_security_credentials_from_cloudshell", return_value=(None, None))
     mocker.patch("mount_efs.get_aws_security_credentials_from_env_vars", return_value=(None, None))
     mocker.patch("mount_efs.urlopen")
