@@ -102,6 +102,41 @@ pub fn generate_partition_id() -> efs_prot::PartitionId {
 
 pub fn parse_bind_client_to_partition_request(
     request: &onc_rpc::RpcMessage<&[u8], &[u8]>,
+) -> Result<(ProxyIdentifier, efs_prot::ConnectionMetrics), RpcError> {
+    let call_body = request.call_body().expect("not a call rpc");
+
+    if EFS_PROGRAM_NUMBER != call_body.program()
+        || EFS_PROGRAM_VERSION != call_body.program_version()
+    {
+        return Err(RpcError::GarbageArgs);
+    }
+
+    let mut payload = Cursor::new(call_body.payload());
+    let raw_proxy_id = xdr_codec::unpack::<_, efs_prot::ProxyIdentifier>(&mut payload)?;
+    let connection_metrics = xdr_codec::unpack::<_, efs_prot::ConnectionMetrics>(&mut payload)?;
+
+    Ok((
+        ProxyIdentifier {
+            uuid: uuid::Builder::from_bytes(
+                raw_proxy_id
+                    .identifier
+                    .try_into()
+                    .expect("Failed not convert vec to sized array"),
+            )
+            .into_uuid(),
+            incarnation: i64::from_be_bytes(
+                raw_proxy_id
+                    .incarnation
+                    .try_into()
+                    .expect("Failed to convert vec to sized array"),
+            ),
+        },
+        connection_metrics
+    ))
+}
+
+pub fn parse_bind_client_to_partition_request_with_no_driver_version(
+    request: &onc_rpc::RpcMessage<&[u8], &[u8]>,
 ) -> Result<ProxyIdentifier, RpcError> {
     let call_body = request.call_body().expect("not a call rpc");
 
