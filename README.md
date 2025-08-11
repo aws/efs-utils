@@ -10,7 +10,6 @@ The `efs-utils` package has been verified against the following Linux distributi
 |----------------------| ----- | --------- |
 | Amazon Linux 2       | `rpm` | `systemd` |
 | Amazon Linux 2023    | `rpm` | `systemd` |
-| CentOS 8             | `rpm` | `systemd` |
 | RHEL 8               | `rpm` | `systemd` |
 | RHEL 9               | `rpm` | `systemd` |
 | Fedora 29            | `rpm` | `systemd` |
@@ -18,7 +17,6 @@ The `efs-utils` package has been verified against the following Linux distributi
 | Fedora 31            | `rpm` | `systemd` |
 | Fedora 32            | `rpm` | `systemd` |
 | Debian 11            | `deb` | `systemd` |
-| Ubuntu 16.04         | `deb` | `systemd` |
 | Ubuntu 18.04         | `deb` | `systemd` |
 | Ubuntu 20.04         | `deb` | `systemd` |
 | Ubuntu 22.04         | `deb` | `systemd` |
