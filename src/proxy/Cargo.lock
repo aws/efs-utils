@@ -249,7 +249,7 @@ checksum = "3c877555693c14d2f84191cfd3ad8582790fc52b5e2274b40b59cf5f5cea25c7"
 
 [[package]]
 name = "efs-proxy"
-version = "2.3.2"
+version = "2.3.3"
 dependencies = [
  "anyhow",
  "async-trait",
