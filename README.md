@@ -12,39 +12,27 @@ The `efs-utils` package has been verified against the following Linux distributi
 | Amazon Linux 2023    | `rpm` | `systemd` |
 | RHEL 8               | `rpm` | `systemd` |
 | RHEL 9               | `rpm` | `systemd` |
-| Fedora 29            | `rpm` | `systemd` |
-| Fedora 30            | `rpm` | `systemd` |
-| Fedora 31            | `rpm` | `systemd` |
-| Fedora 32            | `rpm` | `systemd` |
-| Debian 11            | `deb` | `systemd` |
-| Ubuntu 18.04         | `deb` | `systemd` |
 | Ubuntu 20.04         | `deb` | `systemd` |
 | Ubuntu 22.04         | `deb` | `systemd` |
+| Ubuntu 24.04         | `deb` | `systemd` |
 | OpenSUSE Leap        | `rpm` | `systemd` |
-| OpenSUSE Tumbleweed  | `rpm` | `systemd` |
-| Oracle8              | `rpm` | `systemd` |
-| SLES 12              | `rpm` | `systemd` |
 | SLES 15              | `rpm` | `systemd` |
 
 The `efs-utils` package has been verified against the following MacOS distributions:
 
 | Distribution   | `init` System |
 |----------------|---------------|
-| MacOS Big Sur  | `launchd`     |
-| MacOS Monterey | `launchd`     |
 | MacOS Ventura  | `launchd`     |
 | MacOS Sonoma   | `launchd`     |
 | MacOS Sequoia  | `launchd`     |
+| MacOS Tahoe    | `launchd`     |
 
 ## README contents
-  - [Prerequisites](#prerequisites)
-  - [Optional](#optional)
   - [Installation](#installation)
     - [On Amazon Linux distributions](#on-amazon-linux-distributions)
     - [Install via AWS Systems Manager Distributor](#install-via-aws-systems-manager-distributor)
     - [On other Linux distributions](#on-other-linux-distributions)
-    - [On MacOS Big Sur, macOS Monterey and macOS Ventura distribution](#on-macos-big-sur-macos-monterey-and-macos-ventura-distribution)
-      - [Run tests](#run-tests)
+    - [On macOS Tahoe, macOS Sequoia, macOS Sonoma and macOS Ventura distribution](#on-macos-tahoe-macos-sequoia-macos-sonoma-and-macos-ventura-distribution)
   - [Usage](#usage)
     - [mount.efs](#mountefs)
     - [MacOS](#macos)
@@ -74,20 +62,6 @@ The `efs-utils` package has been verified against the following MacOS distributi
   - [Enabling FIPS Mode](#enabling-fips-mode)
   - [License Summary](#license-summary)
 
-
-## Prerequisites
-
-* `nfs-utils` (RHEL/CentOS/Amazon Linux/Fedora) or `nfs-common` (Debian/Ubuntu)
-* OpenSSL-devel 1.0.2+
-* Python 3.7/3.8
-* `stunnel` 4.56+
-- `rust` 1.70+
-- `cargo`
-
-## Optional
-
-* `botocore` 1.12.0+
-
 ## Installation
 
 ### On Amazon Linux distributions
@@ -113,136 +87,26 @@ for more guidance.)
 
 ### On other Linux distributions
 
-Other distributions require building the package from source and installing it.
+Building from source requires Rust 1.70+, Cargo, Go 1.17.13+, CMake 3.0+, GCC/G++, and Perl.
 
-If your distribution doesn't provide a rust or cargo package, or it provides versions
-that are older than 1.70, then you can install rust and cargo through rustup:
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-. "$HOME/.cargo/env"
-```
+**See [INSTALL.md](INSTALL.md) for detailed build instructions for your distribution.**
 
-- To build and install an RPM:
+### On macOS Tahoe, macOS Sequoia, macOS Sonoma and macOS Ventura distribution
 
-If the distribution is not OpenSUSE or SLES
-
-```bash
-sudo yum -y install git rpm-build make rust cargo openssl-devel
-git clone https://github.com/aws/efs-utils
-cd efs-utils
-make rpm
-sudo yum -y install build/amazon-efs-utils*rpm
-```
-
-Otherwise
-
-```bash
-sudo zypper refresh
-sudo zypper install -y git rpm-build make rust cargo openssl-devel
-git clone https://github.com/aws/efs-utils
-cd efs-utils
-make rpm
-sudo zypper --no-gpg-checks install -y build/amazon-efs-utils*rpm
-```
-
-On OpenSUSE, if you see error like `File './suse/noarch/bash-completion-2.11-2.1.noarch.rpm' not found on medium 'http://download.opensuse.org/tumbleweed/repo/oss/'`
-during installation of `git`, run the following commands to re-add repo OSS and NON-OSS, then run the install script above again.
-
-```bash
-sudo zypper ar -f -n OSS http://download.opensuse.org/tumbleweed/repo/oss/ OSS
-sudo zypper ar -f -n NON-OSS http://download.opensuse.org/tumbleweed/repo/non-oss/ NON-OSS
-sudo zypper refresh
-```
-
-- To build and install a Debian package:
-
-```bash
-sudo apt-get update
-sudo apt-get -y install git binutils rustc cargo pkg-config libssl-dev gettext
-git clone https://github.com/aws/efs-utils
-cd efs-utils
-./build-deb.sh
-sudo apt-get -y install ./build/amazon-efs-utils*deb
-```
-
-If your Debian distribution doesn't provide a rust or cargo package, or your distribution provides versions
-that are older than 1.70, then you can install rust and cargo through rustup:
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-. "$HOME/.cargo/env"
-```
-
-### Common installation issues with efs-utils v2.0.0
-**`make rpm` fails due to "feature `edition2021` is required"**:
-
-Update to a version of rust and cargo
-that is newer than 1.70. To install a new version of rust and cargo, run
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-. "$HOME/.cargo/env"
-```
-
-**You installed a new version of rust with the above command, but your system is still using the rust installed by the package manager**:
-
-When installing rust with the rustup script above, the script will fail if it detects a rust already exists on the system.
-Un-install the package manager's rust, and re-install rust through rustup. Once done, you will need to install rust through the package manager again to satisfy
-the RPM's dependencies.
-```bash
-yum remove cargo rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-yum install cargo rust
-. "$HOME/.cargo/env"
-```
-
-**When you run `make rpm`, compilation of efs-proxy fails due to `error: linker cc not found`**:
-
-Make sure that you have a linker installed on your system. For example, on Amazon Linux or RHEL, install gcc with
-```bash
-yum install gcc
-```
-
-**Installation Issue - Failed Build Dependencies**
-
-If rust dependencies was installed using rustup and the package manager does not have a rust and/or cargo package installed, you may see an error like this.
-
-```
-error: Failed build dependencies:
-    cargo is needed by amazon-efs-utils-2.1.0-1.el7_9.x86_64
-    rust is needed by amazon-efs-utils-2.1.0-1.el7_9.x86_64
-```
-
-In this case, the 'make rpm' command in the installation script above should be replaced by 'make rpm-without-system-rust' to remove the rpmbuild dependency check.
-
-### On macOS Sequoia, macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura distribution
-
-For EC2 Mac instances running macOS Sequoia, macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura, you can install amazon-efs-utils from the 
+For EC2 Mac instances running macOS Tahoe, macOS Sequoia, macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura, you can install amazon-efs-utils from the 
 [homebrew-aws](https://github.com/aws/homebrew-aws) respository. **Note that this will ONLY work on EC2 instances
-running macOS Sequoia, macOS Big Sur, macOS Monterey, macOS Sonoma and macOS Ventura, not local Mac computers.**
+running macOS Tahoe, macOS Sequoia, macOS Sonoma and macOS Ventura, not local Mac computers.**
 ```bash
 brew install amazon-efs-utils
 ```
 
-This will install amazon-efs-utils on your EC2 Mac Instance running macOS Big Sur, macOS Monterey and macOS Ventura in the directory `/usr/local/Cellar/amazon-efs-utils`. 
+This will install amazon-efs-utils in:
+- Intel Macs: `/usr/local/Cellar/amazon-efs-utils`
+- Apple Silicon Macs: `/opt/homebrew/Cellar/amazon-efs-utils`
   		  
 ***Follow the instructions in caveats when using efs-utils on EC2 Mac instance for the first time.*** To check the package caveats run below command
 ```bash
 brew info amazon-efs-utils
-```
-
-#### Run tests
-
-- [Set up a virtualenv](http://libzx.so/main/learning/2016/03/13/best-practice-for-virtualenv-and-git-repos.html) for efs-utils
-
-```bash
-virtualenv ~/.envs/efs-utils
-source ~/.envs/efs-utils/bin/activate
-pip install -r requirements.txt
-```
-
-- Run tests
-
-```bash
-make test
 ```
 
 ## Usage
@@ -722,23 +586,9 @@ Efs-Utils is able to enter FIPS mode when mounting your file system. To enable F
 ```bash
 sed -i "s/fips_mode_enabled = false/fips_mode_enabled = true/" /etc/amazon/efs/efs-utils.conf
 ```
-This will enable any potential API call from EFS-Utils to use FIPS endpoints and cause stunnel to enter FIPS mode 
+This will enable any potential API call from EFS-Utils to use FIPS endpoints and cause proxy to enter FIPS mode 
 
-Note: FIPS mode requires that the installed version of OpenSSL is compiled with FIPS.
-
-To verify that the installed version is compiled with FIPS, look for `OpenSSL X.X.Xx-fips` in the `stunnel -version` command output e.g.
-```bash
-stunnel -version
-```
-
-Example output for FIPS compiled stunnel
-```
-stunnel 4.56 on x86_64-koji-linux-gnu platform
-Compiled/running with OpenSSL 1.0.2k-fips  26 Jan 2017
-Threading:PTHREAD Sockets:POLL,IPv6 SSL:ENGINE,OCSP,FIPS Auth:LIBWRAP
-```
-
-For more information on how to configure OpenSSL with FIPS see the [OpenSSL FIPS README](https://github.com/openssl/openssl/blob/master/README-FIPS.md).
+Efs-Utils is configured to compile with AWS-LC FIPS module by default. For more information on AWS-LC FIPS module see [AWS-LC FIPS README](https://github.com/aws/aws-lc/blob/main/crypto/fipsmodule/FIPS.md)
 
 ## License Summary
 

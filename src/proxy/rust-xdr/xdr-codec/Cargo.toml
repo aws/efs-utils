@@ -1,0 +1,25 @@
+[package]
+name = "xdr-codec"
+version = "0.4.4"
+authors = ["Jeremy Fitzhardinge <jeremy@goop.org>"]
+license = "MIT OR Apache-2.0"
+description = "XDR encode/decode runtime support. Pairs with xdrgen which generates code from specs."
+repository = "https://github.com/jsgf/rust-xdr/tree/master/xdr-codec"
+documentation = "https://docs.rs/xdr-codec"
+readme = "README.md"
+keywords = ["encoding", "protocol", "xdr", "rfc4506", "serialization"]
+include = [ "src/**/*.rs", "tests/**/*.rs", "*.md", "Cargo.toml"  ]
+
+[features]
+# Enable use of `Pack`/`Unpack` traits for `i8`/`u8`. Normally this is disabled to
+# prevent unintended use of `char thing[]` arrays when then intent was `opaque thing[]`.
+bytecodec = []
+# For travis
+unstable = []
+
+[dependencies]
+byteorder = "1.0"
+error-chain = "0.10"
+
+[dev-dependencies]
+quickcheck = "0.4"

@@ -583,6 +583,6 @@ def test_get_aws_security_credentials_pod_identity_invalid_token_file(mocker):
     mocker.patch("builtins.open", side_effect=IOError("File not found"))
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.get_aws_security_credentials(config, True, "us-east-1")
+        mount_efs.get_aws_security_credentials_from_pod_identity(config, True)
 
     assert ex.value.code == 1

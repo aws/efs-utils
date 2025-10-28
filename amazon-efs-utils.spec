@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 2.3.3
+Version   : 2.4.0
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -49,7 +49,7 @@ Group     : Amazon/Tools
 License   : MIT
 URL       : https://aws.amazon.com/efs
 
-BuildArchitectures: x86_64 aarch64
+BuildArch: x86_64 aarch64
 
 Requires  : nfs-utils
 %if 0%{?amzn2}
@@ -124,6 +124,10 @@ mv vendor %{_builddir}/%{name}/src/proxy/
 %endif
 
 %build
+# For AL2, cmake3 needs to be set as CMAKE env var
+%if 0%{?amzn2}
+export CMAKE=/usr/bin/cmake3
+%endif
 cd %{_builddir}/%{name}/src/proxy
 cargo build --release --manifest-path %{_builddir}/%{name}/src/proxy/Cargo.toml
 
@@ -192,6 +196,10 @@ fi
 %clean
 
 %changelog
+* Fri Oct 03 2025 Yangjinan Hu <yjnhu@amazon.com> - 2.4.0
+- Upgrade s2n-tls version in efs-proxy to use AWS-LC
+- Add ubuntu24 and macOS Tahoe support efs-utils
+
 * Mon Aug 11 2025 Anthony Tse <anthotse@amazon.com> - 2.3.3
 - Reset Cargo.lock version number to 3. Using version 4 caused issues for customers using older rust versions.
 - Add environment variable support for AWS profiles and regions
