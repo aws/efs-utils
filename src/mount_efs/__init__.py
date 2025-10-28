@@ -86,7 +86,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "2.3.3"
+VERSION = "2.4.0"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -95,6 +95,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
+UBUNTU_24_RELEASE = "Ubuntu 24"
 
 CLONE_NEWNET = 0x40000000
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -249,7 +250,6 @@ EFS_ONLY_OPTIONS = [
     "verify",
     "rolearn",
     "jwtpath",
-    "fsap",
     "crossaccount",
     LEGACY_STUNNEL_MOUNT_OPTION,
 ]
@@ -287,6 +287,7 @@ MACOS_MONTEREY_RELEASE = "macOS-12"
 MACOS_VENTURA_RELEASE = "macOS-13"
 MACOS_SONOMA_RELEASE = "macOS-14"
 MACOS_SEQUOIA_RELEASE = "macOS-15"
+MACOS_TAHOE_RELEASE = "macOS-26"
 
 
 # Multiplier for max read ahead buffer size
@@ -302,11 +303,12 @@ SKIP_NO_SO_BINDTODEVICE_RELEASES = [
     MACOS_VENTURA_RELEASE,
     MACOS_SONOMA_RELEASE,
     MACOS_SEQUOIA_RELEASE,
+    MACOS_TAHOE_RELEASE,
 ]
 
 MAC_OS_PLATFORM_LIST = ["darwin"]
-# MacOS Versions : Sequoia - 24.*, Sonoma - 23.*, Ventura - 22.*, Monterey - 21.*, Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
-MAC_OS_SUPPORTED_VERSION_LIST = ["20", "21", "22", "23", "24"]
+# MacOS Versions : Tahoe - 25.*, Sequoia - 24.*, Sonoma - 23.*, Ventura - 22.*, Monterey - 21.*, Big Sur - 20.*, Catalina - 19.*, Mojave - 18.*. Catalina and Mojave are not supported for now
+MAC_OS_SUPPORTED_VERSION_LIST = ["20", "21", "22", "23", "24", "25"]
 
 AWS_FIPS_ENDPOINT_CONFIG_ENV = "AWS_USE_FIPS_ENDPOINT"
 ECS_URI_ENV = "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
@@ -2000,23 +2002,23 @@ def bootstrap_proxy(
         preexec_fn=os.setsid,
         close_fds=True,
     )
-    logging.info(
-        "Started %s, pid: %d",
-        "efs-proxy" if efs_proxy_enabled else "stunnel",
-        tunnel_proc.pid,
-    )
-
-    update_tunnel_temp_state_file_with_tunnel_pid(
-        temp_tls_state_file, state_file_dir, tunnel_proc.pid
-    )
-
-    if "netns" not in options:
-        test_tlsport(options["tlsport"])
-    else:
-        with NetNS(nspath=options["netns"]):
-            test_tlsport(options["tlsport"])
 
     try:
+        logging.info(
+            "Started %s, pid: %d",
+            "efs-proxy" if efs_proxy_enabled else "stunnel",
+            tunnel_proc.pid,
+        )
+
+        update_tunnel_temp_state_file_with_tunnel_pid(
+            temp_tls_state_file, state_file_dir, tunnel_proc.pid
+        )
+
+        if "netns" not in options:
+            test_tlsport(options["tlsport"])
+        else:
+            with NetNS(nspath=options["netns"]):
+                test_tlsport(options["tlsport"])
         yield tunnel_proc
     finally:
         # The caller of this function should use this function in the context of a `with` statement
@@ -3360,7 +3362,8 @@ def verify_tlsport_can_be_connected(tlsport):
         logging.debug("Trying to connect to 127.0.0.1: %s", tlsport)
         test_socket.connect(("127.0.0.1", tlsport))
         return True
-    except ConnectionRefusedError:
+    except Exception as e:
+        logging.warning("Error connecting to 127.0.0.1:%s, %s", tlsport, e)
         return False
     finally:
         test_socket.close()
@@ -4084,6 +4087,7 @@ def optimize_readahead_window(mountpoint, options, config):
         DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER * int(options["rsize"]) / 1024
     )
 
+    system_release_version = get_system_release_version()
     try:
         major, minor = decode_device_number(os.stat(mountpoint).st_dev)
         # modify read_ahead_kb in /sys/class/bdi/<bdi>/read_ahead_kb
@@ -4096,6 +4100,20 @@ def optimize_readahead_window(mountpoint, options, config):
             read_ahead_kb_config_file,
             str(fixed_readahead_kb),
         )
+        if UBUNTU_24_RELEASE in system_release_version:
+            # For Ubuntu 24, we use a delayed approach to setting the readahead value.
+            # This is necessary because on Ubuntu 24, there's a race condition with udev
+            # rules that can reset our readahead value immediately after we set it.
+            p = subprocess.Popen(
+                "sleep 2 && echo %s > %s"
+                % (fixed_readahead_kb, read_ahead_kb_config_file),
+                shell=True,
+                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+            )
+            logging.debug("Started background thread for delayed readahead setting")
+            return
+
         p = subprocess.Popen(
             "echo %s > %s" % (fixed_readahead_kb, read_ahead_kb_config_file),
             shell=True,

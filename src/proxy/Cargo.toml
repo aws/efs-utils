@@ -3,7 +3,7 @@ name = "efs-proxy"
 edition = "2021"
 build = "build.rs"
 # The version of efs-proxy is tied to efs-utils.
-version = "2.3.3"
+version = "2.4.0"
 publish = false
 license = "MIT"
 
@@ -20,17 +20,15 @@ log4rs = { version = "1.2.0", features = ["rolling_file_appender", "compound_pol
 nix = { version = "0.26.2", features = ["signal"]}
 onc-rpc = "0.2.3"
 rand = "0.8.5"
-s2n-tls = "0.0"
-s2n-tls-tokio = "0.0"
-s2n-tls-sys = "0.0"
+s2n-tls = {version="^0.3.19",features=["fips"]}
+s2n-tls-tokio = "^0.3.19"
 serde = {version="1.0.175",features=["derive"]}
 serde_ini = "0.2.0"
 thiserror = "1.0.44"
 tokio = { version = "1.29.0, <1.39", features = ["full"] }
 tokio-util = "0.7.8"
 uuid = { version = "1.4.1", features = ["v4", "fast-rng", "macro-diagnostics"]}
-xdr-codec = "0.4.4"
-backtrace = "=0.3.74"
+xdr-codec = { path = "rust-xdr/xdr-codec"}
 
 [dev-dependencies]
 test-case = "*"
@@ -38,4 +36,10 @@ tokio = { version = "1.29.0", features = ["test-util"] }
 tempfile = "3.10.1"
 
 [build-dependencies]
-xdrgen = "0.4.4"
+xdrgen = { path = "rust-xdr/xdrgen" }
+
+[lib]
+# Library is used only to make symbols visible/reusable by Integration tests
+# so we want to disable unit-tests for that target, to avoid running all the unit tests twice
+test = false
+doctest = false

@@ -47,10 +47,26 @@ commands:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             . "$HOME/.cargo/env"
       - run:
+          name: Install golang
+          command: |
+            apt-get -y install wget
+            ARCH=$(dpkg --print-architecture)
+            VERSION=$(wget -qO- https://go.dev/VERSION?m=text | head -1)
+            wget -qO- https://go.dev/dl/${VERSION}.linux-${ARCH}.tar.gz | tar -C /usr/local -xzf -
+            echo 'export PATH=$PATH:/usr/local/go/bin' >> $HOME/.bashrc
+      - run:
           name: Install dependencies
           command: |
             DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata
-            apt-get -y install binutils git rustc cargo pkg-config libssl-dev gettext
+            if grep -q 'Ubuntu 20.04' /etc/os-release 2>/dev/null; then
+              apt-get -y install binutils git rustc cargo pkg-config libssl-dev gettext cmake gcc-10 g++-10
+              update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100
+              update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100
+            elif grep -q 'trixie' /etc/os-release 2>/dev/null; then
+              apt-get -y install binutils git rustc cargo pkg-config libssl-dev gettext cmake gcc-13 g++-13
+            else
+              apt-get -y install binutils git rustc cargo pkg-config libssl-dev gettext cmake gcc g++
+            fi
       - run:
           name: Add local build repo as safe git directory
           command: |
@@ -60,13 +76,21 @@ commands:
           name: Build DEB
           command: |
             . "$HOME/.cargo/env"
+            export PATH=$PATH:/usr/local/go/bin
+            if grep -q 'trixie' /etc/os-release 2>/dev/null; then
+              export CC=gcc-13
+              export CXX=g++-13
+            fi
             rustc --version
             cargo --version
+            go version
+            cmake --version
             ./build-deb.sh
       - run:
           name: Install package
           command: |
-            DEBIAN_FRONTEND=noninteractive apt-get -y install ./build/amazon-efs-utils*deb
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get -y install --fix-missing ./build/amazon-efs-utils*deb
       - run:
           name: Check installed successfully
           command: |
@@ -75,12 +99,30 @@ commands:
     steps:
       - checkout
       - run:
+          name: Install golang
+          command: |
+            yum -y install wget tar gzip
+            ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+            VERSION=$(wget -qO- https://go.dev/VERSION?m=text | head -1)
+            wget -qO- https://go.dev/dl/${VERSION}.linux-${ARCH}.tar.gz | tar -C /usr/local -xzf -
+            echo 'export PATH=$PATH:/usr/local/go/bin' >> $HOME/.bashrc
+      - run:
           name: Install dependencies
           command: |
-            yum -y install rpm-build make systemd rust cargo openssl-devel
+            if grep -q '^ID="amzn"' /etc/os-release && grep -q '^VERSION_ID="2"' /etc/os-release 2>/dev/null; then
+              yum -y install rpm-build make systemd rust cargo openssl-devel cmake3 gcc gcc-c++ perl binutils
+              if [ ! -e /usr/bin/cmake ]; then
+                ln -sf /usr/bin/cmake3 /usr/bin/cmake
+              fi
+            else
+              yum -y install rpm-build make systemd rust cargo openssl-devel cmake gcc gcc-c++ perl binutils
+            fi
       - run:
           name: Build RPM
           command: |
+            export PATH=$PATH:/usr/local/go/bin
+            go version
+            cmake --version
             make rpm
       - run:
           name: Install package
@@ -104,16 +146,29 @@ commands:
           name: Install latest Rust
           command: |
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - run:
+          name: Install golang
+          command: |
+            yum -y install wget tar gzip
+            ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+            VERSION=$(wget -qO- https://go.dev/VERSION?m=text | head -1)
+            wget -qO- https://go.dev/dl/${VERSION}.linux-${ARCH}.tar.gz | tar -C /usr/local -xzf -
+            echo 'export PATH=$PATH:/usr/local/go/bin' >> $HOME/.bashrc
       - checkout
       - run:
           name: Install dependencies
           command: |
-            yum -y install rpm-build make systemd rust cargo openssl-devel
+            yum -y install rpm-build make systemd rust cargo openssl-devel cmake gcc gcc-c++ gcc13 gcc13-c++ perl binutils
       - run:
           name: Build RPM
           command: |
             . "$HOME/.cargo/env"
+            export PATH=$PATH:/usr/local/go/bin
+            export CC=gcc-13
+            export CXX=g++-13
             rustc --version
+            go version
+            cmake --version
             make rpm
       - run:
           name: Install package
@@ -144,15 +199,34 @@ commands:
           command: |
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
       - run:
+          name: Install golang
+          command: |
+            zypper install -y wget tar gzip
+            ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+            VERSION=$(wget -qO- https://go.dev/VERSION?m=text | head -1)
+            wget -qO- https://go.dev/dl/${VERSION}.linux-${ARCH}.tar.gz | tar -C /usr/local -xzf -
+            echo 'export PATH=$PATH:/usr/local/go/bin' >> $HOME/.bashrc
+      - run:
           name: Install dependencies
           command: |
             zypper install -y --force-resolution rpm-build
-            zypper install -y make systemd rust cargo openssl-devel
+            if grep -q 'Tumbleweed' /etc/os-release 2>/dev/null; then
+              zypper install -y make systemd rust cargo openssl-devel cmake gcc13 gcc13-c++ perl binutils
+            else
+              zypper install -y make systemd rust cargo openssl-devel cmake gcc gcc-c++ perl binutils
+            fi
       - run:
           name: Build RPM
           command: |
             . "$HOME/.cargo/env"
+            export PATH=$PATH:/usr/local/go/bin
+            if grep -q 'Tumbleweed' /etc/os-release 2>/dev/null; then
+              export CC=gcc-13
+              export CXX=g++-13
+            fi
             rustc --version
+            go version
+            cmake --version
             make rpm
       - run:
           name: Install package
@@ -260,8 +334,17 @@ workflows:
           name: ubuntu22
           image: ubuntu:22.04
       - build-deb-package:
+          name: ubuntu24
+          image: ubuntu:24.04
+      - build-deb-package:
           name: debian11
           image: debian:bullseye
+      - build-deb-package:
+          name: debian12
+          image: debian:bookworm
+      - build-deb-package:
+          name: debian13
+          image: debian:trixie
       - build-rpm-package:
           name: rocky8
           image: rockylinux/rockylinux:8
@@ -272,29 +355,8 @@ workflows:
           name: amazon-linux-2
           image: amazonlinux:2
       - build-rpm-package-rustup:
-          name: fedora29
-          image: fedora:29
-      - build-rpm-package-rustup:
-          name: fedora30
-          image: fedora:30
-      - build-rpm-package-rustup:
-          name: fedora31
-          image: fedora:31
-      - build-rpm-package-rustup:
-          name: fedora32
-          image: fedora:32
-      - build-rpm-package-rustup:
-          name: fedora33
-          image: fedora:33
-      - build-rpm-package-rustup:
-          name: fedora34
-          image: fedora:34
-      - build-rpm-package-rustup:
-          name: fedora35
-          image: fedora:35
-      - build-rpm-package-rustup:
-          name: fedora36
-          image: fedora:36
+          name: fedora41
+          image: fedora:41
       - build-suse-rpm-package:
           name: opensuse-leap15.1
           image: opensuse/leap:15.1
@@ -310,3 +372,6 @@ workflows:
       - build-suse-rpm-package:
           name: opensuse-leap-latest
           image: opensuse/leap:latest
+      - build-suse-rpm-package:
+          name: opensuse-tumbleweed
+          image: opensuse/tumbleweed

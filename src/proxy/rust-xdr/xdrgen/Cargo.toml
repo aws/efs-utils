@@ -1,0 +1,39 @@
+[package]
+name = "xdrgen"
+version = "0.4.4"
+authors = ["Jeremy Fitzhardinge <jeremy@goop.org>"]
+license = "MIT/Apache-2.0"
+description = "XDR codec generator from specification. Designed for use with xdr-codec."
+repository = "https://github.com/jsgf/rust-xdr/tree/master/xdrgen"
+documentation = "https://docs.rs/xdrgen/"
+readme = "README.md"
+keywords = ["encoding", "protocol", "xdr", "rfc4506", "serialization"]
+include = [ "src/**/*.rs", "tests/**/*.rs", "*.md", "Cargo.toml"  ]
+
+[[bin]]
+name = "xdrgen"
+path = "src/xdrgen.rs"
+test = false
+bench = false
+doc = false
+
+[features]
+unstable = []
+
+[dependencies]
+log = "0.3"
+env_logger = "0.11"
+nom = { version="3.1", features=["verbose-errors"] }
+quote = "0.3"
+clap = "2.24"
+lazy_static = "0.2"
+bitflags = "0.9"
+
+[dependencies.xdr-codec]
+path = "../xdr-codec"
+version = "0.4"
+
+
+[dev-dependencies]
+tempdir = "0.3"
+error-chain = "0.10"

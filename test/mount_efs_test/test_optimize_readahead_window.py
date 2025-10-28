@@ -7,6 +7,7 @@
 #
 import os
 import subprocess
+import time
 
 import mount_efs
 
@@ -183,6 +184,42 @@ def test_optimize_readahead_should_apply_failed_with_exception(mocker, tmpdir):
         "No such file or directory" in warning_log
         or "Directory nonexistent" in warning_log
     )
+
+
+def test_optimize_readahead_ubuntu_24(mocker, tmpdir):
+    mock_config = _get_new_mock_config(enable_optimize_readahead=True)
+    _mock_should_revise_readahead(mocker, True)
+    mocker.patch(
+        "mount_efs.get_system_release_version", return_value="Ubuntu 24.04 LTS"
+    )
+    mocker.patch(
+        "mount_efs.NFS_READAHEAD_CONFIG_PATH_FORMAT",
+        str(tmpdir) + "/%s:%s/read_ahead_kb",
+    )
+    mocker.patch(
+        "os.stat",
+        return_value=generate_os_stat_result(st_dev=DEFAULT_MOUNT_DEVICE_NUMBER),
+    )
+
+    expected_major, expected_minor = mount_efs.decode_device_number(
+        DEFAULT_MOUNT_DEVICE_NUMBER
+    )
+    os.mkdir(str(tmpdir) + "/%s:%s" % (expected_major, expected_minor))
+
+    mount_efs.optimize_readahead_window(MOUNT_POINT, DEFAULT_OPTIONS, mock_config)
+
+    expected_readahead_kb_value = int(
+        mount_efs.DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER
+        * int(DEFAULT_OPTIONS["rsize"])
+        / 1024
+    )
+
+    # Check if the value was set correctly after the delay
+    time.sleep(3)
+    with open(
+        str(tmpdir) + "/%s:%s/read_ahead_kb" % (expected_major, expected_minor)
+    ) as file:
+        assert expected_readahead_kb_value == int(file.read().strip())
 
 
 def generate_os_stat_result(

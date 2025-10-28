@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 2.3.3
+Version   : 2.4.0
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -192,6 +192,10 @@ fi
 %clean
 
 %changelog
+* Fri Oct 03 2025 Yangjinan Hu <yjnhu@amazon.com> - 2.4.0
+- Upgrade s2n-tls version in efs-proxy to use AWS-LC
+- Add ubuntu24 and macOS Tahoe support efs-utils
+
 * Mon Aug 11 2025 Anthony Tse <anthotse@amazon.com> - 2.3.3
 - Reset Cargo.lock version number to 3. Using version 4 caused issues for customers using older rust versions.
 - Add environment variable support for AWS profiles and regions
