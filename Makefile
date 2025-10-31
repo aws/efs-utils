@@ -11,7 +11,7 @@ SOURCE_TARBALL = $(PACKAGE_NAME).tar.gz
 SPECFILE = $(PACKAGE_NAME).spec
 BUILD_DIR = build/rpmbuild
 PROXY_VERSION = 2.0.0
-RPM_BUILD_FLAGS ?= --with system_rust
+RPM_BUILD_FLAGS ?= --with system_rust --noclean
 export PYTHONPATH := $(shell pwd)/src
 
 .PHONY: clean

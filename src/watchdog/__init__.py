@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "2.3.3"
+VERSION = "2.4.0"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -183,6 +183,12 @@ STUNNEL_INSTALLATION_MESSAGE = "Please install it following the instructions at:
 EFS_PROXY_INSTALLATION_MESSAGE = "Please install it by reinstalling amazon-efs-utils"
 
 EFS_PROXY_BIN = "efs-proxy"
+
+OPTIMIZE_READAHEAD_ITEM = "optimize_readahead"
+DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER = 15
+NFS_READAHEAD_CONFIG_PATH_FORMAT = "/sys/class/bdi/%s:%s/read_ahead_kb"
+DEFAULT_RSIZE = 1048576
+UBUNTU_24_RELEASE = "Ubuntu 24"
 
 
 def fatal_error(user_message, log_message=None):
@@ -1265,6 +1271,7 @@ def check_efs_mounts(
             # Set unmount count to 0 if there were inconsistent reads
             state["unmount_count"] = 0
             rewrite_state_file(state, state_file_dir, state_file)
+
             if "certificate" in state:
                 check_certificate(config, state, state_file_dir, state_file)
 
@@ -1277,6 +1284,107 @@ def check_efs_mounts(
             else:
                 logging.warning("TLS tunnel for %s is not running", state_file)
                 restart_tls_tunnel(child_procs, state, state_file_dir, state_file)
+
+            verify_and_update_readahead(
+                nfs_mounts[mount].mountpoint, config, nfs_mounts[mount]
+            )
+
+
+#  This function serves as a safeguard mechanism specifically for Ubuntu 24,
+#  where the initial readahead setting might be overwritten due to system
+#  processes. It checks the current readahead value and updates it if necessary.
+def verify_and_update_readahead(mount, config, mount_info):
+    try:
+        system_release_version = get_system_release_version()
+        if UBUNTU_24_RELEASE not in system_release_version:
+            return
+
+        should_optimize_readahead = get_boolean_config_item_value(
+            config, MOUNT_CONFIG_SECTION, OPTIMIZE_READAHEAD_ITEM, default_value=False
+        )
+        if not should_optimize_readahead:
+            return
+
+        # Use subprocess with timeout to get device number to avoid hanging on os.stat()
+        # when NFS mount is stuck (e.g., security group blocks traffic)
+        process = subprocess.Popen(
+            ["stat", "-c", "%d", mount],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            close_fds=True,
+        )
+        try:
+            stdout, _ = process.communicate(timeout=2)
+            device_number = int(stdout.decode().strip())
+            major, minor = decode_device_number(device_number)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            logging.warning(
+                "Timeout getting device number for %s, skipping readahead check", mount
+            )
+            return
+        except Exception as e:
+            logging.warning("Failed to get device number for %s: %s", mount, e)
+            return
+
+        read_ahead_kb_config_file = NFS_READAHEAD_CONFIG_PATH_FORMAT % (major, minor)
+
+        # Use subprocess with timeout to read sysfs to avoid hanging when kernel is stuck
+        process = subprocess.Popen(
+            ["cat", read_ahead_kb_config_file],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            close_fds=True,
+        )
+        try:
+            stdout, _ = process.communicate(timeout=2)
+            current_readahead_kb = int(stdout.strip())
+        except subprocess.TimeoutExpired:
+            process.kill()
+            logging.warning("Timeout reading readahead for %s, skipping", mount)
+            return
+        except Exception as e:
+            logging.warning("Failed to read readahead for %s: %s", mount, e)
+            return
+
+        opts = mount_info.options
+        rsize = DEFAULT_RSIZE
+        for opt in opts.split(","):
+            if opt.startswith("rsize="):
+                rsize = int(opt.split("=")[1])
+                break
+
+        expected_readahead_kb = int(DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER * rsize / 1024)
+
+        if current_readahead_kb != expected_readahead_kb:
+            logging.info(
+                "Readahead value incorrect for %s. Expected: %d, Current: %d. Updating...",
+                mount,
+                expected_readahead_kb,
+                current_readahead_kb,
+            )
+            p = subprocess.Popen(
+                "echo %s > %s" % (expected_readahead_kb, read_ahead_kb_config_file),
+                shell=True,
+                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+            )
+            _, error = p.communicate()
+            if p.returncode != 0:
+                logging.warning(
+                    'Failed to modify read_ahead_kb: %s with returncode: %d, error: "%s".'
+                    % (expected_readahead_kb, p.returncode, error.strip())
+                )
+
+    except Exception as e:
+        logging.warning("Failed to verify/update readahead for %s: %s", mount, str(e))
+
+
+# https://github.com/torvalds/linux/blob/master/include/linux/kdev_t.h#L48-L49
+def decode_device_number(device_number):
+    major = (device_number & 0xFFF00) >> 8
+    minor = (device_number & 0xFF) | ((device_number >> 12) & 0xFFF00)
+    return major, minor
 
 
 def check_stunnel_health(
