@@ -108,7 +108,7 @@ sudo yum -y install cmake3
 ### RHEL/CentOS/Amazon Linux/Fedora
 
 ```bash
-sudo yum -y install git rpm-build make rust cargo openssl-devel gcc gcc-c++ cmake wget perl # remove gcc gcc-c++ here if you already installed a compatible version following GCC Version Requirements instruction
+sudo yum -y install git rpm-build make rust cargo golang openssl-devel gcc gcc-c++ cmake wget perl # remove gcc gcc-c++ here if you already installed a compatible version following GCC Version Requirements instruction
 git clone https://github.com/aws/efs-utils
 cd efs-utils
 make rpm
@@ -119,7 +119,7 @@ sudo yum -y install build/amazon-efs-utils*rpm
 
 ```bash
 sudo zypper refresh
-sudo zypper install -y git binutils rpm-build make rust cargo libopenssl-devel gcc gcc-c++ cmake wget perl # remove gcc gcc-c++ here if you already installed a compatible version following GCC Version Requirements instruction, if you encounter "Choose from above solutions.." in this step, remove -y flag and choose manually.
+sudo zypper install -y git binutils rpm-build make rust cargo golang libopenssl-devel gcc gcc-c++ cmake wget perl # remove gcc gcc-c++ here if you already installed a compatible version following GCC Version Requirements instruction, if you encounter "Choose from above solutions.." in this step, remove -y flag and choose manually.
 git clone https://github.com/aws/efs-utils
 cd efs-utils
 make rpm
@@ -132,7 +132,7 @@ sudo zypper --no-gpg-checks install -y build/amazon-efs-utils*rpm
 
 ```bash
 sudo apt-get update
-sudo apt-get -y install git binutils rustc cargo libssl-dev pkg-config gettext make gcc g++ cmake wget perl # remove gcc g++ here if you already installed a compatible version following GCC Version Requirements instruction
+sudo apt-get -y install git binutils rustc cargo golang libssl-dev pkg-config gettext make gcc g++ cmake wget perl # remove gcc g++ here if you already installed a compatible version following GCC Version Requirements instruction
 git clone https://github.com/aws/efs-utils
 cd efs-utils
 ./build-deb.sh
