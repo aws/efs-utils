@@ -86,7 +86,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
