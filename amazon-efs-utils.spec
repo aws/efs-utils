@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 2.4.0
+Version   : 2.4.1
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -196,6 +196,9 @@ fi
 %clean
 
 %changelog
+* Thu Nov 20 2025 Anthony Tse <anthotse@amazon.com> - 2.4.1
+- Add cafile override for eusc-de-east-1 in efs-utils.conf
+
 * Fri Oct 03 2025 Yangjinan Hu <yjnhu@amazon.com> - 2.4.0
 - Upgrade s2n-tls version in efs-proxy to use AWS-LC
 - Add ubuntu24 and macOS Tahoe support efs-utils
