@@ -24,6 +24,7 @@ mkdir -p ${BUILD_ROOT}
 echo 'Creating application directories'
 mkdir -p ${BUILD_ROOT}/etc/amazon/efs
 mkdir -p ${BUILD_ROOT}/etc/init/
+mkdir -p ${BUILD_ROOT}/etc/init.d/
 mkdir -p ${BUILD_ROOT}/etc/systemd/system
 mkdir -p ${BUILD_ROOT}/sbin
 mkdir -p ${BUILD_ROOT}/usr/bin
@@ -37,6 +38,7 @@ cd ${BASE_DIR}
 
 echo 'Copying application files'
 install -p -m 644 dist/amazon-efs-mount-watchdog.conf ${BUILD_ROOT}/etc/init
+install -p -m 755 dist/amazon-efs-mount-watchdog.sysvinit ${BUILD_ROOT}/etc/init.d/amazon-efs-mount-watchdog
 install -p -m 644 dist/amazon-efs-mount-watchdog.service ${BUILD_ROOT}/etc/systemd/system
 install -p -m 444 dist/efs-utils.crt ${BUILD_ROOT}/etc/amazon/efs
 install -p -m 644 dist/efs-utils.conf ${BUILD_ROOT}/etc/amazon/efs
