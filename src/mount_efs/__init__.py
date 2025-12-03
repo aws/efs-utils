@@ -3651,6 +3651,7 @@ def cloudwatch_put_retention_policy_helper(
     else:
         cloudwatchlog_client.delete_retention_policy(logGroupName=log_group_name)
 
+
 def put_cloudwatch_log_retention_policy(
     cloudwatchlog_client, log_group_name, retention_days
 ):
