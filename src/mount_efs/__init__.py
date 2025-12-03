@@ -107,7 +107,6 @@ CLOUDWATCHLOG_AGENT = None
 CLOUDWATCH_LOG_SECTION = "cloudwatch-log"
 DEFAULT_CLOUDWATCH_LOG_GROUP = "/aws/efs/utils"
 DEFAULT_FALLBACK_ENABLED = True
-DEFAULT_RETENTION_DAYS = 14
 DEFAULT_UNKNOWN_VALUE = "unknown"
 # 50ms
 DEFAULT_TIMEOUT = 0.05
@@ -3539,7 +3538,7 @@ def get_cloudwatchlog_config(config, fs_id=None):
                 )
 
     logging.debug("Pushing logs to log group named %s in Cloudwatch.", log_group_name)
-    retention_days = DEFAULT_RETENTION_DAYS
+    retention_days = None
     if config.has_option(CLOUDWATCH_LOG_SECTION, "retention_in_days"):
         retention_days = config.get(CLOUDWATCH_LOG_SECTION, "retention_in_days")
 
@@ -3547,7 +3546,7 @@ def get_cloudwatchlog_config(config, fs_id=None):
 
     return {
         "log_group_name": log_group_name,
-        "retention_days": int(retention_days),
+        "retention_days": None if retention_days is None else int(retention_days),
         "log_stream_name": log_stream_name,
     }
 
@@ -3644,11 +3643,13 @@ def create_cloudwatch_log_group(cloudwatchlog_client, log_group_name):
 def cloudwatch_put_retention_policy_helper(
     cloudwatchlog_client, log_group_name, retention_days
 ):
-    cloudwatchlog_client.put_retention_policy(
-        logGroupName=log_group_name, retentionInDays=retention_days
-    )
-    logging.debug("Set cloudwatch log group retention days to %s" % retention_days)
-
+    if retention_days is not None:
+        cloudwatchlog_client.put_retention_policy(
+            logGroupName=log_group_name, retentionInDays=retention_days
+        )
+        logging.debug("Set cloudwatch log group retention days to %s" % retention_days)
+    else:
+        cloudwatchlog_client.delete_retention_policy(logGroupName=log_group_name)
 
 def put_cloudwatch_log_retention_policy(
     cloudwatchlog_client, log_group_name, retention_days
