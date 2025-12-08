@@ -267,7 +267,7 @@ STUNNEL_GLOBAL_CONFIG = {
 STUNNEL_EFS_CONFIG = {
     "client": "yes",
     "accept": "127.0.0.1:%s",
-    "connect": "%s:2049",
+    "connect": "%s:%s",
     "sslVersion": "TLSv1.2",
     "renegotiation": "no",
     "TIMEOUTbusy": "20",
@@ -627,6 +627,30 @@ def get_boolean_config_item_value(
             )
         return default_value
     return config.getboolean(config_section, config_item)
+
+def get_int_config_item_value(
+    config, config_section, config_item, default_value, emit_warning_message=True
+):
+    warning_message = None
+    if not config.has_section(config_section):
+        warning_message = (
+            "Warning: config file does not have section %s." % config_section
+        )
+    elif not config.has_option(config_section, config_item):
+        warning_message = (
+            "Warning: config file does not have %s item in section %s."
+            % (config_item, config_section)
+        )
+
+    if warning_message:
+        if emit_warning_message:
+            sys.stdout.write(
+                "%s. You should be able to find a new config file in the same folder as current config file %s. "
+                "Consider update the new config file to latest config file. Use the default value [%s = %s]."
+                % (warning_message, CONFIG_FILE, config_item, default_value)
+            )
+        return default_value
+    return config.getint(config_section, config_item)
 
 
 def fetch_ec2_metadata_token_disabled(config):
@@ -1527,10 +1551,11 @@ def write_stunnel_config_file(
     efs_config = dict(STUNNEL_EFS_CONFIG)
     efs_config["accept"] = efs_config["accept"] % tls_port
 
+    stunnel_efs_port = get_int_config_item_value(config, CONFIG_SECTION, "stunnel_efs_port", 2049)
     if fallback_ip_address:
-        efs_config["connect"] = efs_config["connect"] % fallback_ip_address
+        efs_config["connect"] = efs_config["connect"] % (fallback_ip_address, stunnel_efs_port)
     else:
-        efs_config["connect"] = efs_config["connect"] % dns_name
+        efs_config["connect"] = efs_config["connect"] % (dns_name, stunnel_efs_port)
 
     # Verify level is only valid for tls mounts
     if (verify_level is not None) and tls_enabled(options):
