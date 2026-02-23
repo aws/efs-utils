@@ -190,7 +190,7 @@ REQUEST_PAYLOAD = ""
 FS_ID_RE = re.compile("^(?P<fs_id>fs-[0-9a-f]+)$")
 EFS_FQDN_RE = re.compile(
     r"^((?P<az>[a-z0-9-]+)\.)?(?P<fs_id>fs-[0-9a-f]+)\.(?:[a-z-]+\.)+"
-    r"(?P<region>[a-z0-9-]+)\.(?P<dns_name_suffix>[a-z0-9.]+)$"
+    r"(?P<region>[a-z0-9-]+)\.(?P<dns_name_suffix>[a-z0-9.-]+)$"
 )
 AP_ID_RE = re.compile("^fsap-[0-9a-f]{17}$")
 
