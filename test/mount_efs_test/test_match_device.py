@@ -118,6 +118,26 @@ def test_match_device_correct_descriptors_cname_dns_suffix_override_region(mocke
     utils.assert_called(gethostbyname_ex_mock)
 
 
+def test_match_device_correct_descriptors_cname_dns_adc_suffix(mocker):
+    """ADC regions use DNS suffixes with hyphens (e.g. cloud.adc-e.uk)"""
+    adc_dns_name = "fs-deadbeef.efs.eu-isoe-west-1.cloud.adc-e.uk"
+    get_dns_name_mock = mocker.patch(
+        "mount_efs.get_dns_name_and_fallback_mount_target_ip_address",
+        return_value=(adc_dns_name, None),
+    )
+    gethostbyname_ex_mock = mocker.patch(
+        "socket.gethostbyname_ex",
+        return_value=(adc_dns_name, [], None),
+    )
+    config = _get_mock_config(dns_name_suffix="cloud.adc-e.uk")
+    for device, (fs_id, path, az) in CORRECT_DEVICE_DESCRIPTORS_CNAME_DNS:
+        assert (fs_id, path, az) == mount_efs.match_device(
+            config, device, DEFAULT_NFS_OPTIONS
+        )
+    utils.assert_called(get_dns_name_mock)
+    utils.assert_called(gethostbyname_ex_mock)
+
+
 def test_match_device_correct_descriptors_cname_dns_primary(mocker):
     get_dns_name_mock = mocker.patch(
         "mount_efs.get_dns_name_and_fallback_mount_target_ip_address",
