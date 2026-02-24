@@ -1674,14 +1674,20 @@ def poll_tunnel_process(tunnel_proc, fs_id, mount_completed):
 
 def get_init_system(comm_file="/proc/1/comm"):
     init_system = DEFAULT_UNKNOWN_VALUE
-    if not check_if_platform_is_mac():
+    if check_if_platform_is_mac():
+        init_system = "launchd"
+    else:
         try:
             with open(comm_file) as f:
                 init_system = f.read().strip()
         except IOError:
             logging.warning("Unable to read %s", comm_file)
-    else:
-        init_system = "launchd"
+
+        # Handle other init systems
+        if init_system == "init":
+            # Sysvinit
+            if os.path.isfile("/sbin/init.sysvinit"):
+                init_system = "sysvinit"
 
     logging.debug("Identified init system: %s", init_system)
     return init_system
@@ -1742,6 +1748,23 @@ def start_watchdog(init_system):
                 close_fds=True,
             )
         elif "start" in str(status):
+            logging.debug("%s is already running", WATCHDOG_SERVICE)
+
+    elif init_system == "sysvinit":
+        rc = subprocess.call(
+            ["service", WATCHDOG_SERVICE, "status"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True
+        )
+        if rc != 0:
+            subprocess.Popen(
+                ["service", WATCHDOG_SERVICE, "start"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+            )
+        else:
             logging.debug("%s is already running", WATCHDOG_SERVICE)
 
     elif init_system == "systemd":
