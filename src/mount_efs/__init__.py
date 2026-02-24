@@ -1680,6 +1680,11 @@ def get_init_system(comm_file="/proc/1/comm"):
                 init_system = f.read().strip()
         except IOError:
             logging.warning("Unable to read %s", comm_file)
+
+        # OpenRC init system manages services a little differently
+        if init_system == "init" and os.path.isfile("/sbin/openrc"):
+            init_system = "openrc-init"
+            logging.debug("Detected OpenRC init system")
     else:
         init_system = "launchd"
 
@@ -1742,6 +1747,24 @@ def start_watchdog(init_system):
                 close_fds=True,
             )
         elif "start" in str(status):
+            logging.debug("%s is already running", WATCHDOG_SERVICE)
+
+    elif init_system == "openrc-init":
+        proc = subprocess.Popen(
+            ["/sbin/service", WATCHDOG_SERVICE, "status"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            close_fds=True,
+        )
+        status, _ = proc.communicate()
+        if "stopped" in str(status):
+            subprocess.Popen(
+                ["/sbin/service", WATCHDOG_SERVICE, "start"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+            )
+        elif "started" in str(status):
             logging.debug("%s is already running", WATCHDOG_SERVICE)
 
     elif init_system == "systemd":
