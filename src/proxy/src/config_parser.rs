@@ -41,6 +41,9 @@ pub struct ProxyConfig {
     /// This nested structure is required for backwards compatibility
     #[serde(alias = "efs")]
     pub nested_config: EfsConfig,
+
+    #[serde(alias = "csi_driver_version")]
+    pub csi_driver_version: Option<String>,
 }
 
 impl FromStr for ProxyConfig {
@@ -109,6 +112,7 @@ output = /var/log/amazon/efs/fs-12341234.home.ec2-user.efs.21036.efs-proxy.log
 pid = /var/run/efs/fs-12341234.home.ec2-user.efs.21036+/stunnel.pid
 port = 8081
 initial_partition_ip = 127.0.0.1:2049
+csi_driver_version = v9.9.9
 
 [efs]
 accept = 127.0.0.1:21036
@@ -136,6 +140,7 @@ checkHost = fs-12341234.efs.us-east-1.amazonaws.com
             output: Some(String::from(
                 "/var/log/amazon/efs/fs-12341234.home.ec2-user.efs.21036.efs-proxy.log",
             )),
+            csi_driver_version: Some("v9.9.9".to_string()),
             nested_config: EfsConfig {
                 listen_addr: String::from("127.0.0.1:21036"),
                 mount_target_addr: String::from("fs-12341234.efs.us-east-1.amazonaws.com:2049"),
@@ -187,6 +192,7 @@ checkHost = fs-12341234.efs.us-east-1.amazonaws.com
             ),
             debug: DEFAULT_LOG_LEVEL.to_string(),
             output: None,
+            csi_driver_version: None,
             nested_config: EfsConfig {
                 listen_addr: String::from("127.0.0.1:21036"),
                 mount_target_addr: String::from("fs-12341234.efs.us-east-1.amazonaws.com:2049"),

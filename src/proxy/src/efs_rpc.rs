@@ -7,6 +7,7 @@ use crate::efs_prot::{BindClientResponse, OperationType};
 use crate::error::RpcError;
 use crate::proxy_identifier::ProxyIdentifier;
 use crate::rpc;
+use log::info;
 
 pub const EFS_PROGRAM_NUMBER: u32 = 100200;
 pub const EFS_PROGRAM_VERSION: u32 = 1;
@@ -19,8 +20,9 @@ pub struct PartitionId {
 pub async fn bind_client_to_partition(
     proxy_id: ProxyIdentifier,
     stream: &mut dyn ProxyStream,
+    csi_driver_version: Option<String>,
 ) -> Result<BindClientResponse, RpcError> {
-    let request = create_bind_client_to_partition_request(&proxy_id)?;
+    let request = create_bind_client_to_partition_request(&proxy_id, csi_driver_version)?;
     stream.write_all(&request).await?;
     stream.flush().await?;
 
@@ -32,6 +34,7 @@ pub async fn bind_client_to_partition(
 
 pub fn create_bind_client_to_partition_request(
     proxy_id: &ProxyIdentifier,
+    csi_driver_version: Option<String>
 ) -> Result<Vec<u8>, RpcError> {
     let payload = efs_prot::ProxyIdentifier {
         identifier: proxy_id.uuid.as_bytes().to_vec(),
@@ -39,6 +42,16 @@ pub fn create_bind_client_to_partition_request(
     };
     let mut payload_buf = Vec::new();
     xdr_codec::pack(&payload, &mut payload_buf)?;
+    match csi_driver_version {
+        Some(version) => {
+            let connection_metrics = efs_prot::ConnectionMetrics {
+                csi_driver_version: version.as_bytes().to_vec(),
+            };
+            xdr_codec::pack(&connection_metrics, &mut payload_buf)?;
+            info!("CSI Driver Version from create bind client to partion: {}", version)
+        },
+        None => info!("CSI Driver Version fom create bind client to partion not provided."),
+    }
 
     let call_body = onc_rpc::CallBody::new(
         EFS_PROGRAM_NUMBER,
@@ -96,16 +109,31 @@ pub mod tests {
     #[test]
     fn test_request_serde() -> Result<(), RpcError> {
         let proxy_id = ProxyIdentifier::new();
-        let request = create_bind_client_to_partition_request(&proxy_id)?;
+        let csi_driver_version = Some("v9.9.9".to_string());
+        let request = create_bind_client_to_partition_request(&proxy_id, csi_driver_version.clone())?;
 
         let deserialized = onc_rpc::RpcMessage::try_from(request.as_slice())?;
-        let deserialized_proxy_id = parse_bind_client_to_partition_request(&deserialized)?;
+        let (deserialized_proxy_id, deserialized_metrics) = parse_bind_client_to_partition_request(&deserialized)?;
+
+        assert_eq!(proxy_id.uuid, deserialized_proxy_id.uuid);
+        assert_eq!(proxy_id.incarnation, deserialized_proxy_id.incarnation);
+        assert_eq!(deserialized_metrics.csi_driver_version, csi_driver_version.unwrap_or_default().as_bytes().to_vec());
+        Ok(())
+    }
+
+    #[test]
+    fn test_request_serde_with_no_driver_version() -> Result<(), RpcError> {
+        let proxy_id = ProxyIdentifier::new();
+        let request = create_bind_client_to_partition_request(&proxy_id, None)?;
+
+        let deserialized = onc_rpc::RpcMessage::try_from(request.as_slice())?;
+        let deserialized_proxy_id = parse_bind_client_to_partition_request_with_no_driver_version(&deserialized)?;
 
         assert_eq!(proxy_id.uuid, deserialized_proxy_id.uuid);
         assert_eq!(proxy_id.incarnation, deserialized_proxy_id.incarnation);
         Ok(())
     }
-
+    
     #[test]
     fn test_response_serde() -> Result<(), RpcError> {
         let partition_id = generate_partition_id();
@@ -129,7 +157,7 @@ pub mod tests {
     #[test]
     fn test_parse_bind_client_to_partition_response_missing_reply() -> Result<(), RpcError> {
         // Create a call message, which will error when parsed as a response
-        let malformed_response = create_bind_client_to_partition_request(&ProxyIdentifier::new())?;
+        let malformed_response = create_bind_client_to_partition_request(&ProxyIdentifier::new(), None)?;
         let deserialized = onc_rpc::RpcMessage::try_from(malformed_response.as_slice())?;
 
         let result = parse_bind_client_to_partition_response(&deserialized);

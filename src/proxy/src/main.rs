@@ -76,6 +76,7 @@ async fn main() {
             &proxy_config.nested_config.listen_addr,
             Arc::new(TlsPartitionFinder::new(tls_config)),
             status_reporter,
+            proxy_config.csi_driver_version,
         )
         .await;
         tokio::spawn(controller.run(sigterm_cancellation_token.clone()))
@@ -86,6 +87,7 @@ async fn main() {
                 mount_target_addr: proxy_config.nested_config.mount_target_addr.clone(),
             }),
             status_reporter,
+            proxy_config.csi_driver_version,
         )
         .await;
         tokio::spawn(controller.run(sigterm_cancellation_token.clone()))
