@@ -8,6 +8,12 @@ pub struct ProxyIdentifier {
     pub incarnation: i64,
 }
 
+impl Default for ProxyIdentifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProxyIdentifier {
     pub fn new() -> Self {
         ProxyIdentifier {
@@ -32,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_increment() {
-        let mut proxy_id = ProxyIdentifier::new();
+        let mut proxy_id = ProxyIdentifier::default();
         let proxy_id_original = proxy_id;
         for i in 0..5 {
             assert_eq!(i, proxy_id.incarnation);

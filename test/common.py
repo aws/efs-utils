@@ -51,6 +51,14 @@ DEFAULT_NON_RETRYABLE_FAILURE_POPEN = PopenMock(
     poll_result=1,
     communicate_return_value=(
         b"",
+        b"mount.nfs4: Protocol not supported",
+    ),
+)
+ACCESS_DENIED_FAILURE_POPEN = PopenMock(
+    return_code=1,
+    poll_result=1,
+    communicate_return_value=(
+        b"",
         b"mount.nfs4: access denied by server while mounting 127.0.0.1:/",
     ),
 )

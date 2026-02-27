@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "2.4.1"
+VERSION = "2.4.2"
 SERVICE = "elasticfilesystem"
 
 CONFIG_FILE = "/etc/amazon/efs/efs-utils.conf"
@@ -992,10 +992,15 @@ def find_command_path(command, install_method):
     # For more information, see https://brew.sh/2021/02/05/homebrew-3.0.0/
     else:
         env_path = "/opt/homebrew/bin:/usr/local/bin"
-    os.putenv("PATH", env_path)
+
+    existing_path = os.environ.get("PATH", "")
+    search_path = env_path + ":" + existing_path if existing_path else env_path
+
+    env = os.environ.copy()
+    env["PATH"] = search_path
 
     try:
-        path = subprocess.check_output(["which", command])
+        path = subprocess.check_output(["which", command], env=env)
         return path.strip().decode()
     except subprocess.CalledProcessError as e:
         fatal_error(

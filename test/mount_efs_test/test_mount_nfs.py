@@ -331,6 +331,50 @@ def test_mount_nfs_not_retry_on_non_retryable_failure(mocker):
     utils.assert_not_called(optimize_readahead_window_mock)
 
 
+def test_mount_nfs_not_retry_access_denied_without_access_point(mocker):
+    optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
+
+    mocker.patch(
+        "subprocess.Popen", side_effect=[common.ACCESS_DENIED_FAILURE_POPEN.mock]
+    )
+
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.mount_nfs(
+            _get_config(),
+            DNS_NAME,
+            "/",
+            "/mnt",
+            DEFAULT_OPTIONS,
+        )
+
+    assert 0 != ex.value.code
+    utils.assert_not_called(optimize_readahead_window_mock)
+
+
+def test_mount_nfs_retry_access_denied_with_access_point(mocker):
+    optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
+
+    mocker.patch(
+        "subprocess.Popen", return_value=common.ACCESS_DENIED_FAILURE_POPEN.mock
+    )
+
+    options = dict(DEFAULT_OPTIONS)
+    options["accesspoint"] = "fsap-12345"
+
+    with pytest.raises(SystemExit) as ex:
+        mount_efs.mount_nfs(
+            _get_config(),
+            DNS_NAME,
+            "/",
+            "/mnt",
+            options,
+        )
+
+    assert 0 != ex.value.code
+    assert subprocess.Popen.call_count > 1
+    utils.assert_not_called(optimize_readahead_window_mock)
+
+
 def test_mount_nfs_failure_after_all_attempts_fail(mocker):
     optimize_readahead_window_mock = mocker.patch("mount_efs.optimize_readahead_window")
     mocker.patch(

@@ -86,7 +86,7 @@ except ImportError:
     BOTOCORE_PRESENT = False
 
 
-VERSION = "2.4.1"
+VERSION = "2.4.2"
 SERVICE = "elasticfilesystem"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
@@ -1425,10 +1425,15 @@ def find_command_path(command, install_method):
     # For more information, see https://brew.sh/2021/02/05/homebrew-3.0.0/
     else:
         env_path = "/opt/homebrew/bin:/usr/local/bin"
-    os.putenv("PATH", env_path)
+
+    existing_path = os.environ.get("PATH", "")
+    search_path = env_path + ":" + existing_path if existing_path else env_path
+
+    env = os.environ.copy()
+    env["PATH"] = search_path
 
     try:
-        path = subprocess.check_output(["which", command])
+        path = subprocess.check_output(["which", command], env=env)
         return path.strip().decode()
     except subprocess.CalledProcessError as e:
         fatal_error(
@@ -1479,7 +1484,7 @@ def write_stunnel_config_file(
     hand-serialize it.
     """
 
-    stunnel_options = get_stunnel_options()
+    stunnel_options = [] if efs_proxy_enabled else get_stunnel_options()
     mount_filename = get_mount_specific_filename(fs_id, mountpoint, tls_port)
 
     system_release_version = get_system_release_version()
@@ -2223,9 +2228,15 @@ def call_nfs_mount_command_with_retry_succeed(
             out, err = proc.communicate(timeout=retry_nfs_mount_command_timeout_sec)
             rc = proc.poll()
             if rc != 0:
+                is_access_point_mount = "accesspoint" in options
                 continue_retry = any(
                     error_string in str(err) for error_string in RETRYABLE_ERRORS
                 )
+
+                # Only retry "access denied" for access point mounts, handles race condition that can occur during AP backend provisioning
+                if not continue_retry and "access denied by server" in str(err):
+                    continue_retry = is_access_point_mount
+
                 if continue_retry:
                     logging.error(
                         'Mounting %s to %s failed, return code=%s, stdout="%s", stderr="%s", mount attempt %d/%d, '
@@ -3223,8 +3234,18 @@ def match_device(config, device, options):
         return remote, path, None
 
     try:
-        primary, secondaries, _ = socket.gethostbyname_ex(remote)
-        hostnames = list(filter(lambda e: e is not None, [primary] + secondaries))
+        addrinfo = socket.getaddrinfo(
+            remote, None, socket.AF_UNSPEC, socket.SOCK_STREAM, 0, socket.AI_CANONNAME
+        )
+        hostnames = list(
+            set(
+                filter(
+                    lambda e: e is not None and e != "", [info[3] for info in addrinfo]
+                )
+            )
+        )
+        if not hostnames:
+            hostnames = [remote]
     except socket.gaierror:
         create_default_cloudwatchlog_agent_if_not_exist(config, options)
         fatal_error(

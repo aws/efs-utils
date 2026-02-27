@@ -48,10 +48,3 @@ struct BindClientResponse {
     BindResponse bind_response;
     ScaleUpConfig scale_up_config;
 };
-
-union OperationResponse switch (OperationType operation_type) {
-    case OP_BIND_CLIENT_TO_PARTITION:
-        BindClientResponse response;
-    default:
-        void;
-};

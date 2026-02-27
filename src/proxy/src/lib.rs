@@ -10,6 +10,7 @@ pub mod connections;
 pub mod controller;
 pub mod efs_rpc;
 pub mod error;
+pub mod log_encoder;
 pub mod logger;
 pub mod proxy;
 pub mod proxy_identifier;

@@ -18,6 +18,7 @@ mod connections;
 mod controller;
 mod efs_rpc;
 mod error;
+mod log_encoder;
 mod logger;
 mod proxy;
 mod proxy_identifier;
@@ -46,9 +47,7 @@ async fn main() {
         Err(e) => panic!("Failed to read configuration. {}", e),
     };
 
-    if let Some(_log_file_path) = &proxy_config.output {
-        logger::init(&proxy_config)
-    }
+    logger::init(&proxy_config);
 
     info!("Running with configuration: {:?}", proxy_config);
 
