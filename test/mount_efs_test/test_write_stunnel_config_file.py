@@ -850,3 +850,24 @@ def test_write_stunnel_config_with_ipv6_and_legacy_stunnel(mocker, tmpdir):
             efs_proxy_enabled=False,
         ),
     )
+
+
+def test_write_stunnel_config_efs_proxy_skips_stunnel_options(mocker, tmpdir):
+    get_stunnel_options_mock = mocker.patch("mount_efs.get_stunnel_options")
+    mocker.patch("mount_efs.add_tunnel_ca_options")
+
+    mount_efs.write_stunnel_config_file(
+        _get_config(mocker),
+        str(tmpdir),
+        FS_ID,
+        MOUNT_POINT,
+        PORT,
+        DNS_NAME,
+        VERIFY_LEVEL,
+        OCSP_ENABLED,
+        _get_mount_options_tls(),
+        DEFAULT_REGION,
+        efs_proxy_enabled=True,
+    )
+
+    get_stunnel_options_mock.assert_not_called()

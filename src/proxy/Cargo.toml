@@ -3,7 +3,7 @@ name = "efs-proxy"
 edition = "2021"
 build = "build.rs"
 # The version of efs-proxy is tied to efs-utils.
-version = "2.4.1"
+version = "2.4.2"
 publish = false
 license = "MIT"
 
@@ -34,6 +34,7 @@ xdr-codec = { path = "rust-xdr/xdr-codec"}
 test-case = "*"
 tokio = { version = "1.29.0", features = ["test-util"] }
 tempfile = "3.10.1"
+regex = "1.10.2"
 
 [build-dependencies]
 xdrgen = { path = "rust-xdr/xdrgen" }

@@ -20,6 +20,10 @@ where
     }
 }
 
+fn default_log_format() -> Option<String> {
+    Some("file".to_string())
+}
+
 #[derive(Default, Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct ProxyConfig {
     #[serde(alias = "fips", deserialize_with = "deserialize_bool")]
@@ -32,6 +36,11 @@ pub struct ProxyConfig {
     /// Output path for log files. Logging is disabled if this value is not provided.
     #[serde(alias = "output")]
     pub output: Option<String>,
+
+    /// The format to use for logging. Values can be "file", "stdout"
+    /// Default is "file" if not specified.
+    #[serde(alias = "log_format", default = "default_log_format")]
+    pub log_format: Option<String>,
 
     /// The proxy process is responsible for writing it's PID into this file so that the Watchdog
     /// process can monitor it
@@ -136,6 +145,7 @@ checkHost = fs-12341234.efs.us-east-1.amazonaws.com
             output: Some(String::from(
                 "/var/log/amazon/efs/fs-12341234.home.ec2-user.efs.21036.efs-proxy.log",
             )),
+            log_format: Some(String::from("file")),
             nested_config: EfsConfig {
                 listen_addr: String::from("127.0.0.1:21036"),
                 mount_target_addr: String::from("fs-12341234.efs.us-east-1.amazonaws.com:2049"),
@@ -162,6 +172,7 @@ socket = a:SO_BINDTODEVICE=lo
 pid = /var/run/efs/fs-12341234.home.ec2-user.efs.21036+/stunnel.pid
 port = 8081
 initial_partition_ip = 127.0.0.1:2049
+log_format = stdout
 
 [efs]
 accept = 127.0.0.1:21036
@@ -187,6 +198,7 @@ checkHost = fs-12341234.efs.us-east-1.amazonaws.com
             ),
             debug: DEFAULT_LOG_LEVEL.to_string(),
             output: None,
+            log_format: Some(String::from("stdout")),
             nested_config: EfsConfig {
                 listen_addr: String::from("127.0.0.1:21036"),
                 mount_target_addr: String::from("fs-12341234.efs.us-east-1.amazonaws.com:2049"),

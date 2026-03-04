@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 2.4.1
+Version   : 2.4.2
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -196,6 +196,13 @@ fi
 %clean
 
 %changelog
+* Tue Dec 23 2025 Samuel Hale <samuhale@amazon.com> - 2.4.2
+- Skip stunnel binary invocation when efs-proxy mode is enabled
+- Retry "access denied" only for access point mounting
+- Fix issue for missing PATH in env when check stunnel lib
+- Fix EFS_FQDN_RE to support ADC DNS suffixes with hyphens
+- Fix IPv6-only mount target FQDN resolution in match_device
+
 * Thu Nov 20 2025 Anthony Tse <anthotse@amazon.com> - 2.4.1
 - Add cafile override for eusc-de-east-1 in efs-utils.conf
 

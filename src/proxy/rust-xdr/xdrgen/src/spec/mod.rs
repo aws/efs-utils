@@ -1073,15 +1073,15 @@ impl Symtab {
         }
     }
 
-    pub fn constants(&self) -> Iter<String, (i64, Option<String>)> {
+    pub fn constants(&self) -> Iter<'_, String, (i64, Option<String>)> {
         self.consts.iter()
     }
 
-    pub fn typespecs(&self) -> Iter<String, Type> {
+    pub fn typespecs(&self) -> Iter<'_, String, Type> {
         self.typespecs.iter()
     }
 
-    pub fn typesyns(&self) -> Iter<String, Type> {
+    pub fn typesyns(&self) -> Iter<'_, String, Type> {
         self.typesyns.iter()
     }
 }
