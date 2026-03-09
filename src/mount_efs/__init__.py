@@ -321,6 +321,18 @@ ECS_FARGATE_CLIENT_IDENTIFIER = "ecs.fargate"
 AWS_CONTAINER_CREDS_FULL_URI_ENV = "AWS_CONTAINER_CREDENTIALS_FULL_URI"
 AWS_CONTAINER_AUTH_TOKEN_FILE_ENV = "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"
 
+# CloudShell credentials endpoint
+CLOUDSHELL_METADATA_ENDPOINT = "http://localhost:1338/latest"
+CLOUDSHELL_TOKEN_URL = CLOUDSHELL_METADATA_ENDPOINT + "/api/token"
+CLOUDSHELL_CREDS_URL = CLOUDSHELL_METADATA_ENDPOINT + "/meta-data/container/security-credentials"
+CLOUDSHELL_TOKEN_HEADER = "X-aws-ec2-metadata-token"
+CLOUDSHELL_TOKEN_TTL_HEADER = "X-aws-ec2-metadata-token-ttl-seconds"
+
+# Environment variables for AWS credentials
+AWS_ACCESS_KEY_ID_ENV = "AWS_ACCESS_KEY_ID"
+AWS_SECRET_ACCESS_KEY_ENV = "AWS_SECRET_ACCESS_KEY"
+AWS_SESSION_TOKEN_ENV = "AWS_SESSION_TOKEN"
+
 
 def is_ipv6_address(ip_address):
     try:
@@ -781,6 +793,18 @@ def get_aws_security_credentials(
         if credentials and credentials_source:
             return credentials, credentials_source
 
+    # attempt to lookup AWS security credentials from CloudShell metadata endpoint
+    credentials, credentials_source = get_aws_security_credentials_from_cloudshell(
+        config, False
+    )
+    if credentials and credentials_source:
+        return credentials, credentials_source
+
+    # attempt to lookup AWS security credentials from environment variables
+    credentials, credentials_source = get_aws_security_credentials_from_env_vars()
+    if credentials and credentials_source:
+        return credentials, credentials_source
+
     # attempt to lookup AWS security credentials with IAM role name attached to instance
     # through IAM role name security credentials lookup uri
     iam_role_name = get_iam_role_name(config)
@@ -794,6 +818,7 @@ def get_aws_security_credentials(
 
     error_msg = (
         "AWS Access Key ID and Secret Access Key are not found in AWS credentials file (%s), config file (%s), "
+        "environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY), CloudShell metadata endpoint, "
         "from ECS credentials relative uri, or from the instance security credentials service"
         % (AWS_CREDENTIALS_FILE, AWS_CONFIG_FILE)
     )
@@ -1003,6 +1028,63 @@ def get_aws_security_credentials_from_instance_metadata(config, iam_role_name):
         return iam_security_dict, "metadata:"
     else:
         return None, None
+
+
+def get_aws_security_credentials_from_cloudshell(config, is_fatal=False):
+    """
+    Attempt to retrieve AWS security credentials from CloudShell metadata endpoint.
+    CloudShell provides a limited IMDSv2-like endpoint at localhost:1338.
+    """
+    try:
+        # First get the token
+        token_headers = {CLOUDSHELL_TOKEN_TTL_HEADER: "60"}
+        token_request = Request(CLOUDSHELL_TOKEN_URL, headers=token_headers)
+        token_request.get_method = lambda: "PUT"
+        
+        token_response = urlopen(token_request, timeout=DEFAULT_TIMEOUT)
+        token = token_response.read().decode("utf-8")
+        
+        # Then get credentials using the token
+        creds_headers = {CLOUDSHELL_TOKEN_HEADER: token}
+        creds_response = url_request_helper(
+            config, 
+            CLOUDSHELL_CREDS_URL,
+            "Unsuccessful retrieval of AWS security credentials from CloudShell",
+            "Unable to reach CloudShell metadata endpoint",
+            headers=creds_headers
+        )
+        
+        if creds_response and all(k in creds_response for k in CREDENTIALS_KEYS):
+            logging.debug("Retrieved credentials from CloudShell metadata endpoint")
+            return creds_response, "cloudshell"
+            
+    except Exception as e:
+        logging.debug("Failed to retrieve CloudShell credentials: %s" % str(e))
+        
+    if is_fatal:
+        fatal_error("Failed to retrieve credentials from CloudShell metadata endpoint")
+    return None, None
+
+
+def get_aws_security_credentials_from_env_vars():
+    """
+    Attempt to retrieve AWS security credentials from environment variables.
+    Supports AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_SESSION_TOKEN.
+    """
+    access_key = os.environ.get(AWS_ACCESS_KEY_ID_ENV)
+    secret_key = os.environ.get(AWS_SECRET_ACCESS_KEY_ENV)
+    session_token = os.environ.get(AWS_SESSION_TOKEN_ENV)
+    
+    if access_key and secret_key:
+        credentials = {
+            "AccessKeyId": access_key,
+            "SecretAccessKey": secret_key,
+            "Token": session_token  # Can be None
+        }
+        logging.debug("Retrieved credentials from environment variables")
+        return credentials, "environment"
+    
+    return None, None
 
 
 def get_iam_role_name(config):
