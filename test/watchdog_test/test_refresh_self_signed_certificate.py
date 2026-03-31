@@ -3,7 +3,6 @@
 # Licensed under the MIT License. See the LICENSE accompanying this file
 # for the specific language governing permissions and limitations under
 # the License.
-
 import json
 import logging
 import os
@@ -11,7 +10,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-import mount_efs
+import efs_utils_common
+import efs_utils_common.certificate_utils as certificate_utils
+import efs_utils_common.constants as constants
+import efs_utils_common.context as context
+import efs_utils_common.file_utils as file_utils
 import watchdog
 
 try:
@@ -21,6 +24,7 @@ except ImportError:
 
 DT_PATTERN = watchdog.CERT_DATETIME_FORMAT
 FS_ID = "fs-deadbeef"
+SERVICE = "elasticfilesystem"
 COMMON_NAME = "fs-deadbeef.efs.us-east-1.amazonaws.com"
 PID = 1234
 STATE_FILE = "stunnel-config.fs-deadbeef.mount.dir.12345"
@@ -54,11 +58,23 @@ PUBLIC_KEY_BODY = (
 
 @pytest.fixture(autouse=True)
 def setup(mocker):
+    mount_context = context.MountContext()
+    mount_context.reset()
+    mount_context.service = "elasticfilesystem"
+    mount_context.mount_type = constants.MOUNT_TYPE_EFS
+    mount_context.config_file_path = constants.CONFIG_FILE
     mocker.patch("socket.gethostbyname")
-    mocker.patch("mount_efs.get_region_from_instance_metadata", return_value=REGION)
-    mocker.patch("mount_efs.get_target_region", return_value=REGION)
-    mocker.patch("mount_efs.get_aws_security_credentials", return_value=CREDENTIALS)
+    mocker.patch(
+        "efs_utils_common.metadata.get_region_from_instance_metadata",
+        return_value=REGION,
+    )
+    mocker.patch("efs_utils_common.metadata.get_target_region", return_value=REGION)
+    mocker.patch(
+        "efs_utils_common.aws_credentials.get_aws_security_credentials",
+        return_value=CREDENTIALS,
+    )
     mocker.patch("watchdog.get_aws_security_credentials", return_value=CREDENTIALS)
+    yield mount_context
 
 
 def _get_config(certificate_renewal_interval=60, client_info=None):
@@ -66,10 +82,10 @@ def _get_config(certificate_renewal_interval=60, client_info=None):
         config = ConfigParser.SafeConfigParser()
     except AttributeError:
         config = ConfigParser()
-    config.add_section(mount_efs.CONFIG_SECTION)
-    config.set(mount_efs.CONFIG_SECTION, "state_file_dir_mode", "0755")
+    config.add_section(efs_utils_common.constants.CONFIG_SECTION)
+    config.set(efs_utils_common.constants.CONFIG_SECTION, "state_file_dir_mode", "0755")
     config.set(
-        mount_efs.CONFIG_SECTION,
+        efs_utils_common.constants.CONFIG_SECTION,
         "dns_name_format",
         "{fs_id}.efs.{region}.amazonaws.com",
     )
@@ -88,7 +104,9 @@ def _get_config(certificate_renewal_interval=60, client_info=None):
 
 def _get_mock_private_key_path(mocker, tmpdir):
     pk_path = os.path.join(str(tmpdir), "privateKey.pem")
-    mocker.patch("mount_efs.get_private_key_path", return_value=pk_path)
+    mocker.patch(
+        "efs_utils_common.certificate_utils.get_private_key_path", return_value=pk_path
+    )
     mocker.patch("watchdog.get_private_key_path", return_value=pk_path)
     return pk_path
 
@@ -106,7 +124,7 @@ def _create_certificate_and_state(
 ):
     config = _get_config()
     good_ap_id = AP_ID if ap_id else None
-    mount_efs.create_certificate(
+    certificate_utils.create_certificate(
         config,
         MOUNT_NAME,
         COMMON_NAME,
@@ -162,8 +180,8 @@ def _create_ca_conf_helper(
     mocker, tmpdir, current_time, iam=True, ap=True, client_info=True
 ):
     config = _get_config()
-    tls_dict = mount_efs.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
-    mount_efs.create_required_directory({}, tls_dict["mount_dir"])
+    tls_dict = certificate_utils.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
+    file_utils.create_required_directory({}, tls_dict["mount_dir"])
     tls_dict["certificate_path"] = os.path.join(tls_dict["mount_dir"], "config.conf")
     tls_dict["private_key"] = os.path.join(tls_dict["mount_dir"], "privateKey.pem")
     tls_dict["public_key"] = os.path.join(tls_dict["mount_dir"], "publicKey.pem")
@@ -186,6 +204,7 @@ def _create_ca_conf_helper(
         REGION,
         FS_ID,
         credentials,
+        SERVICE,
         ap_id,
         client_info,
     )
@@ -234,7 +253,7 @@ def _test_refresh_certificate_helper(
         )
 
     watchdog.check_certificate(
-        config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir)
+        config, state, str(tmpdir), STATE_FILE, SERVICE, base_path=str(tmpdir)
     )
 
     with open(os.path.join(str(tmpdir), STATE_FILE), "r") as state_json:
@@ -274,7 +293,7 @@ def test_do_not_refresh_self_signed_certificate(mocker, tmpdir):
     )
 
     watchdog.check_certificate(
-        config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir)
+        config, state, str(tmpdir), STATE_FILE, SERVICE, base_path=str(tmpdir)
     )
 
     with open(os.path.join(str(tmpdir), STATE_FILE), "r") as state_json:
@@ -310,7 +329,7 @@ def test_do_not_refresh_self_signed_certificate_bad_ap_id_incorrect_start(
     )
 
     watchdog.check_certificate(
-        config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir)
+        config, state, str(tmpdir), STATE_FILE, SERVICE, base_path=str(tmpdir)
     )
 
     assert datetime.strptime(
@@ -343,7 +362,7 @@ def test_do_not_refresh_self_signed_certificate_bad_ap_id_too_short(
     )
 
     watchdog.check_certificate(
-        config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir)
+        config, state, str(tmpdir), STATE_FILE, SERVICE, base_path=str(tmpdir)
     )
 
     assert datetime.strptime(
@@ -376,7 +395,7 @@ def test_do_not_refresh_self_signed_certificate_bad_ap_id_bad_char(
     )
 
     watchdog.check_certificate(
-        config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir)
+        config, state, str(tmpdir), STATE_FILE, SERVICE, base_path=str(tmpdir)
     )
 
     assert datetime.strptime(
@@ -401,7 +420,7 @@ def test_recreate_missing_self_signed_certificate(mocker, tmpdir):
     )
 
     watchdog.check_certificate(
-        config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir)
+        config, state, str(tmpdir), STATE_FILE, SERVICE, base_path=str(tmpdir)
     )
 
     assert datetime.strptime(
@@ -481,7 +500,7 @@ def test_refresh_self_signed_certificate_send_sighup(mocker, tmpdir, caplog):
     )
 
     watchdog.check_certificate(
-        config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir)
+        config, state, str(tmpdir), STATE_FILE, SERVICE, base_path=str(tmpdir)
     )
 
     # SIGHUP signal is 1
@@ -505,7 +524,7 @@ def test_refresh_self_signed_certificate_pid_not_running(mocker, tmpdir, caplog)
     )
 
     watchdog.check_certificate(
-        config, state, str(tmpdir), STATE_FILE, base_path=str(tmpdir)
+        config, state, str(tmpdir), STATE_FILE, SERVICE, base_path=str(tmpdir)
     )
 
     assert "TLS tunnel is not running for" in caplog.text
@@ -515,7 +534,7 @@ def test_create_canonical_request_without_token(mocker):
     mocker.patch("watchdog.get_utc_now", return_value=FIXED_DT)
     public_key_hash = "fake_public_key_hash"
     canonical_request_out = watchdog.create_canonical_request(
-        public_key_hash, FIXED_DT, ACCESS_KEY_ID_VAL, REGION, FS_ID
+        public_key_hash, FIXED_DT, ACCESS_KEY_ID_VAL, REGION, FS_ID, SERVICE
     )
 
     assert (
@@ -531,7 +550,13 @@ def test_create_canonical_request_with_token(mocker):
     mocker.patch("watchdog.get_utc_now", return_value=FIXED_DT)
     public_key_hash = "fake_public_key_hash"
     canonical_request_out = watchdog.create_canonical_request(
-        public_key_hash, FIXED_DT, ACCESS_KEY_ID_VAL, REGION, FS_ID, SESSION_TOKEN_VAL
+        public_key_hash,
+        FIXED_DT,
+        ACCESS_KEY_ID_VAL,
+        REGION,
+        FS_ID,
+        SERVICE,
+        SESSION_TOKEN_VAL,
     )
 
     assert (
@@ -558,7 +583,7 @@ def test_create_string_to_sign(mocker):
     canonical_request = "canonical_request"
 
     string_to_sign_output = watchdog.create_string_to_sign(
-        canonical_request, FIXED_DT, REGION
+        canonical_request, FIXED_DT, REGION, SERVICE
     )
 
     assert (
@@ -573,7 +598,7 @@ def test_calculate_signature(mocker):
     string_to_sign = "string_to_sign"
 
     signature_output = watchdog.calculate_signature(
-        string_to_sign, FIXED_DT, SECRET_ACCESS_KEY_VAL, REGION
+        string_to_sign, FIXED_DT, SECRET_ACCESS_KEY_VAL, REGION, SERVICE
     )
 
     assert (
@@ -594,6 +619,7 @@ def test_recreate_certificate_primary_assets_created(mocker, tmpdir):
         None,
         AP_ID,
         REGION,
+        SERVICE,
         base_path=str(tmpdir),
     )
     assert os.path.exists(pk_path)
@@ -609,7 +635,7 @@ def _test_recreate_certificate_with_valid_client_source_config(
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     tmp_config_path = os.path.join(str(tmpdir), MOUNT_NAME, "tmpConfig")
-    current_time = mount_efs.get_utc_now()
+    current_time = file_utils.get_utc_now()
     watchdog.recreate_certificate(
         config,
         MOUNT_NAME,
@@ -618,6 +644,7 @@ def _test_recreate_certificate_with_valid_client_source_config(
         CREDENTIALS,
         AP_ID,
         REGION,
+        SERVICE,
         base_path=str(tmpdir),
     )
 
@@ -638,6 +665,7 @@ def _test_recreate_certificate_with_valid_client_source_config(
             REGION,
             FS_ID,
             CREDENTIALS,
+            SERVICE,
             AP_ID,
             expected_client_info,
         )
@@ -663,7 +691,7 @@ def _test_recreate_certificate_with_invalid_client_source_config(
     pk_path = _get_mock_private_key_path(mocker, tmpdir)
     tls_dict = watchdog.tls_paths_dictionary(MOUNT_NAME, str(tmpdir))
     tmp_config_path = os.path.join(str(tmpdir), MOUNT_NAME, "tmpConfig")
-    current_time = mount_efs.get_utc_now()
+    current_time = file_utils.get_utc_now()
     watchdog.recreate_certificate(
         config,
         MOUNT_NAME,
@@ -672,6 +700,7 @@ def _test_recreate_certificate_with_invalid_client_source_config(
         CREDENTIALS,
         AP_ID,
         REGION,
+        SERVICE,
         base_path=str(tmpdir),
     )
 
@@ -690,6 +719,7 @@ def _test_recreate_certificate_with_invalid_client_source_config(
             REGION,
             FS_ID,
             CREDENTIALS,
+            SERVICE,
             AP_ID,
             expected_client_info,
         )
@@ -759,6 +789,7 @@ def test_create_ca_conf_with_awsprofile_no_credentials_found(mocker, caplog, tmp
         None,
         CREDENTIALS_SOURCE,
         None,
+        None,
     )
     assert (
         "Failed to retrieve AWS security credentials using lookup method: %s"
@@ -768,7 +799,7 @@ def test_create_ca_conf_with_awsprofile_no_credentials_found(mocker, caplog, tmp
 
 
 def test_create_ca_conf_without_client_info(mocker, tmpdir):
-    current_time = mount_efs.get_utc_now()
+    current_time = file_utils.get_utc_now()
     tls_dict, full_config_body = _create_ca_conf_helper(
         mocker, tmpdir, current_time, iam=True, ap=True, client_info=False
     )
@@ -787,6 +818,7 @@ def test_create_ca_conf_without_client_info(mocker, tmpdir):
         current_time,
         REGION,
         FS_ID,
+        SERVICE,
         CREDENTIALS["Token"],
     )
     efs_client_info_body = ""
@@ -803,7 +835,7 @@ def test_create_ca_conf_without_client_info(mocker, tmpdir):
 
 
 def test_create_ca_conf_with_all(mocker, tmpdir):
-    current_time = mount_efs.get_utc_now()
+    current_time = file_utils.get_utc_now()
     tls_dict, full_config_body = _create_ca_conf_helper(
         mocker, tmpdir, current_time, iam=True, ap=True, client_info=True
     )
@@ -823,6 +855,7 @@ def test_create_ca_conf_with_all(mocker, tmpdir):
         current_time,
         REGION,
         FS_ID,
+        SERVICE,
         CREDENTIALS["Token"],
     )
     efs_client_info_body = watchdog.efs_client_info_builder(CLIENT_INFO)
@@ -839,7 +872,7 @@ def test_create_ca_conf_with_all(mocker, tmpdir):
 
 
 def test_create_ca_conf_with_iam_no_accesspoint(mocker, tmpdir):
-    current_time = mount_efs.get_utc_now()
+    current_time = file_utils.get_utc_now()
     tls_dict, full_config_body = _create_ca_conf_helper(
         mocker, tmpdir, current_time, iam=True, ap=False, client_info=True
     )
@@ -858,6 +891,7 @@ def test_create_ca_conf_with_iam_no_accesspoint(mocker, tmpdir):
         current_time,
         REGION,
         FS_ID,
+        SERVICE,
         CREDENTIALS["Token"],
     )
     efs_client_info_body = watchdog.efs_client_info_builder(CLIENT_INFO)
@@ -874,7 +908,7 @@ def test_create_ca_conf_with_iam_no_accesspoint(mocker, tmpdir):
 
 
 def test_create_ca_conf_with_accesspoint_no_iam(mocker, tmpdir):
-    current_time = mount_efs.get_utc_now()
+    current_time = file_utils.get_utc_now()
     tls_dict, full_config_body = _create_ca_conf_helper(
         mocker, tmpdir, current_time, iam=False, ap=True, client_info=True
     )

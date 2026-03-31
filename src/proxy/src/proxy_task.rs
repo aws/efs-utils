@@ -3,10 +3,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bytes::BytesMut;
-use log::{debug, error, info, trace};
+use log::{debug, info, trace};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
@@ -17,11 +16,11 @@ use tokio::{
     },
 };
 
-use crate::rpc::{RpcFragmentParseError, RPC_MAX_SIZE};
 use crate::{
     connections::ProxyStream,
     controller::Event,
-    rpc::RpcBatch,
+    domain::ClientSocketReader,
+    rpc::rpc::RpcBatch,
     shutdown::{ShutdownHandle, ShutdownReason},
 };
 
@@ -49,7 +48,7 @@ impl PerformanceStats {
     }
 
     // Return total throughput in bytes per second
-    pub fn get_total_throughput(&self) -> u64 {
+    pub fn get_total_throughput_per_second(&self) -> u64 {
         let time_delta_seconds = self.time_delta.as_secs();
         if time_delta_seconds == 0 {
             0
@@ -60,7 +59,6 @@ impl PerformanceStats {
     }
 }
 
-pub const BUFFER_SIZE: usize = RPC_MAX_SIZE;
 pub const REPORT_INTERVAL_SECS: u64 = 3;
 
 pub struct ProxyTask<S> {
@@ -71,6 +69,7 @@ pub struct ProxyTask<S> {
     shutdown: ShutdownHandle,
 }
 
+#[derive(Clone, Debug)]
 pub enum ConnectionMessage {
     Response(RpcBatch),
 }
@@ -92,7 +91,7 @@ impl<S: ProxyStream> ProxyTask<S> {
         }
     }
 
-    pub async fn run(self) {
+    pub async fn run(self, client_socket_reader: Arc<Mutex<dyn ClientSocketReader>>) {
         // Runs Proxy between NFS Client and the EFS Service.
         //
         // This function returns when it is cancelled by the `ShutdownHandle`, or if an error
@@ -115,7 +114,7 @@ impl<S: ProxyStream> ProxyTask<S> {
         let reader = Self::run_reader(
             read_half,
             read_byte_count.clone(),
-            self.partition_senders.clone(),
+            client_socket_reader,
             self.shutdown.clone(),
             shutdown_sender.clone(),
         );
@@ -164,70 +163,18 @@ impl<S: ProxyStream> ProxyTask<S> {
 
     // NFS client to Proxy
     async fn run_reader(
-        mut read_half: OwnedReadHalf,
+        read_half: OwnedReadHalf,
         read_count: Arc<AtomicU64>,
-        partition_senders: Arc<Mutex<Vec<mpsc::Sender<RpcBatch>>>>,
+        socket_reader: Arc<Mutex<dyn ClientSocketReader>>,
         shutdown: ShutdownHandle,
         _shutdown_sender: mpsc::Sender<u8>,
     ) {
         trace!("Starting proxy reader");
-        let mut buffer = BytesMut::with_capacity(BUFFER_SIZE);
-        let reason;
-        let mut next_conn = 0;
-
-        loop {
-            // Read data from NFSClient socket
-            match read_half.read_buf(&mut buffer).await {
-                Ok(n_read) => {
-                    if n_read == 0 {
-                        reason = Some(ShutdownReason::Unmount);
-                        break;
-                    } else {
-                        read_count.fetch_add(n_read as u64, std::sync::atomic::Ordering::AcqRel);
-                    }
-                }
-                Err(e) => {
-                    info!("Error reading from NFS client {:?}", e);
-                    reason = Some(ShutdownReason::Unmount);
-                    break;
-                }
-            }
-
-            // Parse message and send to particular connection's channel
-            match RpcBatch::parse_batch(&mut buffer) {
-                Ok(Some(batch)) => {
-                    let f = partition_senders.lock().await;
-                    let r = f[next_conn].send(batch).await;
-
-                    // select connection via round-robin
-                    next_conn = (next_conn + 1) % f.len();
-                    if let Err(e) = r {
-                        debug!("Error sending RPC batch to connection task {:?}", e);
-                        reason = Some(ShutdownReason::UnexpectedError);
-                        break;
-                    };
-                }
-                Err(RpcFragmentParseError::InvalidSizeTooSmall) => {
-                    drop(read_half);
-                    error!("NFS Client Error: invalid RPC size - size too small");
-                    reason = Some(ShutdownReason::FrameSizeTooSmall);
-                    break;
-                }
-                Err(RpcFragmentParseError::SizeLimitExceeded) => {
-                    drop(read_half);
-                    error!("NFS Client Error: invalid RPC size - size limit exceeded");
-                    reason = Some(ShutdownReason::FrameSizeExceeded);
-                    break;
-                }
-                Ok(None) | Err(RpcFragmentParseError::Incomplete) => (),
-            }
-
-            if buffer.capacity() == 0 {
-                buffer.reserve(BUFFER_SIZE)
-            }
-        }
-        trace!("cli_to_server exiting!");
-        shutdown.exit(reason).await;
+        socket_reader
+            .lock()
+            .await
+            .run(read_half, read_count, shutdown)
+            .await;
     }
 
     // Proxy to NFS Client
@@ -256,7 +203,6 @@ impl<S: ProxyStream> ProxyTask<S> {
                             }
                         };
                     }
-
                     write_count
                         .fetch_add(total_written as u64, std::sync::atomic::Ordering::AcqRel);
                 }

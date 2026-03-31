@@ -3,7 +3,6 @@
 # Licensed under the MIT License. See the LICENSE accompanying this file
 # for the specific language governing permissions and limitations under
 # the License.
-
 import pytest
 
 import watchdog

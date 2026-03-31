@@ -21,6 +21,19 @@ Mount = namedtuple(
 )
 
 
+def create_mock_popen(mock_stat_process, mock_cat_process, mock_echo_process):
+    def mock_popen(*args, **kwargs):
+        if len(args) > 0 and len(args[0]) > 0 and args[0][0] == "stat":
+            return mock_stat_process
+        elif len(args) > 0 and len(args[0]) > 0 and args[0][0] == "cat":
+            return mock_cat_process
+        elif kwargs.get("shell"):
+            return mock_echo_process
+        return MagicMock()
+
+    return mock_popen
+
+
 def test_verify_and_update_readahead_ubuntu_24(mocker, tmpdir):
     # Mock necessary functions and objects
     mock_config = MagicMock()
@@ -32,7 +45,6 @@ def test_verify_and_update_readahead_ubuntu_24(mocker, tmpdir):
         "watchdog.NFS_READAHEAD_CONFIG_PATH_FORMAT",
         str(tmpdir) + "/%s:%s/read_ahead_kb",
     )
-
     expected_major, expected_minor = watchdog.decode_device_number(
         DEFAULT_MOUNT_DEVICE_NUMBER
     )
@@ -65,16 +77,12 @@ def test_verify_and_update_readahead_ubuntu_24(mocker, tmpdir):
 
     mock_echo_process.communicate = echo_communicate
 
-    def mock_popen(*args, **kwargs):
-        if len(args) > 0 and len(args[0]) > 0 and args[0][0] == "stat":
-            return mock_stat_process
-        elif len(args) > 0 and len(args[0]) > 0 and args[0][0] == "cat":
-            return mock_cat_process
-        elif kwargs.get("shell"):
-            return mock_echo_process
-        return MagicMock()
-
-    mocker.patch("subprocess.Popen", side_effect=mock_popen)
+    mocker.patch(
+        "subprocess.Popen",
+        side_effect=create_mock_popen(
+            mock_stat_process, mock_cat_process, mock_echo_process
+        ),
+    )
     watchdog.verify_and_update_readahead(MOUNT_POINT, mock_config, mock_mount_info)
 
     # Assert that the value was updated
@@ -226,14 +234,10 @@ def test_verify_and_update_readahead_cat_timeout(mocker, tmpdir, caplog):
     mock_cat_process = MagicMock()
     mock_cat_process.communicate.side_effect = subprocess.TimeoutExpired("cat", 2)
 
-    def mock_popen(*args, **kwargs):
-        if len(args) > 0 and len(args[0]) > 0 and args[0][0] == "stat":
-            return mock_stat_process
-        elif len(args) > 0 and len(args[0]) > 0 and args[0][0] == "cat":
-            return mock_cat_process
-        return MagicMock()
-
-    mocker.patch("subprocess.Popen", side_effect=mock_popen)
+    mocker.patch(
+        "subprocess.Popen",
+        side_effect=create_mock_popen(mock_stat_process, mock_cat_process, None),
+    )
 
     # Call the function
     watchdog.verify_and_update_readahead(MOUNT_POINT, mock_config, mock_mount_info)
@@ -262,14 +266,10 @@ def test_verify_and_update_readahead_cat_exception(mocker, tmpdir, caplog):
     mock_cat_process = MagicMock()
     mock_cat_process.communicate.side_effect = IOError("Permission denied")
 
-    def mock_popen(*args, **kwargs):
-        if len(args) > 0 and len(args[0]) > 0 and args[0][0] == "stat":
-            return mock_stat_process
-        elif len(args) > 0 and len(args[0]) > 0 and args[0][0] == "cat":
-            return mock_cat_process
-        return MagicMock()
-
-    mocker.patch("subprocess.Popen", side_effect=mock_popen)
+    mocker.patch(
+        "subprocess.Popen",
+        side_effect=create_mock_popen(mock_stat_process, mock_cat_process, None),
+    )
 
     # Call the function
     watchdog.verify_and_update_readahead(MOUNT_POINT, mock_config, mock_mount_info)
@@ -325,16 +325,12 @@ def test_verify_and_update_readahead_custom_rsize(mocker, tmpdir):
 
     mock_echo_process.communicate = echo_communicate
 
-    def mock_popen(*args, **kwargs):
-        if len(args) > 0 and len(args[0]) > 0 and args[0][0] == "stat":
-            return mock_stat_process
-        elif len(args) > 0 and len(args[0]) > 0 and args[0][0] == "cat":
-            return mock_cat_process
-        elif kwargs.get("shell"):
-            return mock_echo_process
-        return MagicMock()
-
-    mocker.patch("subprocess.Popen", side_effect=mock_popen)
+    mocker.patch(
+        "subprocess.Popen",
+        side_effect=create_mock_popen(
+            mock_stat_process, mock_cat_process, mock_echo_process
+        ),
+    )
     watchdog.verify_and_update_readahead(MOUNT_POINT, mock_config, mock_mount_info)
 
     # Assert that the value was updated to correct value for custom rsize
@@ -388,16 +384,12 @@ def test_verify_and_update_readahead_no_rsize_option(mocker, tmpdir):
 
     mock_echo_process.communicate = echo_communicate
 
-    def mock_popen(*args, **kwargs):
-        if len(args) > 0 and len(args[0]) > 0 and args[0][0] == "stat":
-            return mock_stat_process
-        elif len(args) > 0 and len(args[0]) > 0 and args[0][0] == "cat":
-            return mock_cat_process
-        elif kwargs.get("shell"):
-            return mock_echo_process
-        return MagicMock()
-
-    mocker.patch("subprocess.Popen", side_effect=mock_popen)
+    mocker.patch(
+        "subprocess.Popen",
+        side_effect=create_mock_popen(
+            mock_stat_process, mock_cat_process, mock_echo_process
+        ),
+    )
     watchdog.verify_and_update_readahead(MOUNT_POINT, mock_config, mock_mount_info)
 
     # Assert that the value was updated using default rsize

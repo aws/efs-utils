@@ -18,12 +18,13 @@ use std::{path::Path, str::FromStr};
 use crate::config_parser::ProxyConfig;
 use crate::log_encoder::SingleLineEncoder;
 
-const LOG_FILE_MAX_BYTES: u64 = 1048576;
-const LOG_FILE_COUNT: u32 = 10;
-
 pub fn create_config(config: &ProxyConfig) -> Config {
-    let level_filter =
-        LevelFilter::from_str(&config.debug).expect("config value for `debug` is invalid");
+    let level_filter = config
+        .nested_config
+        .proxy_logging_level
+        .as_ref()
+        .and_then(|l| LevelFilter::from_str(l).ok())
+        .unwrap_or_else(|| LevelFilter::from_str(&config.debug).unwrap_or(LevelFilter::Warn));
 
     let log_format = config.log_format.as_deref().unwrap_or("file");
 
@@ -47,11 +48,14 @@ pub fn create_config(config: &ProxyConfig) -> Config {
                     .build("stderr", Box::new(stderr)),
             );
 
-            let trigger = SizeTrigger::new(LOG_FILE_MAX_BYTES);
+            let trigger = SizeTrigger::new(config.nested_config.proxy_logging_max_bytes as u64);
             let mut pattern = log_file_path_string.clone();
             pattern.push_str(".{}");
             let roller = FixedWindowRoller::builder()
-                .build(&pattern, LOG_FILE_COUNT)
+                .build(
+                    &pattern,
+                    config.nested_config.proxy_logging_file_count as u32,
+                )
                 .expect("Unable to create roller");
             let policy = CompoundPolicy::new(Box::new(trigger), Box::new(roller));
 
@@ -198,5 +202,52 @@ mod tests {
             result.is_ok(),
             "Logger initialization should not panic when output is None"
         );
+    }
+
+    #[test]
+    fn test_create_config_with_no_proxy_logging_level_falls_back_to_debug_field() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let log_path = temp_dir.path().join("test.log");
+        let log_path_str = log_path.to_str().expect("Failed to convert path to string");
+
+        let config = ProxyConfig {
+            fips: false,
+            debug: "warn".to_string(),
+            output: Some(log_path_str.to_string()),
+            log_format: Some("file".to_string()),
+            pid_file_path: "".to_string(),
+            nested_config: crate::config_parser::EfsConfig::default(),
+        };
+
+        let log_config = create_config(&config);
+
+        assert_eq!(log_config.root().level(), LevelFilter::Warn);
+
+        let _ = temp_dir.close();
+    }
+
+    #[test]
+    fn test_create_config_with_custom_proxy_logging_level() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let log_path = temp_dir.path().join("test.log");
+        let log_path_str = log_path.to_str().expect("Failed to convert path to string");
+
+        let mut nested_config = crate::config_parser::EfsConfig::default();
+        nested_config.proxy_logging_level = Some("DEBUG".to_string());
+
+        let config = ProxyConfig {
+            fips: false,
+            debug: "info".to_string(),
+            output: Some(log_path_str.to_string()),
+            log_format: Some("file".to_string()),
+            pid_file_path: "".to_string(),
+            nested_config,
+        };
+
+        let log_config = create_config(&config);
+
+        assert_eq!(log_config.root().level(), LevelFilter::Debug);
+
+        let _ = temp_dir.close();
     }
 }

@@ -28,15 +28,19 @@ tarball: clean
 	cp -p dist/amazon-efs-mount-watchdog.conf $(PACKAGE_NAME)/dist
 	cp -p dist/amazon-efs-mount-watchdog.service $(PACKAGE_NAME)/dist
 	cp -p dist/efs-utils.conf $(PACKAGE_NAME)/dist
+	cp -p dist/s3files-utils.conf $(PACKAGE_NAME)/dist
 	cp -p dist/efs-utils.crt $(PACKAGE_NAME)/dist
 
 	mkdir -p $(PACKAGE_NAME)/src
+	cp -rp src/efs_utils_common $(PACKAGE_NAME)/src
 	cp -rp src/mount_efs $(PACKAGE_NAME)/src
+	cp -rp src/mount_s3files $(PACKAGE_NAME)/src
 	cp -rp src/watchdog $(PACKAGE_NAME)/src
 	cp -rp src/proxy $(PACKAGE_NAME)/src
 
 	mkdir -p ${PACKAGE_NAME}/man
 	cp -rp man/mount.efs.8 ${PACKAGE_NAME}/man
+	cp -rp man/mount.s3files.8 ${PACKAGE_NAME}/man
 
 	tar -czf $(SOURCE_TARBALL) $(PACKAGE_NAME)/*
 

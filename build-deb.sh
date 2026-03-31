@@ -11,7 +11,7 @@ set -ex
 
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
-VERSION=2.4.2
+VERSION=3.0.0
 RELEASE=1
 ARCH=$(dpkg --print-architecture)
 DEB_SYSTEM_RELEASE_PATH=/etc/os-release
@@ -29,6 +29,9 @@ mkdir -p ${BUILD_ROOT}/sbin
 mkdir -p ${BUILD_ROOT}/usr/bin
 mkdir -p ${BUILD_ROOT}/var/log/amazon/efs
 mkdir -p ${BUILD_ROOT}/usr/share/man/man8
+mkdir -p ${BUILD_ROOT}/sbin/efs_utils_common
+mkdir -p ${BUILD_ROOT}/sbin/mount_s3files
+mkdir -p ${BUILD_ROOT}/sbin/mount_efs
 
 echo 'Building efs-proxy'
 cd src/proxy
@@ -40,9 +43,14 @@ install -p -m 644 dist/amazon-efs-mount-watchdog.conf ${BUILD_ROOT}/etc/init
 install -p -m 644 dist/amazon-efs-mount-watchdog.service ${BUILD_ROOT}/etc/systemd/system
 install -p -m 444 dist/efs-utils.crt ${BUILD_ROOT}/etc/amazon/efs
 install -p -m 644 dist/efs-utils.conf ${BUILD_ROOT}/etc/amazon/efs
+install -p -m 644 dist/s3files-utils.conf ${BUILD_ROOT}/etc/amazon/efs
 install -p -m 755 src/mount_efs/__init__.py ${BUILD_ROOT}/sbin/mount.efs
+install -p -m 755 src/mount_s3files/__init__.py ${BUILD_ROOT}/sbin/mount.s3files
 install -p -m 755 src/proxy/target/release/efs-proxy ${BUILD_ROOT}/usr/bin/efs-proxy
 install -p -m 755 src/watchdog/__init__.py ${BUILD_ROOT}/usr/bin/amazon-efs-mount-watchdog
+install -p -m 644 src/efs_utils_common/*.py ${BUILD_ROOT}/sbin/efs_utils_common
+install -p -m 644 src/mount_s3files/*.py ${BUILD_ROOT}/sbin/mount_s3files
+install -p -m 644 src/mount_efs/*.py ${BUILD_ROOT}/sbin/mount_efs
 
 echo 'Copying install scripts'
 install -p -m 755 dist/scriptlets/after-install-upgrade ${BUILD_ROOT}/postinst
@@ -58,6 +66,7 @@ install -p -m 644 dist/amazon-efs-utils.conffiles ${BUILD_ROOT}/conffiles
 
 echo 'Copying manpages'
 install -p -m 644 man/mount.efs.8 ${BUILD_ROOT}/usr/share/man/man8/mount.efs.8
+install -p -m 644 man/mount.s3files.8 ${BUILD_ROOT}/usr/share/man/man8/mount.s3files.8
 
 echo 'Creating deb binary file'
 echo '2.0'> ${BUILD_ROOT}/debian-binary

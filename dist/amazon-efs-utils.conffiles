@@ -1,1 +1,2 @@
 /etc/amazon/efs/efs-utils.conf
+/etc/amazon/efs/s3files-utils.conf

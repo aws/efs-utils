@@ -6,6 +6,8 @@ pub enum ConnectError {
     Cancelled,
     #[error("{0}")]
     IoError(#[from] tokio::io::Error),
+    #[error("{0}")]
+    JoinError(#[from] tokio::task::JoinError),
     #[error("Connect attempt failed - Maximum attempt count exceeded")]
     MaxAttemptsExceeded,
     #[error("Attempt to acquire additional connections to EFS failed.")]
@@ -32,10 +34,16 @@ pub enum RpcError {
     ProcedureUnavailable,
     #[error("rpc accept_stat: SystemError")]
     SystemError,
+    #[error("RPC serialization failed: {0}")]
+    SerializationError(String),
+    #[error("Invalid RPC message params")]
+    InvalidParams,
     #[error(transparent)]
     IoError(#[from] tokio::io::Error),
     #[error(transparent)]
     XdrCodecError(#[from] xdr_codec::Error),
     #[error(transparent)]
     OncRpc(#[from] onc_rpc::Error),
+    #[error("awsfile_channel_init rpc failed. Reason: `{0}`")]
+    AwsFileChannelInitFailure(String),
 }

@@ -3,7 +3,6 @@
 # Licensed under the MIT License. See the LICENSE accompanying this file
 # for the specific language governing permissions and limitations under
 # the License.
-
 import logging
 import sys
 import unittest
@@ -12,7 +11,7 @@ from unittest.mock import MagicMock, mock_open
 
 from botocore.exceptions import ProfileNotFound
 
-import mount_efs
+import efs_utils_common
 import watchdog
 
 from .. import utils
@@ -34,6 +33,7 @@ SECRET_ACCESS_KEY_VAL = "FAKE_AWS_SECRET_ACCESS_KEY"
 SESSION_TOKEN_VAL = "FAKE_SESSION_TOKEN"
 MACOS = "macOS"
 AL2 = "Amazon Linux release 2"
+UBUNTU_24 = "Ubuntu 24.04.3 LTS"
 
 
 def get_config(
@@ -51,14 +51,18 @@ def get_config(
 
 
 def test_is_instance_metadata_url_helper():
-    assert False == watchdog.is_instance_metadata_url(mount_efs.ECS_TASK_METADATA_API)
-    assert True == watchdog.is_instance_metadata_url(
-        mount_efs.INSTANCE_METADATA_TOKEN_URL
+    assert False == watchdog.is_instance_metadata_url(
+        efs_utils_common.constants.ECS_TASK_METADATA_API
     )
     assert True == watchdog.is_instance_metadata_url(
-        mount_efs.INSTANCE_METADATA_SERVICE_URL
+        efs_utils_common.constants.INSTANCE_METADATA_TOKEN_URL
     )
-    assert True == watchdog.is_instance_metadata_url(mount_efs.INSTANCE_IAM_URL)
+    assert True == watchdog.is_instance_metadata_url(
+        efs_utils_common.constants.INSTANCE_METADATA_SERVICE_URL
+    )
+    assert True == watchdog.is_instance_metadata_url(
+        efs_utils_common.constants.INSTANCE_IAM_URL
+    )
 
 
 def _test_get_boolean_config_item_in_config_file_helper(
@@ -71,7 +75,7 @@ def _test_get_boolean_config_item_in_config_file_helper(
 
 def test_get_true_boolean_config_item_in_config_file():
     config_section = watchdog.MOUNT_CONFIG_SECTION
-    config_item = mount_efs.FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM
+    config_item = efs_utils_common.constants.FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM
     config = get_config(config_section, config_item, "true")
     assert True == watchdog.get_boolean_config_item_value(
         config, config_section, config_item, True
@@ -83,7 +87,7 @@ def test_get_true_boolean_config_item_in_config_file():
 
 def test_get_false_boolean_config_item_in_config_file():
     config_section = watchdog.MOUNT_CONFIG_SECTION
-    config_item = mount_efs.FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM
+    config_item = efs_utils_common.constants.FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM
     config = get_config(config_section, config_item, "false")
     assert False == watchdog.get_boolean_config_item_value(
         config, config_section, config_item, True
@@ -95,7 +99,7 @@ def test_get_false_boolean_config_item_in_config_file():
 
 def test_get_default_true_boolean_config_item_not_in_config_file(capsys):
     config_section = watchdog.MOUNT_CONFIG_SECTION
-    config_item = mount_efs.FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM
+    config_item = efs_utils_common.constants.FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM
     config = get_config()
 
     assert True == watchdog.get_boolean_config_item_value(
@@ -133,7 +137,7 @@ def test_get_default_true_boolean_config_item_not_in_config_file(capsys):
 
 def test_get_default_boolean_config_section_not_in_config_file(capsys):
     config_section = "random"
-    config_item = mount_efs.FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM
+    config_item = efs_utils_common.constants.FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM
     config = get_config()
 
     assert True == watchdog.get_boolean_config_item_value(
@@ -182,7 +186,9 @@ def test_url_request_helper_does_not_fetch_metadata_token_due_to_token_fetch_dis
         "watchdog.get_aws_ec2_metadata_token"
     )
     url_open_mock = mocker.patch("watchdog.urlopen")
-    watchdog.url_request_helper(config, mount_efs.INSTANCE_METADATA_SERVICE_URL, "", "")
+    watchdog.url_request_helper(
+        config, efs_utils_common.constants.INSTANCE_METADATA_SERVICE_URL, "", ""
+    )
     utils.assert_not_called(get_aws_ec2_metadata_token_mock)
     utils.assert_called(url_open_mock)
 
@@ -197,7 +203,9 @@ def test_url_request_helper_does_not_fetch_metadata_token_due_to_url_not_instanc
         "watchdog.get_aws_ec2_metadata_token"
     )
     url_open_mock = mocker.patch("watchdog.urlopen")
-    watchdog.url_request_helper(config, mount_efs.ECS_TASK_METADATA_API, "", "")
+    watchdog.url_request_helper(
+        config, efs_utils_common.constants.ECS_TASK_METADATA_API, "", ""
+    )
     utils.assert_not_called(get_aws_ec2_metadata_token_mock)
     utils.assert_called(url_open_mock)
 
@@ -210,7 +218,9 @@ def test_url_request_helper_fetch_metadata_token_config_item_present(mocker):
         "watchdog.get_aws_ec2_metadata_token", return_value="ABCDEFG="
     )
     url_open_mock = mocker.patch("watchdog.urlopen")
-    watchdog.url_request_helper(config, mount_efs.INSTANCE_METADATA_SERVICE_URL, "", "")
+    watchdog.url_request_helper(
+        config, efs_utils_common.constants.INSTANCE_METADATA_SERVICE_URL, "", ""
+    )
     utils.assert_called(get_aws_ec2_metadata_token_mock)
     utils.assert_called(url_open_mock)
 
@@ -221,7 +231,9 @@ def test_url_request_helper_fetch_metadata_token_config_item_not_present(mocker)
         "watchdog.get_aws_ec2_metadata_token", return_value="ABCDEFG="
     )
     url_open_mock = mocker.patch("watchdog.urlopen")
-    watchdog.url_request_helper(config, mount_efs.INSTANCE_METADATA_SERVICE_URL, "", "")
+    watchdog.url_request_helper(
+        config, efs_utils_common.constants.INSTANCE_METADATA_SERVICE_URL, "", ""
+    )
     utils.assert_called(get_aws_ec2_metadata_token_mock)
     utils.assert_called(url_open_mock)
 
@@ -229,8 +241,8 @@ def test_url_request_helper_fetch_metadata_token_config_item_not_present(mocker)
 def test_url_request_helper_unauthorized_error(mocker, caplog):
     caplog.set_level(logging.WARNING)
 
-    config_section = mount_efs.CONFIG_SECTION
-    config_item = mount_efs.DISABLE_FETCH_EC2_METADATA_TOKEN_ITEM
+    config_section = efs_utils_common.constants.CONFIG_SECTION
+    config_item = efs_utils_common.constants.DISABLE_FETCH_EC2_METADATA_TOKEN_ITEM
     config = get_config(config_section, config_item, "true")
 
     get_aws_ec2_metadata_token_mock = mocker.patch(
@@ -241,7 +253,7 @@ def test_url_request_helper_unauthorized_error(mocker, caplog):
         side_effect=HTTPError("url", 401, "Unauthorized", None, None),
     )
     resp = watchdog.url_request_helper(
-        config, mount_efs.INSTANCE_METADATA_SERVICE_URL, "", ""
+        config, efs_utils_common.constants.INSTANCE_METADATA_SERVICE_URL, "", ""
     )
 
     assert None == resp
@@ -439,5 +451,24 @@ def test_get_system_release_version_linux_unknown(mocker):
     open_mock = mocker.patch("builtins.open", side_effect=FileNotFoundError)
     platform_mock = mocker.patch("platform.platform")
     assert watchdog.DEFAULT_UNKNOWN_VALUE == watchdog.get_system_release_version()
+    utils.assert_not_called(platform_mock)
+    utils.assert_called_n_times(open_mock, 2)
+
+
+@unittest.skipIf(sys.version_info[1] < 7, "Not supported in python3.6 and below.")
+def test_get_system_release_version_ubuntu24_with_quotes(mocker):
+    mocker.patch("watchdog.check_if_platform_is_mac", return_value=False)
+    mock = mock_open()
+    mock.side_effect = [
+        FileNotFoundError,  # /etc/system-release doesn't exist
+        mock_open(
+            read_data='PRETTY_NAME="Ubuntu 24.04.3 LTS"'
+        ).return_value,  # /etc/os-release with quotes
+    ]
+    open_mock = mocker.patch("builtins.open", mock)
+    platform_mock = mocker.patch("platform.platform")
+    assert (
+        UBUNTU_24 == watchdog.get_system_release_version()
+    )  # should return without quotes
     utils.assert_not_called(platform_mock)
     utils.assert_called_n_times(open_mock, 2)
