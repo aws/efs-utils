@@ -28,7 +28,7 @@ hyper = "0.14"
 log = "0.4"
 libc = "0.2"
 log4rs = { version = "1.2.0", features = ["rolling_file_appender", "compound_policy", "size_trigger", "fixed_window_roller"]}
-lru = "0.12"
+lru = "0.16"
 moka = { version = "0.12.10", features = ["sync"] }
 nix = { version = "0.26.2", features = ["signal"]}
 onc-rpc = "0.3.3"

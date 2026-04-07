@@ -308,7 +308,7 @@ dependencies = [
  "http 0.2.12",
  "http 1.4.0",
  "http-body 1.0.1",
- "lru 0.16.3",
+ "lru",
  "percent-encoding",
  "regex-lite",
  "sha2",
@@ -1299,7 +1299,7 @@ dependencies = [
  "libc",
  "log 0.4.29",
  "log4rs",
- "lru 0.12.5",
+ "lru",
  "mockall",
  "moka",
  "nix",
@@ -1691,8 +1691,6 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
- "allocator-api2",
- "equivalent",
  "foldhash 0.1.5",
 ]
 
@@ -2240,15 +2238,6 @@ dependencies = [
  "typemap-ors",
  "unicode-segmentation",
  "winapi",
-]
-
-[[package]]
-name = "lru"
-version = "0.12.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
-dependencies = [
- "hashbrown 0.15.5",
 ]
 
 [[package]]
