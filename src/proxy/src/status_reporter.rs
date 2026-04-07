@@ -1,5 +1,5 @@
+use crate::awsfile_rpc::PartitionId;
 use crate::controller::ConnectionSearchState;
-use crate::efs_rpc::PartitionId;
 use crate::{proxy_identifier::ProxyIdentifier, proxy_task::PerformanceStats};
 use anyhow::{Error, Result};
 use tokio::sync::mpsc::{self, Receiver, Sender};

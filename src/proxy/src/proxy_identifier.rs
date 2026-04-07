@@ -1,5 +1,8 @@
 use uuid::Uuid;
 
+use crate::awsfile_prot;
+use crate::error::RpcError;
+
 pub const INITIAL_INCARNATION: i64 = 0;
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
@@ -28,6 +31,37 @@ impl ProxyIdentifier {
             return;
         }
         self.incarnation += 1;
+    }
+}
+
+impl Into<awsfile_prot::ProxyIdentifier> for ProxyIdentifier {
+    fn into(self) -> awsfile_prot::ProxyIdentifier {
+        awsfile_prot::ProxyIdentifier {
+            identifier: self.uuid.as_bytes().to_vec(),
+            incarnation: self.incarnation.to_be_bytes().to_vec(),
+        }
+    }
+}
+
+impl TryFrom<awsfile_prot::ProxyIdentifier> for ProxyIdentifier {
+    type Error = RpcError;
+
+    fn try_from(raw_proxy_id: awsfile_prot::ProxyIdentifier) -> Result<Self, Self::Error> {
+        Ok(ProxyIdentifier {
+            uuid: uuid::Builder::from_bytes(
+                raw_proxy_id
+                    .identifier
+                    .try_into()
+                    .map_err(|_| RpcError::MalformedResponse)?,
+            )
+            .into_uuid(),
+            incarnation: i64::from_be_bytes(
+                raw_proxy_id
+                    .incarnation
+                    .try_into()
+                    .map_err(|_| RpcError::MalformedResponse)?,
+            ),
+        })
     }
 }
 

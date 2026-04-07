@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 2.4.2
+Version   : 3.0.0
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -145,13 +145,23 @@ mkdir -p %{buildroot}%{efs_bindir}
 mkdir -p %{buildroot}%{_bindir}
 mkdir -p %{buildroot}%{_localstatedir}/log/amazon/efs
 mkdir -p  %{buildroot}%{_mandir}/man8
+mkdir -p %{buildroot}%{efs_bindir}/efs_utils_common
+mkdir -p %{buildroot}%{efs_bindir}/mount_efs
+mkdir -p %{buildroot}%{efs_bindir}/mount_s3files
 
 install -p -m 644 %{_builddir}/%{name}/dist/efs-utils.conf %{buildroot}%{_sysconfdir}/amazon/efs
+install -p -m 644 %{_builddir}/%{name}/dist/s3files-utils.conf %{buildroot}%{_sysconfdir}/amazon/efs
 install -p -m 444 %{_builddir}/%{name}/dist/efs-utils.crt %{buildroot}%{_sysconfdir}/amazon/efs
 install -p -m 755 %{_builddir}/%{name}/src/mount_efs/__init__.py %{buildroot}%{efs_bindir}/mount.efs
+install -p -m 755 %{_builddir}/%{name}/src/mount_s3files/__init__.py %{buildroot}%{efs_bindir}/mount.s3files
 install -p -m 755 %{_builddir}/%{name}/src/watchdog/__init__.py %{buildroot}%{_bindir}/amazon-efs-mount-watchdog
 install -p -m 644 %{_builddir}/%{name}/man/mount.efs.8 %{buildroot}%{_mandir}/man8
+install -p -m 644 %{_builddir}/%{name}/man/mount.s3files.8 %{buildroot}%{_mandir}/man8
 install -p -m 755 %{_builddir}/%{name}/src/proxy/target/release/efs-proxy %{buildroot}%{efs_bindir}/efs-proxy
+
+cp -r %{_builddir}/%{name}/src/efs_utils_common/*.py %{buildroot}%{efs_bindir}/efs_utils_common/
+cp -r %{_builddir}/%{name}/src/mount_efs/*.py %{buildroot}%{efs_bindir}/mount_efs/
+cp -r %{_builddir}/%{name}/src/mount_s3files/*.py %{buildroot}%{efs_bindir}/mount_s3files/
 
 %files
 %defattr(-,root,root,-)
@@ -162,15 +172,24 @@ install -p -m 755 %{_builddir}/%{name}/src/proxy/target/release/efs-proxy %{buil
 %endif
 %{_sysconfdir}/amazon/efs/efs-utils.crt
 %{efs_bindir}/mount.efs
+%{efs_bindir}/mount.s3files
 %{efs_bindir}/efs-proxy
 %{_bindir}/amazon-efs-mount-watchdog
 /var/log/amazon
 %{_mandir}/man8/mount.efs.8.gz
+%{_mandir}/man8/mount.s3files.8.gz
+%{efs_bindir}/efs_utils_common/
+%{efs_bindir}/mount_efs/
+%{efs_bindir}/mount_s3files/
 
 %config(noreplace) %{_sysconfdir}/amazon/efs/efs-utils.conf
+%config(noreplace) %{_sysconfdir}/amazon/efs/s3files-utils.conf
 
 %if %{with_systemd}
 %post
+%if 0%{?rhel} == 8
+mkdir -p /usr/local/lib/python3.6/site-packages
+%endif
 %systemd_post amazon-efs-mount-watchdog.service
 
 %preun
@@ -196,6 +215,9 @@ fi
 %clean
 
 %changelog
+* Tue Mar 31 2026 Samuel  Hale <samuhale@amazon.com> - 3.0.0
+- Add support for s3files
+
 * Tue Dec 23 2025 Samuel Hale <samuhale@amazon.com> - 2.4.2
 - Skip stunnel binary invocation when efs-proxy mode is enabled
 - Retry "access denied" only for access point mounting
@@ -215,7 +237,7 @@ fi
 - Add environment variable support for AWS profiles and regions
 
 * Fri Jul 18 2025 Anthony Tse <anthotse@amazon.com> - 2.3.2
-- Fix package version numbering 
+- Fix package version numbering
 
 * Thu Apr 17 2025 Anthony Tse <anthotse@amazon.com> - 2.3.0
 - Add support for pod-identity credentials in the credentials chain

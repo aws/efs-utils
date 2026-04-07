@@ -8,7 +8,9 @@ import socket
 
 import pytest
 
-import mount_efs
+import efs_utils_common
+import efs_utils_common.network_utils as network_utils
+import mount_efs.dns_resolver as dns_resolver
 
 from .. import utils
 
@@ -16,7 +18,6 @@ try:
     import ConfigParser
 except ImportError:
     from configparser import ConfigParser
-
 
 FS_ID = "fs-deadbeef"
 DEFAULT_REGION = "us-east-1"
@@ -50,7 +51,9 @@ TEST_SOCKET_GET_ADDR_INFO_RETURN = [
 
 @pytest.fixture(autouse=True)
 def setup(mocker):
-    mocker.patch("mount_efs.get_target_region", return_value=DEFAULT_REGION)
+    mocker.patch(
+        "mount_efs.dns_resolver.get_target_region", return_value=DEFAULT_REGION
+    )
     mocker.patch(
         "socket.getaddrinfo",
         return_value=TEST_SOCKET_GET_ADDR_INFO_RETURN,
@@ -68,15 +71,17 @@ def _get_mock_config(
         config = ConfigParser.SafeConfigParser()
     except AttributeError:
         config = ConfigParser()
-    config.add_section(mount_efs.CONFIG_SECTION)
-    if mount_efs.CONFIG_SECTION != config_section:
+    config.add_section(efs_utils_common.constants.CONFIG_SECTION)
+    if efs_utils_common.constants.CONFIG_SECTION != config_section:
         config.add_section(config_section)
-    config.set(mount_efs.CONFIG_SECTION, "dns_name_format", dns_name_format)
+    config.set(
+        efs_utils_common.constants.CONFIG_SECTION, "dns_name_format", dns_name_format
+    )
     config.set(config_section, "dns_name_suffix", dns_name_suffix)
     if has_fallback_to_mount_target_ip_address_item:
         config.set(
-            mount_efs.CONFIG_SECTION,
-            mount_efs.FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM,
+            efs_utils_common.constants.CONFIG_SECTION,
+            efs_utils_common.constants.FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM,
             str(fallback_to_mount_target_ip_address),
         )
 
@@ -86,8 +91,10 @@ def _get_mock_config(
 def test_get_dns_name_and_fallback_mount_target_ip_address():
     config = _get_mock_config()
 
-    dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
-        config, FS_ID, DEFAULT_NFS_OPTIONS
+    dns_name, ip_address = (
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
+            config, FS_ID, DEFAULT_NFS_OPTIONS
+        )
     )
 
     assert "%s.efs.%s.amazonaws.com" % (FS_ID, DEFAULT_REGION) == dns_name
@@ -97,8 +104,10 @@ def test_get_dns_name_and_fallback_mount_target_ip_address():
 def test_get_dns_name_with_az_in_options():
     config = _get_mock_config("{az}.{fs_id}.efs.{region}.amazonaws.com")
 
-    dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
-        config, FS_ID, OPTIONS_WITH_AZ
+    dns_name, ip_address = (
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
+            config, FS_ID, OPTIONS_WITH_AZ
+        )
     )
 
     assert (
@@ -110,8 +119,10 @@ def test_get_dns_name_with_az_in_options():
 def test_get_dns_name_without_az_in_options():
     config = _get_mock_config("{az}.{fs_id}.efs.{region}.amazonaws.com")
 
-    dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
-        config, FS_ID, DEFAULT_NFS_OPTIONS
+    dns_name, ip_address = (
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
+            config, FS_ID, DEFAULT_NFS_OPTIONS
+        )
     )
 
     assert "%s.efs.%s.amazonaws.com" % (FS_ID, DEFAULT_REGION) == dns_name
@@ -121,10 +132,13 @@ def test_get_dns_name_without_az_in_options():
 def test_get_dns_name_with_ip_in_options(mocker):
     config = _get_mock_config()
     ip_address_connect_mock = mocker.patch(
-        "mount_efs.mount_target_ip_address_can_be_resolved", return_value=True
+        "mount_efs.dns_resolver.mount_target_ip_address_can_be_resolved",
+        return_value=True,
     )
-    dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
-        config, FS_ID, OPTIONS_WITH_IP
+    dns_name, ip_address = (
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
+            config, FS_ID, OPTIONS_WITH_IP
+        )
     )
 
     assert "%s.efs.%s.amazonaws.com" % (FS_ID, DEFAULT_REGION) == dns_name
@@ -136,11 +150,14 @@ def test_get_dns_name_with_crossaccount_in_options(mocker):
     config = _get_mock_config("{az}.{fs_id}.efs.{region}.amazonaws.com")
 
     get_az_id_mock = mocker.patch(
-        "mount_efs.get_az_id_from_instance_metadata", return_value=DEFAULT_AZ_ID
+        "mount_efs.dns_resolver.get_az_id_from_instance_metadata",
+        return_value=DEFAULT_AZ_ID,
     )
 
-    dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
-        config, FS_ID, OPTIONS_WITH_CROSSACCOUNT
+    dns_name, ip_address = (
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
+            config, FS_ID, OPTIONS_WITH_CROSSACCOUNT
+        )
     )
 
     assert (
@@ -153,8 +170,10 @@ def test_get_dns_name_with_crossaccount_in_options(mocker):
 def test_get_dns_name_suffix_hardcoded():
     config = _get_mock_config("{az}.{fs_id}.efs.{region}.amazonaws.com")
 
-    dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
-        config, FS_ID, DEFAULT_NFS_OPTIONS
+    dns_name, ip_address = (
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
+            config, FS_ID, DEFAULT_NFS_OPTIONS
+        )
     )
 
     assert "%s.efs.%s.amazonaws.com" % (FS_ID, DEFAULT_REGION) == dns_name
@@ -162,12 +181,14 @@ def test_get_dns_name_suffix_hardcoded():
 
 
 def test_get_dns_name_region_hardcoded(mocker):
-    get_target_region_mock = mocker.patch("mount_efs.get_target_region")
+    get_target_region_mock = mocker.patch("mount_efs.dns_resolver.get_target_region")
 
     config = _get_mock_config("{az}.{fs_id}.efs.%s.{dns_name_suffix}" % DEFAULT_REGION)
 
-    dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
-        config, FS_ID, DEFAULT_NFS_OPTIONS
+    dns_name, ip_address = (
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
+            config, FS_ID, DEFAULT_NFS_OPTIONS
+        )
     )
 
     # get_target_region will be called 1 time to get dns_name_suffix
@@ -178,12 +199,14 @@ def test_get_dns_name_region_hardcoded(mocker):
 
 
 def test_get_dns_name_region_and_suffix_hardcoded(mocker):
-    get_target_region_mock = mocker.patch("mount_efs.get_target_region")
+    get_target_region_mock = mocker.patch("mount_efs.dns_resolver.get_target_region")
 
     config = _get_mock_config("{az}.{fs_id}.efs.us-west-2.amazonaws.com")
 
-    dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
-        config, FS_ID, DEFAULT_NFS_OPTIONS
+    dns_name, ip_address = (
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
+            config, FS_ID, DEFAULT_NFS_OPTIONS
+        )
     )
 
     utils.assert_not_called(get_target_region_mock)
@@ -196,7 +219,7 @@ def test_get_dns_name_bad_format_wrong_specifiers():
     config = _get_mock_config("{foo}.efs.{bar}")
 
     with pytest.raises(ValueError) as ex:
-        mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
             config, FS_ID, DEFAULT_NFS_OPTIONS
         )
 
@@ -207,7 +230,7 @@ def test_get_dns_name_bad_format_too_many_specifiers_1():
     config = _get_mock_config("{fs_id}.efs.{foo}")
 
     with pytest.raises(ValueError) as ex:
-        mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
             config, FS_ID, DEFAULT_NFS_OPTIONS
         )
 
@@ -218,7 +241,7 @@ def test_get_dns_name_bad_format_too_many_specifiers_2():
     config = _get_mock_config("{fs_id}.efs.{region}.{foo}")
 
     with pytest.raises(ValueError) as ex:
-        mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
             config, FS_ID, DEFAULT_NFS_OPTIONS
         )
 
@@ -228,10 +251,13 @@ def test_get_dns_name_bad_format_too_many_specifiers_2():
 def test_get_dns_name_unresolvable(mocker, capsys):
     config = _get_mock_config()
 
-    mocker.patch("socket.getaddrinfo", side_effect=socket.gaierror)
+    mocker.patch("mount_efs.dns_resolver.get_target_region", return_value="us-east-1")
+    mocker.patch(
+        "efs_utils_common.network_utils.socket.getaddrinfo", side_effect=socket.gaierror
+    )
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
             config, FS_ID, DEFAULT_NFS_OPTIONS
         )
 
@@ -243,7 +269,9 @@ def test_get_dns_name_unresolvable(mocker, capsys):
 
 def test_get_dns_name_special_region(mocker):
     for special_region in SPECIAL_REGIONS:
-        mocker.patch("mount_efs.get_target_region", return_value=special_region)
+        mocker.patch(
+            "mount_efs.dns_resolver.get_target_region", return_value=special_region
+        )
 
         config_section = "mount.%s" % special_region
         special_dns_name_suffix = SPECIAL_REGION_DNS_DICT[special_region]
@@ -255,7 +283,7 @@ def test_get_dns_name_special_region(mocker):
         (
             dns_name,
             ip_address,
-        ) = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
+        ) = dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
             config, FS_ID, DEFAULT_NFS_OPTIONS
         )
 
@@ -267,7 +295,7 @@ def test_get_dns_name_special_region(mocker):
 
 
 def test_get_dns_name_region_in_suffix(mocker):
-    get_target_region_mock = mocker.patch("mount_efs.get_target_region")
+    get_target_region_mock = mocker.patch("mount_efs.dns_resolver.get_target_region")
 
     for special_region in SPECIAL_REGIONS:
         special_dns_name_suffix = SPECIAL_REGION_DNS_DICT[special_region]
@@ -280,7 +308,7 @@ def test_get_dns_name_region_in_suffix(mocker):
         (
             dns_name,
             ip_address,
-        ) = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
+        ) = dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
             config, FS_ID, DEFAULT_NFS_OPTIONS
         )
 
@@ -296,13 +324,13 @@ def test_get_dns_name_region_in_suffix(mocker):
 
 def test_dns_name_can_be_resolved_dns_resolve_failure(mocker):
     dns_mock = mocker.patch("socket.getaddrinfo", side_effect=socket.gaierror)
-    result = mount_efs.dns_name_can_be_resolved(DNS_NAME)
+    result = network_utils.dns_name_can_be_resolved(DNS_NAME)
     assert not result
     utils.assert_called(dns_mock)
 
 
 def test_dns_name_can_be_resolved_dns_resolve_succeed():
-    result = mount_efs.dns_name_can_be_resolved(DNS_NAME)
+    result = network_utils.dns_name_can_be_resolved(DNS_NAME)
     assert True == result
 
 
@@ -314,11 +342,14 @@ def test_get_dns_name_and_fall_back_ip_address_success(mocker):
 
     dns_mock = mocker.patch("socket.getaddrinfo", side_effect=socket.gaierror)
     get_fallback_mount_target_ip_mock = mocker.patch(
-        "mount_efs.get_fallback_mount_target_ip_address", return_value=IP_ADDRESS
+        "mount_efs.dns_resolver.get_fallback_mount_target_ip_address",
+        return_value=IP_ADDRESS,
     )
 
-    dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
-        config, FS_ID, DEFAULT_NFS_OPTIONS
+    dns_name, ip_address = (
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
+            config, FS_ID, DEFAULT_NFS_OPTIONS
+        )
     )
 
     assert "%s.efs.%s.amazonaws.com" % (FS_ID, DEFAULT_REGION) == dns_name
@@ -336,14 +367,17 @@ def test_get_dns_name_and_mount_target_ip_address_via_option_success(mocker):
 
     dns_mock = mocker.patch("socket.getaddrinfo")
     get_fallback_mount_target_ip_mock = mocker.patch(
-        "mount_efs.get_fallback_mount_target_ip_address"
+        "mount_efs.dns_resolver.get_fallback_mount_target_ip_address"
     )
     ip_address_connect_mock = mocker.patch(
-        "mount_efs.mount_target_ip_address_can_be_resolved", return_value=True
+        "mount_efs.dns_resolver.mount_target_ip_address_can_be_resolved",
+        return_value=True,
     )
 
-    dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
-        config, FS_ID, OPTIONS_WITH_IP
+    dns_name, ip_address = (
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
+            config, FS_ID, OPTIONS_WITH_IP
+        )
     )
 
     assert "%s.efs.%s.amazonaws.com" % (FS_ID, DEFAULT_REGION) == dns_name
@@ -362,15 +396,15 @@ def test_get_dns_name_and_mount_target_ip_address_via_option_failure(mocker, cap
 
     dns_mock = mocker.patch("socket.getaddrinfo")
     get_fallback_mount_target_ip_mock = mocker.patch(
-        "mount_efs.get_fallback_mount_target_ip_address"
+        "mount_efs.dns_resolver.get_fallback_mount_target_ip_address"
     )
     ip_address_connect_mock = mocker.patch(
-        "mount_efs.mount_target_ip_address_can_be_resolved",
-        side_effect=mount_efs.FallbackException("Timeout"),
+        "mount_efs.dns_resolver.mount_target_ip_address_can_be_resolved",
+        side_effect=efs_utils_common.exceptions.FallbackException("Timeout"),
     )
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
             config, FS_ID, OPTIONS_WITH_IP
         )
 
@@ -395,12 +429,12 @@ def test_get_dns_name_and_fall_back_ip_address_failure(mocker, capsys):
 
     dns_mock = mocker.patch("socket.getaddrinfo", side_effect=socket.gaierror)
     get_fallback_mount_target_ip_mock = mocker.patch(
-        "mount_efs.get_fallback_mount_target_ip_address",
-        side_effect=mount_efs.FallbackException("timeout"),
+        "mount_efs.dns_resolver.get_fallback_mount_target_ip_address",
+        side_effect=efs_utils_common.exceptions.FallbackException("timeout"),
     )
 
     with pytest.raises(SystemExit) as ex:
-        mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
             config, FS_ID, DEFAULT_NFS_OPTIONS
         )
 
@@ -418,10 +452,13 @@ def test_get_dns_name_with_ipv6_in_options(mocker):
     ipv6_address = "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
     options_with_ipv6 = {"mounttargetip": ipv6_address}
     ip_address_connect_mock = mocker.patch(
-        "mount_efs.mount_target_ip_address_can_be_resolved", return_value=True
+        "mount_efs.dns_resolver.mount_target_ip_address_can_be_resolved",
+        return_value=True,
     )
-    dns_name, ip_address = mount_efs.get_dns_name_and_fallback_mount_target_ip_address(
-        config, FS_ID, options_with_ipv6
+    dns_name, ip_address = (
+        dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
+            config, FS_ID, options_with_ipv6
+        )
     )
 
     assert "%s.efs.%s.amazonaws.com" % (FS_ID, DEFAULT_REGION) == dns_name

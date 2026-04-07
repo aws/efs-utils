@@ -3,7 +3,6 @@
 # Licensed under the MIT License. See the LICENSE accompanying this file
 # for the specific language governing permissions and limitations under
 # the License.
-
 from contextlib import contextmanager
 from unittest.mock import MagicMock
 
@@ -92,15 +91,32 @@ def _test_main(
             return_value=("fs-deadbeef.efs.us-west-1.amazonaws.com", None),
         )
     parse_arguments_mock = mocker.patch(
-        "mount_efs.parse_arguments", return_value=("fs-deadbeef", "/", "/mnt", options)
+        "mount_efs.parse_arguments",
+        return_value=("fs-deadbeef", "/", "/mnt", options),
     )
     bootstrap_proxy_mock = mocker.patch(
-        "mount_efs.bootstrap_proxy", side_effect=dummy_contextmanager
+        "efs_utils_common.mount_utils.bootstrap_proxy", side_effect=dummy_contextmanager
     )
 
+    mock_context = mocker.MagicMock()
+    stunnel_mode_enabled = stunnel or macos or ocsp
+    mock_context.proxy_mode = "stunnel" if stunnel_mode_enabled else None
+    mocker.patch("efs_utils_common.metadata.MountContext", return_value=mock_context)
+
     if tls:
-        mocker.patch("mount_efs.verify_tlsport_can_be_connected", return_value=True)
-    mount_mock = mocker.patch("mount_efs.mount_nfs")
+        mocker.patch(
+            "efs_utils_common.network_utils.verify_tlsport_can_be_connected",
+            return_value=True,
+        )
+
+    # Mock mount_nfs at the correct path based on how it will be called
+    # If we're in legacy stunnel mode (macos, stunnel, or ocsp) and no tls, mount_nfs is called directly from main
+    # Otherwise, it might be called from within mount_with_proxy
+    legacy_stunnel_mode = stunnel or macos or ocsp
+    if not tls and legacy_stunnel_mode:
+        mount_mock = mocker.patch("mount_efs.mount_nfs")
+    else:
+        mount_mock = mocker.patch("efs_utils_common.mount_utils.mount_nfs")
 
     mount_efs.main()
 
@@ -309,7 +325,7 @@ def test_main_tlsport_is_not_integer(mocker, capsys):
 
 def test_main_tls_mount_point_mounted_with_non_nfs(mocker):
     mocker.patch("os.path.ismount", return_value=True)
-    mocker.patch("mount_efs.is_nfs_mount", return_value=False)
+    mocker.patch("efs_utils_common.mount_utils.is_nfs_mount", return_value=False)
     _test_main(mocker, tls=True, tlsport=TLS_PORT)
 
 

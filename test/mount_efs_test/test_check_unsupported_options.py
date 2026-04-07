@@ -6,24 +6,40 @@
 # the License.
 #
 
-import mount_efs
+import pytest
+
+import efs_utils_common.context as context
+import efs_utils_common.mount_options as mount_options
 
 
-def test_no_unsupported_options(capsys):
-    options = {}
+@pytest.fixture(autouse=True)
+def setup_test():
+    mount_context = context.MountContext()
+    mount_context.reset()
+    yield mount_context
+    mount_context.reset()
 
-    mount_efs.check_unsupported_options(options)
+
+def test_azid_option_unsupported(capsys):
+    options = {"azid": "use1-az1"}
+    mount_context = context.MountContext()
+    mount_context.unsupported_options = ["azid"]
+
+    with pytest.raises(SystemExit):
+        mount_options.check_unsupported_options(options)
+
+    out, err = capsys.readouterr()
+    assert "Unsupported mount options detected" in err
+    assert "azid" in err
+
+
+def test_no_efs_unsupported_options(capsys):
+    options = {"tls": None}
+    mount_context = context.MountContext()
+    mount_context.unsupported_options = ["azid"]
+
+    mount_options.check_unsupported_options(options)
 
     out, err = capsys.readouterr()
     assert not out
-
-
-def test_capath_unsupported(capsys):
-    options = {"capath": "/capath"}
-
-    mount_efs.check_unsupported_options(options)
-
-    out, err = capsys.readouterr()
-    assert "not supported" in err
-    assert "capath" in err
-    assert "capath" not in options
+    assert "tls" in options

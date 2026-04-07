@@ -1,18 +1,19 @@
-use crate::efs_prot::{BindClientResponse, BindResponse, ScaleUpConfig};
-use crate::efs_rpc::{self, PartitionId};
+use crate::awsfile_prot::{BindClientResponse, BindResponse, ScaleUpConfig};
+use crate::awsfile_rpc::{AwsFileRpcClient, PartitionId, RpcClient};
 use crate::error::{ConnectError, RpcError};
 use crate::proxy_identifier::ProxyIdentifier;
+use crate::util::time_utils::create_deadline;
 use crate::{
     controller::Event, shutdown::ShutdownHandle, tls::establish_tls_stream, tls::TlsConfig,
 };
 use async_trait::async_trait;
-use futures::future;
+use futures::future::{self, BoxFuture};
 use log::{debug, info, warn};
 use s2n_tls_tokio::TlsStream;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 use tokio::task::JoinHandle;
-use tokio::time::timeout;
+use tokio::time::{timeout_at, Instant};
 use tokio::{
     io::AsyncWriteExt,
     io::{AsyncRead, AsyncWrite},
@@ -20,26 +21,81 @@ use tokio::{
     sync::mpsc,
 };
 
+extern crate static_assertions as sa;
+
 const CONCURRENT_ATTEMPT_COUNT: u32 = 3;
 
 pub const MAX_ATTEMPT_COUNT: u32 = 120;
-const SINGLE_CONNECTION_TIMEOUT_SEC: u64 = 15;
-pub const MULTIPLEX_CONNECTION_TIMEOUT_SEC: u64 = 15;
+
+// We want default single connection timeout to be longer than multiplex one,
+// to avoid mixing up different timeouts and have a clear timeout reason.
+const SINGLE_CONNECTION_TIMEOUT_SEC: u64 = 20;
+const MULTIPLEX_CONNECTION_TIMEOUT_SEC: u64 = 15;
+sa::const_assert!(MULTIPLEX_CONNECTION_TIMEOUT_SEC < SINGLE_CONNECTION_TIMEOUT_SEC);
+const SINGLE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(SINGLE_CONNECTION_TIMEOUT_SEC);
+pub const MULTIPLEX_CONNECTION_TIMEOUT: Duration =
+    Duration::from_secs(MULTIPLEX_CONNECTION_TIMEOUT_SEC);
 
 pub trait ProxyStream: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ProxyStream for T {}
 
 #[async_trait]
 pub trait PartitionFinder<S: ProxyStream> {
+    async fn create_connect_future(&self) -> BoxFuture<'static, Result<S, ConnectError>>;
+
     async fn establish_connection(
         &self,
+        deadline: Instant,
         proxy_id: ProxyIdentifier,
-    ) -> Result<(S, Option<PartitionId>, Option<ScaleUpConfig>), ConnectError>;
+    ) -> Result<(S, Option<PartitionId>, Option<ScaleUpConfig>), ConnectError> {
+        match self.inner_establish_connection(deadline, proxy_id).await? {
+            (stream, Ok(response)) => {
+                debug!(
+                    "EFS RPC call succeeded while establishing connection. Response: {}",
+                    get_bind_response_string(&response.bind_response)
+                );
+                let partition_id = match &response.bind_response {
+                    BindResponse::READY(id) => Some(PartitionId { id: id.0 }),
+                    _ => None,
+                };
+                Ok((stream, partition_id, Some(response.scale_up_config)))
+            }
+            (_, Err(e)) => {
+                warn!("EFS RPC call errored while establishing connection. Error {e}",);
+                let stream = self.create_connect_future().await.await?;
+                return Ok((stream, None, None));
+            }
+        }
+    }
+
+    async fn inner_establish_connection(
+        &self,
+        deadline: Instant,
+        proxy_id: ProxyIdentifier,
+    ) -> Result<(S, Result<BindClientResponse, RpcError>), ConnectError> {
+        self.spawn_establish_connection_task(deadline, proxy_id)
+            .await
+            .await
+            .map_err(|join_error| ConnectError::from(join_error))?
+    }
 
     async fn spawn_establish_connection_task(
         &self,
+        deadline: Instant,
         proxy_id: ProxyIdentifier,
-    ) -> JoinHandle<Result<(S, Result<BindClientResponse, RpcError>), ConnectError>>;
+    ) -> JoinHandle<Result<(S, Result<BindClientResponse, RpcError>), ConnectError>> {
+        let connect_future = self.create_connect_future().await;
+        tokio::spawn(async move {
+            timeout_at(deadline, async {
+                let mut stream = connect_future.await?;
+                let bind_response =
+                    AwsFileRpcClient::bind_client_to_partition(&proxy_id.into(), &mut stream).await;
+                Ok((stream, bind_response))
+            })
+            .await
+            .map_err(|_| ConnectError::Timeout)?
+        })
+    }
 
     // Establish multiple connections to an EFS "Partition" to enable higher IO throughput. A
     // `target` partition should be provided if the proxy owns an existing connection to EFS. When
@@ -49,13 +105,18 @@ pub trait PartitionFinder<S: ProxyStream> {
     //
     async fn inner_establish_multiplex_connection(
         &self,
+        timeout: Duration,
         proxy_id: ProxyIdentifier,
         target: Option<PartitionId>,
         shutdown_handle: ShutdownHandle,
     ) -> Result<(PartitionId, Vec<S>, ScaleUpConfig), (ConnectError, Option<ScaleUpConfig>)> {
         let mut connect_futures = Vec::with_capacity(CONCURRENT_ATTEMPT_COUNT as usize);
         for _ in 0..CONCURRENT_ATTEMPT_COUNT {
-            connect_futures.push(self.spawn_establish_connection_task(proxy_id).await);
+            let deadline = create_deadline(SINGLE_CONNECTION_TIMEOUT);
+            connect_futures.push(
+                self.spawn_establish_connection_task(deadline, proxy_id)
+                    .await,
+            );
         }
 
         let mut connected_partitions: HashMap<PartitionId, Vec<S>> = HashMap::new();
@@ -63,8 +124,7 @@ pub trait PartitionFinder<S: ProxyStream> {
         let mut failure_count = 0;
         let mut attempt_count = CONCURRENT_ATTEMPT_COUNT;
 
-        let overall_timeout =
-            tokio::time::sleep(Duration::from_secs(MULTIPLEX_CONNECTION_TIMEOUT_SEC));
+        let overall_timeout = tokio::time::sleep(timeout);
         tokio::pin!(overall_timeout);
 
         loop {
@@ -173,7 +233,13 @@ pub trait PartitionFinder<S: ProxyStream> {
             return Err((ConnectError::MaxAttemptsExceeded, None));
         } else {
             connect_futures.swap_remove(last_failed_index);
-            connect_futures.push(self.spawn_establish_connection_task(proxy_id).await);
+            connect_futures.push(
+                self.spawn_establish_connection_task(
+                    create_deadline(SINGLE_CONNECTION_TIMEOUT),
+                    proxy_id,
+                )
+                .await,
+            );
             *attempt_count += 1;
             Ok(())
         }
@@ -188,7 +254,12 @@ pub trait PartitionFinder<S: ProxyStream> {
         shutdown_handle: ShutdownHandle,
     ) {
         let result = match self
-            .inner_establish_multiplex_connection(proxy_id, partition_id, shutdown_handle)
+            .inner_establish_multiplex_connection(
+                MULTIPLEX_CONNECTION_TIMEOUT,
+                proxy_id,
+                partition_id,
+                shutdown_handle,
+            )
             .await
         {
             Ok((id, proxy_streams, scale_up_config)) => {
@@ -265,55 +336,16 @@ pub struct PlainTextPartitionFinder {
     pub mount_target_addr: String,
 }
 
-impl PlainTextPartitionFinder {
-    async fn establish_plain_text_connection(
-        mount_target_addr: String,
-        proxy_id: ProxyIdentifier,
-    ) -> Result<(TcpStream, Result<BindClientResponse, RpcError>), ConnectError> {
-        timeout(Duration::from_secs(SINGLE_CONNECTION_TIMEOUT_SEC), async {
-            let mut tcp_stream = TcpStream::connect(mount_target_addr).await?;
-            let response = efs_rpc::bind_client_to_partition(proxy_id, &mut tcp_stream).await;
-            Ok((configure_stream(tcp_stream), response))
-        })
-        .await
-        .map_err(|_| ConnectError::Timeout)?
-    }
-}
-
 #[async_trait]
 impl PartitionFinder<TcpStream> for PlainTextPartitionFinder {
-    async fn establish_connection(
-        &self,
-        proxy_id: ProxyIdentifier,
-    ) -> Result<(TcpStream, Option<PartitionId>, Option<ScaleUpConfig>), ConnectError> {
-        let (s, bind_result) =
-            Self::establish_plain_text_connection(self.mount_target_addr.clone(), proxy_id).await?;
-        match bind_result {
-            Ok(response) => {
-                debug!(
-                    "EFS RPC call succeeded while establishing initial connection. Response: {}",
-                    get_bind_response_string(&response.bind_response)
-                );
-                let partition_id = match &response.bind_response {
-                    BindResponse::READY(id) => Some(PartitionId { id: id.0 }),
-                    _ => None,
-                };
-                Ok((s, partition_id, Some(response.scale_up_config)))
+    async fn create_connect_future(&self) -> BoxFuture<'static, Result<TcpStream, ConnectError>> {
+        let mount_target_address = self.mount_target_addr.clone();
+        Box::pin(async move {
+            match TcpStream::connect(mount_target_address).await {
+                Ok(tcp_stream) => Ok(configure_stream(tcp_stream)),
+                Err(e) => Err(ConnectError::IoError(e)),
             }
-            Err(e) => {
-                warn!("EFS RPC call errored while establishing initial connection. Error {e}",);
-                let tcp_stream = TcpStream::connect(self.mount_target_addr.clone()).await?;
-                return Ok((configure_stream(tcp_stream), None, None));
-            }
-        }
-    }
-
-    async fn spawn_establish_connection_task(
-        &self,
-        proxy_id: ProxyIdentifier,
-    ) -> JoinHandle<Result<(TcpStream, Result<BindClientResponse, RpcError>), ConnectError>> {
-        let addr = self.mount_target_addr.clone();
-        tokio::spawn(Self::establish_plain_text_connection(addr, proxy_id))
+        })
     }
 }
 
@@ -325,65 +357,15 @@ impl TlsPartitionFinder {
     pub fn new(tls_config: Arc<tokio::sync::Mutex<TlsConfig>>) -> Self {
         TlsPartitionFinder { tls_config }
     }
-
-    async fn establish_tls_connection(
-        tls_config: TlsConfig,
-        proxy_id: ProxyIdentifier,
-    ) -> Result<(TlsStream<TcpStream>, Result<BindClientResponse, RpcError>), ConnectError> {
-        timeout(Duration::from_secs(SINGLE_CONNECTION_TIMEOUT_SEC), async {
-            let mut tls_stream = establish_tls_stream(tls_config).await?;
-            let response = efs_rpc::bind_client_to_partition(proxy_id, &mut tls_stream).await;
-            Ok((tls_stream, response))
-        })
-        .await
-        .map_err(|_| ConnectError::Timeout)?
-    }
 }
 
 #[async_trait]
 impl PartitionFinder<TlsStream<TcpStream>> for TlsPartitionFinder {
-    async fn establish_connection(
+    async fn create_connect_future(
         &self,
-        proxy_id: ProxyIdentifier,
-    ) -> Result<
-        (
-            TlsStream<TcpStream>,
-            Option<PartitionId>,
-            Option<ScaleUpConfig>,
-        ),
-        ConnectError,
-    > {
+    ) -> BoxFuture<'static, Result<TlsStream<TcpStream>, ConnectError>> {
         let tls_config_copy = self.tls_config.lock().await.clone();
-        let (s, bind_result) = Self::establish_tls_connection(tls_config_copy, proxy_id).await?;
-        let (bind_response, scale_up_config) = match bind_result {
-            Ok(response) => {
-                warn!(
-                    "EFS RPC call succeeded while establishing initial connection. Response: {}",
-                    get_bind_response_string(&response.bind_response)
-                );
-                (response.bind_response, Some(response.scale_up_config))
-            }
-            Err(e) => {
-                warn!("EFS RPC call errored while establishing initial connection. Error {e}",);
-                let tls_stream = establish_tls_stream(self.tls_config.lock().await.clone()).await?;
-                return Ok((tls_stream, None, None));
-            }
-        };
-
-        match bind_response {
-            BindResponse::READY(id) => Ok((s, Some(PartitionId { id: id.0 }), scale_up_config)),
-            _ => Ok((s, None, scale_up_config)),
-        }
-    }
-
-    async fn spawn_establish_connection_task(
-        &self,
-        proxy_id: ProxyIdentifier,
-    ) -> JoinHandle<
-        Result<(TlsStream<TcpStream>, Result<BindClientResponse, RpcError>), ConnectError>,
-    > {
-        let tls_config_copy = self.tls_config.lock().await.clone();
-        tokio::spawn(Self::establish_tls_connection(tls_config_copy, proxy_id))
+        Box::pin(establish_tls_stream(tls_config_copy))
     }
 }
 
@@ -412,11 +394,15 @@ mod tests {
     async fn test_establish_connection_timeout() {
         let (_listener, port) = find_available_port().await;
 
+        let test_single_connection_timeout: Duration = Duration::from_secs(1);
+
         let error = tokio::spawn(async move {
             let partition_finder = PlainTextPartitionFinder {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
             };
-            partition_finder.establish_connection(PROXY_ID).await
+            partition_finder
+                .establish_connection(create_deadline(test_single_connection_timeout), PROXY_ID)
+                .await
         })
         .await
         .expect("join err");
@@ -428,6 +414,8 @@ mod tests {
     async fn test_establish_multiplex_timeout() {
         let (_listener, port) = find_available_port().await;
 
+        let test_multiple_connection_timeout_sec: Duration = Duration::from_secs(1);
+
         let error = tokio::spawn(async move {
             let (shutdown_handle, _waiter) = ShutdownHandle::new(CancellationToken::new());
 
@@ -435,13 +423,24 @@ mod tests {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
             };
             partition_finder
-                .inner_establish_multiplex_connection(PROXY_ID, None, shutdown_handle)
+                .inner_establish_multiplex_connection(
+                    test_multiple_connection_timeout_sec,
+                    PROXY_ID,
+                    None,
+                    shutdown_handle,
+                )
                 .await
         })
         .await
         .expect("join err");
 
-        assert!(matches!(error, Err((ConnectError::Timeout, None))));
+        // Since we did not start/configure any Server to respond, PartitionFinder should fail by timeout
+        let err = error.unwrap_err();
+        assert!(
+            matches!(err, (ConnectError::Timeout, None)),
+            "Expected ConnectError::Timeout error, actual error: {:?}",
+            err
+        );
     }
 
     #[tokio::test]
@@ -456,7 +455,12 @@ mod tests {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
             };
             partition_finder
-                .inner_establish_multiplex_connection(PROXY_ID, None, shutdown_handle_clone)
+                .inner_establish_multiplex_connection(
+                    MULTIPLEX_CONNECTION_TIMEOUT,
+                    PROXY_ID,
+                    None,
+                    shutdown_handle_clone,
+                )
                 .await
         });
 
@@ -485,15 +489,15 @@ mod tests {
 
     #[async_trait]
     impl PartitionFinder<TcpStream> for BrokenPartitionFinder {
-        async fn establish_connection(
+        async fn create_connect_future(
             &self,
-            _proxy_id: ProxyIdentifier,
-        ) -> Result<(TcpStream, Option<PartitionId>, Option<ScaleUpConfig>), ConnectError> {
+        ) -> BoxFuture<'static, Result<TcpStream, ConnectError>> {
             unimplemented!()
         }
 
         async fn spawn_establish_connection_task(
             &self,
+            _deadline: Instant,
             _proxy_id: ProxyIdentifier,
         ) -> JoinHandle<Result<(TcpStream, Result<BindClientResponse, RpcError>), ConnectError>>
         {
@@ -523,7 +527,12 @@ mod tests {
 
         let (shutdown_handle, _waiter) = ShutdownHandle::new(CancellationToken::new());
         let error = partition_finder
-            .inner_establish_multiplex_connection(PROXY_ID, None, shutdown_handle.clone())
+            .inner_establish_multiplex_connection(
+                MULTIPLEX_CONNECTION_TIMEOUT,
+                PROXY_ID,
+                None,
+                shutdown_handle.clone(),
+            )
             .await;
 
         assert!(matches!(error, Err((ConnectError::MultiplexFailure, None))));

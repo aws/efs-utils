@@ -1,0 +1,236 @@
+.TH "S3FILES" "8"
+.SH "NAME"
+\fBmount\&.s3files\fR \- Mount helper for using Amazon S3Files file systems\&.
+.SH "SYNOPSIS"
+.sp
+\fBmount\&.s3files\fR \fIfs-id-or-dns-name\fR \fImount-point\fR [\fB\-o\fR \fIoptions\fR]
+.SH "DESCRIPTION"
+.sp
+\fBmount\&.s3files\fR is part of the \fBamazon\-efs\-utils\fR \
+package. It improves mount performance and simplifies using S3Files file systems\&.
+.sp
+\fBmount\&.s3files\fR is meant to be used through the \
+\fBmount\fR(8) command for mounting s3files file systems\&.
+.sp
+\fBmount\&.s3files\fR launches a proxy process that forwards NFS traffic from the kernel's NFS client to s3files. \
+This proxy is responsible for TLS encryption, and for providing improved throughput performance.
+.sp
+\fIfs-id-or-dns-name\fR has to be of one of the following \
+two forms:
+.P
+.IP \(bu
+An s3files filesystem ID in the form of "fs\-abcd1234", generated \
+when the file system is created\&.
+.IP \(bu
+A domain name that has a resolvable DNS-CNAME record, \
+which in turn points to a fully-qualified s3files DNS name \
+in the form of "fs\-abcd1234\&.s3files\&.us-east-1\&.on\&.aws" \
+or "use1\-az1\&.fs\-abcd1234\&.s3files\&.us-east-1\&.on\&.aws"\&.
+.P
+\fImount-point\fR is the local directory \
+on which the file system will be mounted\&.
+.sp
+\fBmount\&.s3files\fR automatically applies the following NFS options:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+nfsvers=4\&.2
+rsize=1048576
+wsize=1048576
+hard
+timeo=600
+retrans=2
+noresvport
+tls
+iam
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+\fBNote:\fR S3 Files mounts always use TLS encryption and IAM authentication\&. \
+These cannot be disabled\&.
+.sp
+By default, the mount helper enforces the certificate hostname \
+checking and disables the use of Online Certificate Status Protocol (OCSP). \
+These options can be configured in the config file located at \
+\fI/etc/amazon/efs/s3files\-utils\&.conf\&\fR.
+.sp
+Additionally, the mount helper has built\-in logging for \
+troubleshooting purposes\&. These logs are located at \fI/var/log/amazon/efs\fR\&.
+.sp
+It is possible to configure your Amazon EC2 instance to automatically \
+remount your Amazon S3 file system when it reboots. For more information, \
+see the analogous online documentation for EFS at: \
+\fIhttps://docs\&.aws\&.amazon\&.com/efs/latest/ug/mount\-fs\-auto\-mount\-onreboot\&.html\fR\&.
+.sp
+The S3 Files mount helper will automatically use encryption of data in transit and IAM authentication. \
+When mounting, the mount helper will try to retrieve the required IAM credentials from the following locations: \
+the aws credentials URI passed by mount option, the AWS CLI credentials file (~/.aws/credentials), the \
+AWS CLI config file (~/\&.aws/config), the AWS_CONTAINER_CREDENTIALS_RELATIVE_URI \
+environment variable, the AssumeRoleWithWebIdentity, and the EC2 instance profile\&. \
+The first location that has credentials will be used\&.
+.sp
+.SH "OPTIONS"
+.sp
+\fB\-o\fR, Options are specified with a \fB\-o\fR flag followed by a \
+comma separated string of options\&. All of the options specified in \
+\fBnfs(5)\fR are available, in addition to the following S3 Files-specific \
+options:
+.if n \{\
+.RS 4
+.\}
+.TP
+\fBregion\fR
+Mounts the S3 file system from the specified region, overriding any config file value\&.
+.TP
+\fBtlsport=\fR\fIn\fR
+Configures the proxy process to listen for connections from the NFS client on the specified port\&. \
+This is applicable to both non-tls and tls mounts\&. By default, the \
+tlsport is chosen randomly from port range defined in the config file located \
+at \fI/etc/amazon/efs/s3files\-utils\&.conf\&\fR.
+.TP
+\fBverify=\fR\fIn\fR
+Verify TLS certificates using the specified stunnel verify level\&. For \
+more information, see \fBstunnel(8)\fR\&.
+.TP
+\fBocsp / noocsp\fR
+Selects whether to perform OCSP validation on TLS certificates\&, \
+overriding /etc/amazon/efs/s3files-utils.conf. By default OCSP is disabled. \
+For more information, see \fBstunnel(8)\fR\&. \
+The ocsp mount option is incompatible with the efs-proxy process, and will revert efs-utils \
+to the legacy "stunnel" mode, which does not support improved per-client throughput performance.
+.TP
+\fBrolearn\fR
+Role ARN for IAM authentication with AssumeRoleWithWebIdentity API\&.
+.TP
+\fBjwtpath\fR
+Identity token for IAM authentication with AssumeRoleWithWebIdentity API\&.
+.TP
+\fBaccesspoint\fR
+Mount the S3 file system using the specified access point. The access point must be \
+in the "available" state before it can be used to mount S3 Files\&.
+.TP
+\fBawsprofile\fR
+Use the named profile used to lookup IAM credentials in the AWS CLI credentials file \
+(~/.aws/credentials) or AWS CLI config file (~/.aws/config). If botocore is installed, \
+assume the named profile and use the credentials of the assumed profile. If "awsprofile" \
+is not specified, the "default" profile is used\&.
+.TP
+\fBawscredsuri\fR
+Use the relative uri to lookup IAM credentials from ecs task metadata endpoint\&.
+.TP
+\fBcafile\fR
+Use the cafile as the stunnel certificate authority file\&.
+.TP
+\fBnetns\fR
+Mount the S3 file system to the specified network namespace\&.
+.TP
+\fBazid\fR
+Mount the S3 file system to the specified availability zone ID mount target.
+.TP
+\fBmounttargetip\fR
+Mount the S3 file system to the specified mount target ip address\&.
+.TP
+\fBnodirects3read\fR
+Disable the direct S3 read path\&. When specified, all read operations go through \
+the standard NFS data path instead of reading directly from S3\&.
+.SH "EXAMPLES"
+.TP
+sudo mount -t s3files fs-abcd1234 /mnt/s3files
+Mount an S3 file system with file system ID "fs-abcd1234" at mount point \
+"/mnt/s3files" with encryption of data in transit. The mount helper will authenticate \
+with S3 Files using the system's IAM identity\&.
+.TP
+sudo mount -t s3files -o mounttargetip=192.0.0.1 /mnt/s3files
+Mount an S3 file system with file system ID "fs-abcd1234" on the mount target \
+that belongs to the file system with address "192.0.0.1" with encryption of \
+data in transit and IAM authentication\&.
+.TP
+sudo mount -t s3files -o netns=/proc/1/net/ns fs-abcd1234 /mnt/s3files
+Mount an S3 file system with file system ID "fs-abcd1234" at mount point \
+"/mnt/s3files" using encryption of data in transit and IAM authentication in given network namespace \
+'/proc/1/net/ns'
+.TP
+sudo mount -t s3files -o azid=use1-az1 fs-abcd1234 /mnt/s3files
+Mount an S3 file system with file system ID "fs-abcd1234" at mount point \
+"/mnt/s3files" to the mount target in availability zone with ID use1-az1, \
+using encryption of data in transit and IAM authentication\&.
+.TP
+sudo mount -t s3files fs-abcd1234:/child /mnt/s3files
+Mount a non-root directory of an S3 file system with file system ID \
+"fs-abcd1234" at mount point "/mnt/s3files" using encryption of data in transit \
+and IAM authentication\&.
+.TP
+sudo mount -t s3files -o verify=0 fs-abcd1234 /mnt/s3files
+Mount an S3 file system with file system ID "fs-abcd1234" at mount point \
+"/mnt/s3files" using encryption of data in transit, IAM authentication, and a verify level of 0\&.
+.TP
+sudo mount -t s3files -o ocsp fs-abcd1234 /mnt/s3files
+Mount an S3 file system with file system ID "fs-abcd1234" at mount point \
+"/mnt/s3files" using encryption of data in transit, IAM authentication, and with OCSP validation enabled\&.
+.TP
+sudo mount -t s3files custom-cname.example.com /mnt/s3files
+Mount an S3 file system using the custom DNS name \
+"custom-cname\&.example\&.com" \(em which has to \
+resolve to a fully-qualified S3Files DNS name such as \
+"fs\-abcd1234\&.s3files\&.us-east-1\&.on\&.aws" \
+\(em at mount point "/mnt/s3files" with encryption \
+of data in transit and IAM authentication\&.
+.TP
+sudo mount -t s3files -o rolearn="ROLE_ARN",jwtpath="PATH/JWT_TOKEN_FILE" fs-abcd1234 /mnt/s3files
+Mount an S3 file system with file system ID "fs-abcd1234" at mount point "/mnt/s3files" \
+with encryption of data in transit. The mount helper will assume the role "ROLE_ARN" by calling \
+the AssumeRoleWithWebIdentity API with the identity token at "PATH/JWT_TOKEN_FILE" for IAM authentication\&.
+.TP
+sudo mount -t s3files -o awsprofile=test-profile fs-abcd1234 /mnt/s3files
+Mount an S3 file system with file system ID "fs-abcd1234" at mount point "/mnt/s3files" \
+with encryption of data in transit. The mount helper will authenticate with S3 Files using \
+the system's IAM identity named profile "test profile", for which the credentials are retrieved \
+either from /root/.aws/credentials or /root/.aws/config. If the credentials are not present \
+in the credentials or config files, and there is a "[profile test-profile]" section in the \
+/root/.aws/config file, the mount helper will assume the named profile "test-profile" based \
+on the profile section configuration in root/.aws/config and use the credentials retrieved \
+with botocore to mount (botocore must be pre-installed)\&.
+.TP
+sudo mount -t s3files -o accesspoint=fsap-12345678 fs-abcd1234 /mnt/s3files
+Mount an S3 file system with file system ID "fs-abcd1234" at mount point "/mnt/s3files" \
+with encryption of data in transit and IAM authentication. The file system is mounted using the access point \
+"fsap-12345678"\&.
+.SH "FILES"
+.TP
+\fI/sbin/mount\&.s3files\fR
+The executable for the Amazon S3 Files mount helper\&.
+.TP
+\fI/usr/bin/amazon-efs-mount-watchdog\fR
+The executable for the supervisor process that monitors the network relay\&.
+.TP
+\fI/etc/amazon/efs/s3files-utils.conf\fR
+The configuration file for the Amazon S3 Files mount helper\&.
+.TP
+\fI/etc/amazon/efs/efs-utils.crt\fR
+The default Certificate Authority file used by the Amazon S3 Files mount helper\&.
+.TP
+\fI/etc/init/amazon-efs-mount-watchdog.conf\fR
+The configuration file for the supervisor process\&.
+.TP
+\fI/var/log/amazon/efs/\fR
+The directory where logs for the Amazon S3 Files mount helper, the stunnel network \
+relay, and the supervisor process are stored\&.
+.TP
+\fI/usr/share/man/man8/mount.s3files.8\fR
+The man page for the Amazon S3 Files mount helper\&.
+.SH "NOTES"
+.sp
+For more information on using the \fBamazon\-efs\-utils\fR package, see \
+\fIhttps://docs\&.aws\&.amazon\&.com/efs/latest/ug/using\-amazon\-efs\-utils\&.html\fR \
+in the Amazon EFS User Guide\&. For troubleshooting tips, see the github README: \
+\fIhttps://github\&.com/aws/efs\-utils/tree/master\fR
+.SH "SEE ALSO"
+.sp
+\fBnfs(8)\fR, \fBstunnel(8)\fR, \fBfstab(5)\fR
+.SH "COPYING"
+.sp
+Copyright 2017\-2018 Amazon\&.com, Inc\&. and its affiliates\&. All Rights Reserved\&.

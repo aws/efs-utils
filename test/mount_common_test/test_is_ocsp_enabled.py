@@ -1,0 +1,78 @@
+#
+# Copyright 2017-2018 Amazon.com, Inc. and its affiliates. All Rights Reserved.
+#
+# Licensed under the MIT License. See the LICENSE accompanying this file
+# for the specific language governing permissions and limitations under
+# the License.
+#
+
+import efs_utils_common
+import efs_utils_common.proxy as proxy
+
+try:
+    import ConfigParser
+except ImportError:
+    from configparser import ConfigParser
+
+
+def _get_config(stunnel_check_cert_validity):
+    try:
+        config = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        config = ConfigParser()
+    config.add_section(efs_utils_common.constants.CONFIG_SECTION)
+    if stunnel_check_cert_validity is not None:
+        config.set(
+            efs_utils_common.constants.CONFIG_SECTION,
+            "stunnel_check_cert_validity",
+            str(stunnel_check_cert_validity),
+        )
+    return config
+
+
+def test_is_ocsp_enabled_config_false_no_cli():
+    options = {}
+
+    ocsp_enabled = proxy.is_ocsp_enabled(_get_config(False), options)
+
+    assert ocsp_enabled is False
+
+
+def test_is_ocsp_enabled_config_true_no_cli():
+    options = {}
+
+    ocsp_enabled = proxy.is_ocsp_enabled(_get_config(True), options)
+
+    assert ocsp_enabled is True
+
+
+def test_is_ocsp_enabled_config_false_cli_true():
+    options = {"ocsp": None}
+
+    ocsp_enabled = proxy.is_ocsp_enabled(_get_config(False), options)
+
+    assert ocsp_enabled is True
+
+
+def test_is_ocsp_enabled_config_true_cli_true():
+    options = {"ocsp": None}
+
+    ocsp_enabled = proxy.is_ocsp_enabled(_get_config(True), options)
+
+    assert ocsp_enabled is True
+
+
+def test_is_ocsp_enabled_config_false_cli_false():
+    options = {"noocsp": None}
+
+    ocsp_enabled = proxy.is_ocsp_enabled(_get_config(False), options)
+
+    assert ocsp_enabled is False
+
+
+def test_is_ocsp_enabled_config_true_cli_false():
+    options = {"noocsp": None}
+
+    ocsp_enabled = proxy.is_ocsp_enabled(_get_config(True), options)
+
+    assert ocsp_enabled is False

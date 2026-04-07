@@ -1,9 +1,20 @@
-use crate::config_parser::ProxyConfig;
-use crate::connections::{PlainTextPartitionFinder, TlsPartitionFinder};
-use crate::tls::get_tls_config;
-use crate::tls::TlsConfig;
+use tikv_jemallocator::Jemalloc;
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 use clap::Parser;
-use controller::Controller;
+use efs_proxy::aws::cw_publisher::{CloudWatchClient, CloudWatchPublisher, CW_NAMESPACE_EFS};
+use efs_proxy::aws::s3_client::S3ClientStandardBuilder;
+use efs_proxy::awsfile_rpc::AwsFileRpcClient;
+use efs_proxy::config_parser::ProxyConfig;
+use efs_proxy::connections::{PlainTextPartitionFinder, TlsPartitionFinder};
+use efs_proxy::controller::Controller;
+use efs_proxy::logger;
+use efs_proxy::status_reporter;
+use efs_proxy::tls::get_tls_config;
+use efs_proxy::tls::TlsConfig;
+use efs_proxy::utils::is_running_on_lambda;
 use log::{debug, error, info};
 use std::path::Path;
 use std::sync::Arc;
@@ -12,30 +23,13 @@ use tokio::signal;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-mod config_parser;
-mod connection_task;
-mod connections;
-mod controller;
-mod efs_rpc;
-mod error;
-mod log_encoder;
-mod logger;
-mod proxy;
-mod proxy_identifier;
-mod proxy_task;
-mod rpc;
-mod shutdown;
-mod status_reporter;
-mod test_utils;
-mod tls;
-
 #[allow(clippy::all)]
 #[allow(deprecated)]
 #[allow(invalid_value)]
 #[allow(non_camel_case_types)]
 #[allow(unused_assignments)]
-mod efs_prot {
-    include!(concat!(env!("OUT_DIR"), "/efs_prot_xdr.rs"));
+mod awsfile_prot {
+    include!(concat!(env!("OUT_DIR"), "/awsfile_prot_xdr.rs"));
 }
 
 #[tokio::main]
@@ -43,7 +37,14 @@ async fn main() {
     let args = Args::parse();
 
     let proxy_config = match ProxyConfig::from_path(Path::new(&args.proxy_config_path)) {
-        Ok(config) => config,
+        Ok(mut config) => {
+            // no_direct_s3_read argument takes precedence over read_bypass_requested value from config file
+            if args.no_direct_s3_read {
+                config.nested_config.read_bypass_config.requested = false;
+                config.nested_config.read_bypass_config.enabled = false;
+            }
+            config
+        }
         Err(e) => panic!("Failed to read configuration. {}", e),
     };
 
@@ -63,6 +64,26 @@ async fn main() {
         Err(e) => panic!("Failed to create SIGTERM listener. {}", e),
     };
 
+    // Build a shared CloudWatch metric publisher for NFS reachability metrics.
+    // Only needed when read bypass is requested — the publisher at this level is only used for
+    // NFSConnectionAccessible metric in Controller::emit_nfs_reachability, which is a read-bypass feature.
+    // Skipping it when RBP is off avoids ~9 MiB of memory from AWS SDK/credentials/HTTP pool init.
+    let telemetry = &proxy_config.nested_config.telemetry_config;
+    let cw_publisher: Option<Arc<dyn CloudWatchClient>> = if is_running_on_lambda() {
+        info!("Running on Lambda, skipping CloudWatch publisher initialization");
+        None
+    } else if !proxy_config.nested_config.read_bypass_config.requested {
+        info!("Read bypass not requested, skipping CloudWatch publisher initialization");
+        None
+    } else if !telemetry.cloud_watch_metrics_enabled && !telemetry.cloud_watch_logs_enabled {
+        info!("CloudWatch metrics and logs both disabled, skipping CloudWatch publisher initialization");
+        None
+    } else {
+        Some(Arc::new(
+            CloudWatchPublisher::new_from_config(&proxy_config, None, CW_NAMESPACE_EFS).await,
+        ))
+    };
+
     let controller_handle = if args.tls {
         let tls_config = match get_tls_config(&proxy_config).await {
             Ok(config) => Arc::new(Mutex::new(config)),
@@ -73,21 +94,33 @@ async fn main() {
 
         let controller = Controller::new(
             &proxy_config.nested_config.listen_addr,
+            proxy_config.clone(),
             Arc::new(TlsPartitionFinder::new(tls_config)),
             status_reporter,
+            cw_publisher.clone(),
         )
         .await;
-        tokio::spawn(controller.run(sigterm_cancellation_token.clone()))
+        tokio::spawn(controller.run(
+            sigterm_cancellation_token.clone(),
+            AwsFileRpcClient,
+            S3ClientStandardBuilder,
+        ))
     } else {
         let controller = Controller::new(
             &proxy_config.nested_config.listen_addr,
+            proxy_config.clone(),
             Arc::new(PlainTextPartitionFinder {
                 mount_target_addr: proxy_config.nested_config.mount_target_addr.clone(),
             }),
             status_reporter,
+            cw_publisher.clone(),
         )
         .await;
-        tokio::spawn(controller.run(sigterm_cancellation_token.clone()))
+        tokio::spawn(controller.run(
+            sigterm_cancellation_token.clone(),
+            AwsFileRpcClient,
+            S3ClientStandardBuilder,
+        ))
     };
 
     tokio::select! {
@@ -150,6 +183,9 @@ pub struct Args {
 
     #[arg(long, default_value_t = false)]
     pub tls: bool,
+
+    #[arg(long, default_value_t = false)]
+    pub no_direct_s3_read: bool,
 }
 
 #[cfg(test)]

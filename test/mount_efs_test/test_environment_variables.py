@@ -8,14 +8,17 @@ import os
 
 import pytest
 
-import mount_efs
+import efs_utils_common
+import efs_utils_common.aws_credentials as aws_credentials
+import efs_utils_common.metadata as metadata
 
 from .. import utils
 
 try:
     import ConfigParser
+    from ConfigParser import NoOptionError
 except ImportError:
-    from configparser import ConfigParser
+    from configparser import ConfigParser, NoOptionError
 
 
 def test_get_aws_profile_with_env_variable(mocker):
@@ -27,9 +30,11 @@ def test_get_aws_profile_with_env_variable(mocker):
     mocker.patch.dict(os.environ, {"AWS_PROFILE": "test-profile"})
 
     # Mock file reading to return empty configs
-    mocker.patch("mount_efs.read_config", return_value=ConfigParser())
+    mocker.patch(
+        "efs_utils_common.aws_credentials.read_config", return_value=ConfigParser()
+    )
 
-    result = mount_efs.get_aws_profile(options, use_iam)
+    result = aws_credentials.get_aws_profile(options, use_iam)
     assert result == "test-profile"
 
 
@@ -41,7 +46,7 @@ def test_get_aws_profile_mount_option_takes_precedence(mocker):
     # Mock environment variable
     mocker.patch.dict(os.environ, {"AWS_PROFILE": "env-profile"})
 
-    result = mount_efs.get_aws_profile(options, use_iam)
+    result = aws_credentials.get_aws_profile(options, use_iam)
     assert result == "mount-profile"
 
 
@@ -57,9 +62,11 @@ def test_get_aws_profile_no_env_variable(mocker):
     # Mock config file to have default profile
     mock_config = mocker.MagicMock()
     mock_config.get.return_value = "fake_access_key"
-    mocker.patch("mount_efs.read_config", return_value=mock_config)
+    mocker.patch(
+        "efs_utils_common.aws_credentials.read_config", return_value=mock_config
+    )
 
-    result = mount_efs.get_aws_profile(options, use_iam)
+    result = aws_credentials.get_aws_profile(options, use_iam)
     assert result == "default"
 
 
@@ -71,7 +78,7 @@ def test_get_target_region_with_aws_region_env(mocker):
     # Mock environment variable
     mocker.patch.dict(os.environ, {"AWS_REGION": "us-west-2"})
 
-    result = mount_efs.get_target_region(config, options)
+    result = metadata.get_target_region(config, options)
     assert result == "us-west-2"
 
 
@@ -85,7 +92,7 @@ def test_get_target_region_with_aws_default_region_env(mocker):
     env_vars["AWS_DEFAULT_REGION"] = "eu-central-1"
     mocker.patch.dict(os.environ, env_vars, clear=True)
 
-    result = mount_efs.get_target_region(config, options)
+    result = metadata.get_target_region(config, options)
     assert result == "eu-central-1"
 
 
@@ -99,7 +106,7 @@ def test_get_target_region_mount_option_takes_precedence(mocker):
         os.environ, {"AWS_REGION": "us-west-2", "AWS_DEFAULT_REGION": "eu-central-1"}
     )
 
-    result = mount_efs.get_target_region(config, options)
+    result = metadata.get_target_region(config, options)
     assert result == "ap-southeast-1"
 
 
@@ -113,7 +120,7 @@ def test_get_target_region_aws_region_precedence_over_default(mocker):
         os.environ, {"AWS_REGION": "us-west-2", "AWS_DEFAULT_REGION": "eu-central-1"}
     )
 
-    result = mount_efs.get_target_region(config, options)
+    result = metadata.get_target_region(config, options)
     assert result == "us-west-2"
 
 
@@ -131,14 +138,14 @@ def test_get_target_region_fallback_to_config_file(mocker):
     }
     mocker.patch.dict(os.environ, env_vars, clear=True)
 
-    result = mount_efs.get_target_region(config, options)
+    result = metadata.get_target_region(config, options)
     assert result == "us-east-1"
 
 
 def test_get_target_region_fallback_to_metadata_service(mocker):
     """Test fallback to instance metadata when config file fails"""
     config = mocker.MagicMock()
-    config.get.side_effect = mount_efs.NoOptionError("region", "section")
+    config.get.side_effect = NoOptionError("region", "section")
     options = {}
 
     # Ensure environment variables are not set
@@ -151,8 +158,9 @@ def test_get_target_region_fallback_to_metadata_service(mocker):
 
     # Mock metadata service
     mocker.patch(
-        "mount_efs.get_region_from_instance_metadata", return_value="us-west-1"
+        "efs_utils_common.metadata.get_region_from_instance_metadata",
+        return_value="us-west-1",
     )
 
-    result = mount_efs.get_target_region(config, options)
+    result = metadata.get_target_region(config, options)
     assert result == "us-west-1"

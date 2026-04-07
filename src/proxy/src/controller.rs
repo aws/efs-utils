@@ -1,14 +1,22 @@
-use crate::connections::configure_stream;
-use crate::efs_prot::ScaleUpConfig;
-use crate::efs_rpc::PartitionId;
-use crate::shutdown::ShutdownReason;
-use crate::status_reporter::{self, StatusReporter};
 use crate::{
-    connections::{PartitionFinder, ProxyStream},
+    aws::{
+        cw_publisher::{CloudWatchClient, LogLevel},
+        s3_client::S3ClientBuilder,
+    },
+    awsfile_prot::{
+        AwsFileChannelInitArgs, AwsFileReadBypassConfigArgs, ChannelConfigArgs, ScaleUpConfig,
+    },
+    awsfile_rpc::{PartitionId, RpcClient},
+    config::channel_init_config::ChannelInitConfig,
+    config_parser::ProxyConfig,
+    connections::{configure_stream, PartitionFinder, ProxyStream},
     proxy::Proxy,
+    proxy_builder::ProxyBuilder,
     proxy_identifier::ProxyIdentifier,
     proxy_task::PerformanceStats,
-    shutdown::ShutdownHandle,
+    shutdown::{ShutdownHandle, ShutdownReason},
+    status_reporter::{self, StatusReporter},
+    utils::create_deadline,
 };
 use log::{debug, error, info, warn};
 use std::{sync::Arc, time::Duration};
@@ -19,8 +27,9 @@ pub const DEFAULT_SCALE_UP_BACKOFF: Duration = Duration::from_secs(300);
 
 pub const DEFAULT_SCALE_UP_CONFIG: ScaleUpConfig = ScaleUpConfig {
     max_multiplexed_connections: 5,
-    scale_up_bytes_per_sec_threshold: 300 * 1024 * 1024,
-    scale_up_threshold_breached_duration_sec: 1,
+    scale_up_bytes_per_ms_threshold: 300 * 1024 * 1024 / 1000,
+    scale_up_threshold_breached_duration_ms: 1000,
+    scale_up_lookback_window_size_ms: 1000,
 };
 
 #[derive(Debug)]
@@ -77,13 +86,17 @@ pub struct Controller<S: ProxyStream> {
     pub restart_count: u64,
     pub scale_up_config: ScaleUpConfig,
     pub status_reporter: StatusReporter,
+    pub proxy_config: ProxyConfig,
+    pub cw_publisher: Option<Arc<dyn CloudWatchClient>>,
 }
 
 impl<S: ProxyStream> Controller<S> {
     pub async fn new(
         listen_addr: &str,
+        proxy_config: ProxyConfig,
         partition_finder: Arc<impl PartitionFinder<S> + Sync + Send + 'static>,
         status_reporter: StatusReporter,
+        cw_publisher: Option<Arc<dyn CloudWatchClient>>,
     ) -> Self {
         let Ok(listener) = TcpListener::bind(listen_addr).await else {
             panic!("Failed to bind {}", listen_addr);
@@ -97,13 +110,30 @@ impl<S: ProxyStream> Controller<S> {
             restart_count: 0,
             scale_up_config: DEFAULT_SCALE_UP_CONFIG,
             status_reporter,
+            proxy_config,
+            cw_publisher,
         }
     }
 
-    pub async fn run(mut self, token: CancellationToken) -> Option<ShutdownReason> {
+    pub async fn run<T: RpcClient, V: S3ClientBuilder>(
+        mut self,
+        token: CancellationToken,
+        rpc_client: T,
+        s3_client_builder: V,
+    ) -> Option<ShutdownReason> {
         let mut ready_connections = None;
         // Main Proxy incarnation management loop
         loop {
+            // Set init_deadline to be 1 second less than the `proxy_init_timeout_sec`, as we
+            // expect this proxy to be killed if the initial NFS mount did not succeed when the full
+            // `proxy_init_timeout_sec` has elapsed.
+            let init_deadline = create_deadline(Duration::from_secs(
+                self.proxy_config
+                    .nested_config
+                    .proxy_init_timeout_sec
+                    .saturating_sub(1),
+            ));
+
             info!("Starting new incarnation of proxy");
             let nfs_client = match self.listener.accept().await {
                 Ok((client, socket_addr)) => {
@@ -137,22 +167,29 @@ impl<S: ProxyStream> Controller<S> {
             let (status_events_tx, mut status_events_rx) = mpsc::channel(1024);
             let (shutdown, mut waiter) = ShutdownHandle::new(token.child_token());
 
-            let (partition_id, partition_servers, scale_up_config) = match ready_connections {
+            let (partition_id, mut partition_servers, scale_up_config) = match ready_connections {
                 Some(connections) => {
                     ready_connections = None;
                     connections
                 }
                 None => {
-                    match self
+                    let result = self
                         .partition_finder
-                        .establish_connection(self.proxy_id)
-                        .await
-                    {
+                        .establish_connection(init_deadline, self.proxy_id)
+                        .await;
+
+                    self.emit_nfs_reachability(
+                        result.is_ok(),
+                        self.proxy_config.nested_config.fs_id.as_str(),
+                    )
+                    .await;
+
+                    match result {
                         Ok((s, partition_id, scale_up_config)) => {
                             (partition_id, vec![s], scale_up_config)
                         }
                         Err(e) => {
-                            warn!("Failed to establish an initial connection to EFS. Error: {e}",);
+                            warn!("Failed to establish an initial connection to EFS. Error: {e}");
                             continue;
                         }
                     }
@@ -164,8 +201,57 @@ impl<S: ProxyStream> Controller<S> {
                 None => debug!("Established initial connection without a PartitionId"),
             }
 
+            let mut configs = Vec::new();
+
+            // Add read bypass config if requested
+            if self.proxy_config.nested_config.read_bypass_config.requested {
+                configs.push(ChannelConfigArgs::AWSFILE_READ_BYPASS(
+                    AwsFileReadBypassConfigArgs {
+                        enabled: self.proxy_config.nested_config.read_bypass_config.enabled,
+                    },
+                ));
+            }
+
+            let channel_init_args = AwsFileChannelInitArgs {
+                minor_version: 1,
+                configs,
+            };
+
+            let channel_init_config = match rpc_client
+                .channel_init(
+                    init_deadline,
+                    &channel_init_args,
+                    partition_servers
+                        .get_mut(0)
+                        .expect("No awsfile server connections exist"),
+                )
+                .await
+            {
+                Ok(config) => {
+                    debug!("ChannelInitConfig: {:#?}", config);
+                    config
+                }
+                Err(e) => {
+                    warn!("{e}");
+                    ChannelInitConfig::default()
+                }
+            };
+
             self.scale_up_config = scale_up_config.unwrap_or(self.scale_up_config);
             debug!("ScaleUpConfig: {:#?}", self.scale_up_config);
+
+            let s3_client = match channel_init_config.read_bypass_config.enabled
+                && self.proxy_config.nested_config.read_bypass_config.enabled
+            {
+                true => {
+                    let s3_bucket = channel_init_config.read_bypass_config.bucket_name.clone();
+                    let s3_prefix = channel_init_config.read_bypass_config.prefix.clone();
+                    s3_client_builder
+                        .build(&s3_bucket, &s3_prefix, &self.proxy_config)
+                        .await
+                }
+                false => None,
+            };
 
             let mut state = IncarnationState::new(
                 self.proxy_id,
@@ -174,17 +260,29 @@ impl<S: ProxyStream> Controller<S> {
                 partition_servers.len() as u16,
             );
 
-            let mut proxy = Proxy::new(
+            let mut proxy = ProxyBuilder::build_proxy(
                 nfs_client,
                 partition_servers,
                 status_events_tx,
                 shutdown.clone(),
-            );
+                self.proxy_config.clone(),
+                channel_init_config,
+                s3_client,
+            )
+            .await;
 
             // Proxy status loop
+            let mut metrics_interval = tokio::time::interval_at(
+                tokio::time::Instant::now() + Duration::from_secs(60),
+                Duration::from_secs(60),
+            );
             loop {
                 let mut err = Ok(());
                 tokio::select! {
+                    _ = metrics_interval.tick() => {
+                        let fs_id = self.proxy_config.nested_config.fs_id.as_str();
+                        self.emit_nfs_reachability(true, fs_id).await;
+                    }
                     _ = self.status_reporter.await_report_request() => {
                         let report = status_reporter::Report {
                             proxy_id: state.proxy_id,
@@ -262,8 +360,8 @@ impl<S: ProxyStream> Controller<S> {
 
         state.num_connections == 1
             && state.connection_state == ConnectionSearchState::Idle
-            && stats.get_total_throughput()
-                >= self.scale_up_config.scale_up_bytes_per_sec_threshold as u64
+            && stats.get_total_throughput_per_second()
+                >= self.scale_up_config.scale_up_bytes_per_ms_threshold as u64 / 1000
     }
 
     async fn handle_event(
@@ -303,7 +401,7 @@ impl<S: ProxyStream> Controller<S> {
                         streams.len()
                     );
                     for stream in streams {
-                        proxy.add_connection(stream).await;
+                        ProxyBuilder::add_connection(proxy, stream).await;
                     }
                 } else {
                     assert_eq!(
@@ -327,5 +425,28 @@ impl<S: ProxyStream> Controller<S> {
         }
         debug!("ScaleUpConfig: {:#?}", self.scale_up_config);
         Ok(EventResult::Ok)
+    }
+
+    async fn emit_nfs_reachability(&self, is_reachable: bool, fs_id: &str) {
+        if let Some(publisher) = &self.cw_publisher {
+            let (level, message) = if is_reachable {
+                (
+                    LogLevel::Info,
+                    format!("NFS connection to EFS is established: fs_id='{}'", fs_id),
+                )
+            } else {
+                (
+                    // We use Warn level since these logs might be emitted during reconnections
+                    // (scale up / scale down, EFS-side load balancing etc), which is not a real reachibility error
+                    LogLevel::Warn,
+                    format!(
+                        "Failed to establish NFS connection to EFS: fs_id='{}'",
+                        fs_id
+                    ),
+                )
+            };
+            publisher.emit_log(level, &message);
+            publisher.publish_nfs_reachability(is_reachable, fs_id);
+        }
     }
 }
