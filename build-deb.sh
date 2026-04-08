@@ -11,7 +11,7 @@ set -ex
 
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
-VERSION=3.0.0
+VERSION=3.0.1
 RELEASE=1
 ARCH=$(dpkg --print-architecture)
 DEB_SYSTEM_RELEASE_PATH=/etc/os-release

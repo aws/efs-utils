@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 3.0.0
+Version   : 3.0.1
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -215,6 +215,9 @@ fi
 %clean
 
 %changelog
+* Wed Apr 08 2026 Yangjinan Hu <yjnhu@amazon.com> - 3.0.1
+- Fix proxy crash on NFS error in READ_BYPASS response
+
 * Tue Mar 31 2026 Samuel  Hale <samuhale@amazon.com> - 3.0.0
 - Add support for s3files
 
