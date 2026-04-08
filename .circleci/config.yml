@@ -99,6 +99,10 @@ commands:
     steps:
       - checkout
       - run:
+          name: Install latest Rust
+          command: |
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - run:
           name: Install golang
           command: |
             yum -y install wget tar gzip
@@ -120,52 +124,8 @@ commands:
       - run:
           name: Build RPM
           command: |
-            export PATH=$PATH:/usr/local/go/bin
-            go version
-            cmake --version
-            make rpm
-      - run:
-          name: Install package
-          command: |
-            yum -y install build/amazon-efs-utils*rpm
-      - run:
-          name: Check installed successfully
-          command: |
-            mount.efs --version
-      - run:
-          name: Check changelog
-          command: |
-            rpm -q --changelog amazon-efs-utils
-  build-rpm-rustup:
-    steps:
-      - run:
-          name: Install dependencies
-          command: |
-            yum install --skip-broken -y curl
-      - run:
-          name: Install latest Rust
-          command: |
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-      - run:
-          name: Install golang
-          command: |
-            yum -y install wget tar gzip
-            ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-            VERSION=$(wget -qO- https://go.dev/VERSION?m=text | head -1)
-            wget -qO- https://go.dev/dl/${VERSION}.linux-${ARCH}.tar.gz | tar -C /usr/local -xzf -
-            echo 'export PATH=$PATH:/usr/local/go/bin' >> $HOME/.bashrc
-      - checkout
-      - run:
-          name: Install dependencies
-          command: |
-            yum -y install rpm-build make systemd rust cargo openssl-devel cmake gcc gcc-c++ gcc13 gcc13-c++ perl binutils
-      - run:
-          name: Build RPM
-          command: |
             . "$HOME/.cargo/env"
             export PATH=$PATH:/usr/local/go/bin
-            export CC=gcc-13
-            export CXX=g++-13
             rustc --version
             go version
             cmake --version
@@ -182,7 +142,6 @@ commands:
           name: Check changelog
           command: |
             rpm -q --changelog amazon-efs-utils
-
   build-suse-rpm:
     steps:
       - checkout
@@ -242,11 +201,11 @@ commands:
             rpm -q --changelog amazon-efs-utils
   build-centos-repo:
     steps:
-    - run:
-        name: change the mirrors to vault.centos.org
-        command: |
-          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
-          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+      - run:
+          name: change the mirrors to vault.centos.org
+          command: |
+            sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+            sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
 jobs:
   test:
     parameters:
@@ -275,15 +234,6 @@ jobs:
       image: << parameters.image >>
     steps:
       - build-rpm
-  build-rpm-package-rustup:
-    parameters:
-      image:
-        type: string
-    executor:
-      name: linux
-      image: << parameters.image >>
-    steps:
-      - build-rpm-rustup
   build-suse-rpm-package:
     parameters:
       image:
@@ -293,16 +243,6 @@ jobs:
       image: << parameters.image >>
     steps:
       - build-suse-rpm
-  build-centos-rpm-package:
-    parameters:
-      image:
-        type: string
-    executor:
-      name: linux
-      image: << parameters.image >>
-    steps:
-      - build-centos-repo
-      - build-rpm-rustup
 workflows:
   workflow:
     jobs:
@@ -314,7 +254,7 @@ workflows:
           image: python:3.9.13
       - test:
           name: python3_10
-          image: python:3.10.13   
+          image: python:3.10.13
       - test:
           name: python3_11
           image: python:3.11.9
@@ -354,9 +294,6 @@ workflows:
       - build-rpm-package:
           name: amazon-linux-2
           image: amazonlinux:2
-      - build-rpm-package-rustup:
-          name: fedora41
-          image: fedora:41
       - build-suse-rpm-package:
           name: opensuse-leap15.1
           image: opensuse/leap:15.1
