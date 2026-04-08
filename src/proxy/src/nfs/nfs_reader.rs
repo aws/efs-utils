@@ -72,14 +72,14 @@ pub trait NfsReader<DispatcherError: Debug> {
                 Ok(batch) => {
                     if let Err(e) = self.get_dispatcher().dispatch(batch).await {
                         error!("Error sending message batch to dispatcher {:?}", e);
-                        shutdown_reason = Some(ShutdownReason::UnexpectedError);
+                        shutdown_reason = Some(ShutdownReason::NeedsRestart);
                         break;
                     }
                 }
                 Err(parse_error) => {
                     if let Err(e) = self.get_dispatcher().handle_parse_error(parse_error).await {
-                        error!("Error sending message batch to dispatcher {:?}", e);
-                        shutdown_reason = Some(ShutdownReason::UnexpectedError);
+                        error!("Error handling parsing error {:?}", e);
+                        shutdown_reason = Some(ShutdownReason::NeedsRestart);
                         break;
                     }
                 }
@@ -164,5 +164,69 @@ impl<E: Debug + Clone, S: ProxyStream> ServerSocketReader<S> for NfsServerReader
     #[cfg(test)]
     fn get_domain(&self) -> &'static str {
         self.domain_name
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rpc::rpc::RpcBatch;
+    use crate::rpc::rpc_envelope::EnvelopeBatch;
+    use crate::shutdown::{ShutdownHandle, ShutdownReason};
+    use crate::test_utils::generate_rpc_msg_fragments;
+    use dyn_clone::clone_trait_object;
+    use std::io::Cursor;
+    use std::sync::atomic::AtomicU64;
+    use tokio::sync::mpsc::error::SendError;
+    use tokio_util::sync::CancellationToken;
+
+    #[derive(Clone)]
+    struct FailingDispatcher;
+
+    #[async_trait]
+    impl Dispatcher<EnvelopeBatch<NfsRpcEnvelope>, SendError<RpcBatch>> for FailingDispatcher {
+        async fn dispatch(
+            &mut self,
+            _message: EnvelopeBatch<NfsRpcEnvelope>,
+        ) -> Result<(), SendError<RpcBatch>> {
+            Err(SendError(RpcBatch { rpcs: vec![] }))
+        }
+
+        async fn handle_parse_error(
+            &mut self,
+            _parse_error: RpcParseError,
+        ) -> Result<(), SendError<RpcBatch>> {
+            Err(SendError(RpcBatch { rpcs: vec![] }))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_send_error_triggers_needs_restart() {
+        let mut reader = NfsClientReader {
+            parser: NfsRpcParser,
+            dispatcher: Box::new(FailingDispatcher),
+            domain_name: "test",
+        };
+
+        let (shutdown, mut waiter) = ShutdownHandle::new(CancellationToken::new());
+
+        // Generate a valid RPC message so the reader parses and dispatches
+        let (data, _) = generate_rpc_msg_fragments(100, 1);
+        let cursor = Cursor::new(data.to_vec());
+
+        NfsReader::run(
+            &mut reader,
+            cursor,
+            Some(Arc::new(AtomicU64::new(0))),
+            shutdown,
+        )
+        .await;
+
+        let reason = waiter.recv().await;
+        assert_eq!(
+            reason,
+            Some(ShutdownReason::NeedsRestart),
+            "SendError should trigger NeedsRestart, not UnexpectedError"
+        );
     }
 }

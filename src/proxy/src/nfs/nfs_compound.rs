@@ -1278,4 +1278,25 @@ mod tests {
 
         // compound verification is alread done in test_in_place_replace_operation_opcode_success
     }
+
+    /// Verify that AWSFILE_READ_BYPASS4res::default (NFS error) can be
+    /// converted to READ4res::default for forwarding to the client.
+    #[test]
+    fn test_convert_read_bypass_default_to_read_default() {
+        let op = nfs_resop4::OP_AWSFILE_READ_BYPASS(AWSFILE_READ_BYPASS4res::default);
+        let result = <nfs_resop4 as NfsOperationConversion<
+            nfs_opnum4,
+            AWSFILE_READ_BYPASS4res,
+            READ4res,
+        >>::convert(op);
+
+        assert!(
+            result.is_ok(),
+            "default variant should convert successfully"
+        );
+        assert!(
+            matches!(result.unwrap(), nfs_resop4::OP_READ(READ4res::default)),
+            "Should convert to OP_READ(default)"
+        );
+    }
 }

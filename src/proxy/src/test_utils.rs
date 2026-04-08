@@ -269,3 +269,49 @@ impl crate::util::s3_data_reader::S3DataReader for CountingS3DataReader {
         })
     }
 }
+
+pub fn create_test_s3_data_locator(
+    offset: u64,
+    count: u32,
+) -> crate::nfs::nfs4_1_xdr::awsfile_bypass_data_locator {
+    crate::nfs::nfs4_1_xdr::awsfile_bypass_data_locator {
+        bucket_name: b"test-bucket".to_vec(),
+        s3_key: b"test-key".to_vec(),
+        etag: b"test-etag".to_vec(),
+        version_id: b"test-version-id".to_vec(),
+        offset,
+        count,
+    }
+}
+
+#[cfg(test)]
+pub async fn create_test_read_bypass_context(
+) -> std::sync::Arc<crate::util::read_bypass_context::ReadBypassContext> {
+    use aws_sdk_s3::operation::get_object::GetObjectOutput;
+    use aws_sdk_s3::primitives::ByteStream;
+    use aws_smithy_mocks::{mock, mock_client};
+
+    let get_object_rule = mock!(aws_sdk_s3::Client::get_object)
+        .match_requests(|_req| true)
+        .then_output(|| {
+            GetObjectOutput::builder()
+                .content_length(100)
+                .body(ByteStream::from(vec![0u8; 100]))
+                .e_tag("test-etag")
+                .build()
+        });
+
+    let mock_client = std::sync::Arc::new(mock_client!(aws_sdk_s3, [&get_object_rule]));
+    let s3_client =
+        crate::aws::s3_client::S3Client::new_with_client("test-bucket", "test-prefix", mock_client)
+            .await;
+
+    let proxy_config = crate::config_parser::ProxyConfig::default();
+    std::sync::Arc::new(crate::util::read_bypass_context::ReadBypassContext::new(
+        &proxy_config,
+        "test-bucket".to_string(),
+        "test-prefix".to_string(),
+        s3_client,
+        false,
+    ))
+}

@@ -47,7 +47,9 @@ pub fn ensure_home_env_set() {
         let uid = unsafe { libc::getuid() };
         let pw = unsafe { libc::getpwuid(uid) };
         if pw.is_null() {
-            log::warn!("HOME not set and getpwuid({}) returned null, unable to resolve home directory", uid);
+            log::warn!(
+                "HOME not set and getpwuid returned null, unable to resolve home directory"
+            );
         } else {
             let dir = unsafe { std::ffi::CStr::from_ptr((*pw).pw_dir) };
             if let Ok(dir_str) = dir.to_str() {

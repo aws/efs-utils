@@ -128,7 +128,7 @@ impl ReadBypassServerDispatcher {
     // Batch coming from the socket can contain multiple NFS compounds, each compound might need to be handled differently.
     // `preprocess_batch` performs proper in-place modification for READ_BYPASS operations
     // and sends compounds which contain bypassable reads to ReadBypassAgent.
-    // It returns batch wih compounds which can be sent to NFSClient
+    // It returns batch with compounds which can be sent to NFSClient
     async fn preprocess_batch(
         &mut self,
         mut message: NfsRpcInfo,
@@ -179,8 +179,10 @@ impl ReadBypassServerDispatcher {
                     // Payload is provided by EFS server, do nothing at this moment
                     AWSFILE_READ_BYPASS4res::NFS4_OK(_) => {}
                     AWSFILE_READ_BYPASS4res::default => {
-                        warn!("Unexpected READ_BYPASS response: AWSFILE_READ_BYPASS4res::default");
-                        return Err(ReadBypassServerDispatcherError::UnexpectedReadBypassResponse);
+                        debug!(
+                            "Server returned non-bypass status for READ_BYPASS, \
+                             forwarding error to client"
+                        );
                     }
                 }
             } else {
@@ -268,7 +270,7 @@ mod tests {
         get_sample_op_sequence_res,
     };
     use crate::rpc::rpc_envelope::{EnvelopeBatch, RpcMessageType};
-    use bytes::Bytes;
+    use bytes::{Bytes, BytesMut};
     use tokio::sync::mpsc;
     use tokio::sync::mpsc::Receiver;
 
@@ -296,13 +298,37 @@ mod tests {
 
     fn create_readbypass_envelope(bypass_res: AWSFILE_READ_BYPASS4res) -> NfsRpcEnvelope {
         let sequence_op_res = get_sample_op_sequence_res();
-        let bypass_op_res = nfs_resop4::OP_AWSFILE_READ_BYPASS(bypass_res);
+        let bypass_op_res = nfs_resop4::OP_AWSFILE_READ_BYPASS(bypass_res.clone());
 
         let compound_res = COMPOUND4res {
             status: nfsstat4::NFS4_OK,
             tag: utf8string(vec![]),
             resarray: vec![sequence_op_res, bypass_op_res],
         };
+
+        // default variant can't be serialized, build envelope directly
+        if matches!(bypass_res, AWSFILE_READ_BYPASS4res::default) {
+            use crate::nfs::nfs_compound::{NfsMetadata, RefNfsCompoundInfo};
+            use crate::rpc::rpc_envelope::{
+                EnvelopeHeader, RpcMessageParams, RpcMessageType, RpcReplyParams,
+            };
+            return NfsRpcEnvelope {
+                header: EnvelopeHeader {
+                    raw_bytes: BytesMut::new(),
+                    message_type: RpcMessageType::Reply,
+                    params: RpcMessageParams::ReplyParams(RpcReplyParams {
+                        xid: 1,
+                        auth_verifier: onc_rpc::auth::AuthFlavor::AuthNone(None),
+                    }),
+                },
+                body: RefNfsCompound::Compound4res(RefNfsCompoundInfo::new(
+                    NfsMetadata::default(),
+                    compound_res,
+                    vec![nfs_opnum4::OP_SEQUENCE, nfs_opnum4::OP_AWSFILE_READ_BYPASS],
+                    BytesMut::new(),
+                )),
+            };
+        }
 
         create_nfs_rpc_envelope_from_compound(RpcMessageType::Reply, compound_res)
     }
@@ -550,5 +576,42 @@ mod tests {
 
         let result = dispatcher.dispatch(message_batch).await;
         assert!(result.is_err()); // Should fail due to mismatch
+    }
+
+    /// When the server returns an NFS error (e.g. NFS4ERR_STALE)
+    /// for a READ_BYPASS operation, get_compound_read_bypass_status
+    /// should return BypassRejected instead of an error.
+    #[tokio::test]
+    async fn test_nfs_error_in_readbypass_returns_bypass_rejected() {
+        use crate::nfs::nfs_compound::{NfsMetadata, RefNfsCompoundInfo};
+
+        let sequence_op_res = get_sample_op_sequence_res();
+        let bypass_op_res = nfs_resop4::OP_AWSFILE_READ_BYPASS(AWSFILE_READ_BYPASS4res::default);
+        let compound_res = COMPOUND4res {
+            status: nfsstat4::NFS4ERR_STALE,
+            tag: utf8string(vec![]),
+            resarray: vec![sequence_op_res, bypass_op_res],
+        };
+        let mut ref_info = RefNfsCompoundInfo::new(
+            NfsMetadata::default(),
+            compound_res,
+            vec![nfs_opnum4::OP_SEQUENCE, nfs_opnum4::OP_AWSFILE_READ_BYPASS],
+            BytesMut::new(),
+        );
+
+        let result = ReadBypassServerDispatcher::get_compound_read_bypass_status(&mut ref_info);
+
+        assert!(
+            result.is_ok(),
+            "NFS error should not cause dispatcher error: {:?}",
+            result.err()
+        );
+        assert!(
+            matches!(
+                result.unwrap(),
+                CompoundResponsePreprocessStatus::BypassRejected
+            ),
+            "NFS error in READ_BYPASS should be treated as bypass rejection"
+        );
     }
 }

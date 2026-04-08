@@ -403,8 +403,14 @@ impl FileReadAheadCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nfs::nfs4_1_xdr::nfs_fh4;
+    use crate::test_utils::{
+        create_test_read_bypass_context, create_test_s3_data_locator, CountingS3DataReader,
+    };
+    use crate::util::read_bypass_request_context::ReadBypassRequestContext;
     use crate::util::s3_data_reader::S3ReadBypassReader;
     use std::sync::atomic::Ordering;
+    use test_case::test_case;
 
     #[tokio::test]
     async fn test_new_file_readahead_cache() {
@@ -880,8 +886,6 @@ mod tests {
             .expect("Task should not panic");
     }
 
-    use crate::test_utils::CountingS3DataReader;
-
     fn create_test_locator(
         offset: u64,
         count: u32,
@@ -978,5 +982,97 @@ mod tests {
             1,
             "Should create cache state for large file"
         );
+    }
+
+    /// Stress test for concurrent reads with cache eviction pressure.
+    #[ignore]
+    #[test_case(false, false ; "single_file_random")]
+    #[test_case(false, true ; "single_file_sequential")]
+    #[test_case(true, false ; "multi_file_random")]
+    #[test_case(true, true ; "multi_file_sequential")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn test_concurrent_reads_and_evictions_stress(multi_file: bool, sequential: bool) {
+        use tokio_util::sync::CancellationToken;
+
+        const NUM_THREADS: u64 = 8;
+        const FILE_SIZE: u64 = 4 * 1024 * 1024;
+        const MIN_READ_SIZE: u64 = 4 * 1024;
+        const MAX_READ_SIZE: u64 = 1024 * 1024;
+        const TEST_DURATION_SECS: u64 = 15;
+
+        let config = ReadBypassConfig {
+            readahead_cache_init_memory_size_mb: 8,
+            readahead_cache_max_memory_size_mb: 8,
+            ..Default::default()
+        };
+        let reader = Arc::new(CountingS3DataReader::new());
+        let cache = Arc::new(FileReadAheadCache::new(
+            256 * 1024,
+            64 * 1024,
+            reader.clone(),
+            &config,
+        ));
+        cache.set_self_weak(Arc::downgrade(&cache));
+
+        let cancel = CancellationToken::new();
+
+        let handles: Vec<_> = (0..NUM_THREADS)
+            .map(|thread_id| {
+                let cache = cache.clone();
+                let cancel = cancel.clone();
+
+                tokio::spawn(async move {
+                    use rand::Rng;
+
+                    let ctx = create_test_read_bypass_context().await;
+                    let file_id = if multi_file { thread_id } else { 0 };
+                    let fh = nfs_fh4(file_id.to_le_bytes().to_vec());
+                    let mut seq_offset = 0u64;
+
+                    while !cancel.is_cancelled() {
+                        let read_size = rand::thread_rng().gen_range(MIN_READ_SIZE..MAX_READ_SIZE);
+                        let offset = if sequential {
+                            let o = seq_offset;
+                            seq_offset = (seq_offset + read_size) % (FILE_SIZE - MAX_READ_SIZE);
+                            o
+                        } else {
+                            rand::thread_rng().gen_range(0..FILE_SIZE - read_size)
+                        };
+
+                        let locator = create_test_s3_data_locator(offset, read_size as u32);
+                        let req = Arc::new(ReadBypassRequestContext::new(ctx.clone(), 0));
+
+                        if let Ok(Some(data)) = cache
+                            .process_read_request(req, fh.clone(), FILE_SIZE, locator)
+                            .await
+                        {
+                            assert!(
+                                verify_data(&data, offset, read_size as usize),
+                                "data corruption at offset={} expected_len={} actual_len={}",
+                                offset,
+                                read_size,
+                                data.len()
+                            );
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        tokio::time::sleep(std::time::Duration::from_secs(TEST_DURATION_SECS)).await;
+        cancel.cancel();
+        for h in handles {
+            h.await.expect("task panicked");
+        }
+    }
+
+    /// Verify data matches expected pattern: byte at position i = (offset + i) % 256
+    fn verify_data(data: &[u8], offset: u64, expected_len: usize) -> bool {
+        if data.len() != expected_len {
+            return false;
+        }
+        data.iter()
+            .enumerate()
+            .all(|(i, &b)| b == ((offset as usize + i) % 256) as u8)
     }
 }
