@@ -32,7 +32,7 @@ lru = "0.16"
 moka = { version = "0.12.10", features = ["sync"] }
 nix = { version = "0.26.2", features = ["signal"]}
 onc-rpc = "0.3.3"
-rand = "0.8.5"
+rand = "0.10.1"
 regex = "1.10.2"
 tikv-jemallocator = "0.6"
 s2n-tls = {version="^0.3.19",features=["fips"]}
