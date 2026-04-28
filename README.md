@@ -82,7 +82,7 @@ You can use AWS Systems Manager Distributor to automatically install or update `
 
 ### Other Linux Distributions
 
-Building from source requires Rust 1.70+, Cargo, Go 1.17.13+, CMake 3.0+, GCC/G++, and Perl. See [INSTALL.md](INSTALL.md) for detailed build instructions for your distribution.
+Building from source requires Rust 1.91.1+, Cargo, Go 1.17.13+, CMake 3.0+, GCC/G++, and Perl. See [INSTALL.md](INSTALL.md) for detailed build instructions for your distribution.
 
 ### For macOS Tahoe, Sequoia, Sonoma, and Ventura distributions
 
@@ -283,7 +283,7 @@ Make sure to re run the failed mount again after running the prior commands befo
 # Upgrading Efs-utils Versions
 
 ### Upgrading efs-utils from v1 to v2
-Efs-utils v2.0.0 replaces stunnel, which provides TLS encryptions for mounts, with efs-proxy an AWS built component built. Efs-proxy is the primary the foundation for all new feature support for EFS. To receive the performance benefits of efs-proxy, you need to re-mount any existing mounts. Note: Efs-proxy is not compatible with OCSP or Mac clients. In these cases, efs-utils will automatically revert back to using stunnel. If you build efs-utils v2.0.0 from source Rust and Cargo are required for versions 1.70+.
+Efs-utils v2.0.0 replaces stunnel, which provides TLS encryptions for mounts, with efs-proxy an AWS built component built. Efs-proxy is the primary the foundation for all new feature support for EFS. To receive the performance benefits of efs-proxy, you need to re-mount any existing mounts. Note: Efs-proxy is not compatible with OCSP or Mac clients. In these cases, efs-utils will automatically revert back to using stunnel.
 
 ### Upgrading from efs-utils v2 to v3
 Efs-utils v3.0.0 adds support for S3 Files. There are no breaking changes upgrading from v2 to v3.0.0.

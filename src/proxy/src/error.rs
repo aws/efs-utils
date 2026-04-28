@@ -46,4 +46,6 @@ pub enum RpcError {
     OncRpc(#[from] onc_rpc::Error),
     #[error("awsfile_channel_init rpc failed. Reason: `{0}`")]
     AwsFileChannelInitFailure(String),
+    #[error("awsfile_channel_init rpc timed out")]
+    ChannelInitTimeout,
 }

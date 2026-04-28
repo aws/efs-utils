@@ -48,7 +48,7 @@ jobs:
             }
 
       - name: Send issue comments notification to Slack
-        if: github.event_name == 'issue_comment' && !github.event.issue.pull_request 
+        if: github.event_name == 'issue_comment' && !github.event.issue.pull_request
         uses: slackapi/slack-github-action@v2.1.1
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}

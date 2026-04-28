@@ -10,6 +10,7 @@ use crate::{
     config::channel_init_config::ChannelInitConfig,
     config_parser::ProxyConfig,
     connections::{configure_stream, PartitionFinder, ProxyStream},
+    error::RpcError,
     proxy::Proxy,
     proxy_builder::ProxyBuilder,
     proxy_identifier::ProxyIdentifier,
@@ -31,9 +32,9 @@ pub const DEFAULT_SCALE_UP_BACKOFF: Duration = Duration::from_secs(300);
 
 pub const DEFAULT_SCALE_UP_CONFIG: ScaleUpConfig = ScaleUpConfig {
     max_multiplexed_connections: 5,
-    scale_up_bytes_per_ms_threshold: 300 * 1024 * 1024 / 1000,
-    scale_up_threshold_breached_duration_ms: 1000,
-    scale_up_lookback_window_size_ms: 1000,
+    scale_up_bytes_per_sec_threshold: 300 * 1024 * 1024,
+    scale_up_threshold_breached_duration_sec: 1,
+    scale_up_lookback_window_size_sec: 1,
 };
 
 #[derive(Debug)]
@@ -179,6 +180,7 @@ impl<S: ProxyStream> Controller<S> {
             let (status_events_tx, mut status_events_rx) = mpsc::channel(1024);
             let (shutdown, mut waiter) = ShutdownHandle::new(token.child_token());
 
+            let used_reused_connections = ready_connections.is_some();
             let (partition_id, mut partition_servers, scale_up_config) = match ready_connections {
                 Some(connections) => {
                     ready_connections = None;
@@ -251,6 +253,11 @@ impl<S: ProxyStream> Controller<S> {
                 }
                 Err(e) => {
                     warn!("{e}");
+                    if used_reused_connections && matches!(&e, RpcError::ChannelInitTimeout) {
+                        warn!("channel_init timed out on reused connections, restarting with fresh connections");
+                        ready_connections = None;
+                        continue;
+                    }
                     ChannelInitConfig::default()
                 }
             };
@@ -400,7 +407,7 @@ impl<S: ProxyStream> Controller<S> {
         state.num_connections == 1
             && state.connection_state == ConnectionSearchState::Idle
             && stats.get_total_throughput_per_second()
-                >= self.scale_up_config.scale_up_bytes_per_ms_threshold as u64 / 1000
+                >= self.scale_up_config.scale_up_bytes_per_sec_threshold as u64
     }
 
     async fn handle_event(

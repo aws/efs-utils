@@ -1,3 +1,7 @@
+# v3.1.1
+- Update proxy connection scaling logic
+- Fix IndexError in get_system_release_version on SUSE SLES 16
+
 # v3.1.0
 - Enable readahead caching in proxy for bypassed reads
 - Clean up warnings in proxy
