@@ -524,6 +524,28 @@ def test_get_system_release_version_linux_read_from_os_release_path(mocker):
     utils.assert_called_n_times(open_mock, 2)
 
 
+@unittest.skipIf(sys.version_info[1] < 7, "Not supported in python3.6 and below.")
+def test_get_system_release_version_linux_os_release_with_comment_containing_pretty_name(
+    mocker,
+):
+    """SUSE SLES 16 has a comment line mentioning PRETTY_NAME before the actual key."""
+    mocker.patch(
+        "efs_utils_common.platform_utils.check_if_platform_is_mac", return_value=False
+    )
+    os_release_content = (
+        "# The NAME and PRETTY_NAME fields have been chosen for compatibility.\n"
+        'PRETTY_NAME="SUSE Linux Enterprise Server 16.0"\n'
+    )
+    mock = mock_open()
+    mock.side_effect = [
+        FileNotFoundError,
+        mock_open(read_data=os_release_content).return_value,
+    ]
+    mocker.patch("builtins.open", mock)
+    result = platform_utils.get_system_release_version()
+    assert result == "SUSE Linux Enterprise Server 16.0"
+
+
 def test_get_system_release_version_linux_unknown(mocker):
     mocker.patch(
         "efs_utils_common.platform_utils.check_if_platform_is_mac", return_value=False

@@ -46,8 +46,10 @@ def get_system_release_version():
     try:
         with open(OS_RELEASE_PATH) as f:
             for line in f:
-                if "PRETTY_NAME" in line:
-                    return line.split("=")[1].strip()
+                line = line.strip()
+                if line.startswith("PRETTY_NAME="):
+                    value = line.split("=", 1)[1].strip()
+                    return value.strip('"').strip("'")
     except IOError:
         logging.debug("Unable to read %s", OS_RELEASE_PATH)
 

@@ -12,9 +12,9 @@ This guide provides detailed instructions for building `efs-utils` from source o
 
 ## Build Prerequisites
 
-Building efs-utils v2.0+ requires the following dependencies:
+Building efs-utils v3.0+ requires the following dependencies:
 
-* `rust` 1.70+
+* `rust` 1.91.1+
 * `cargo`
 * `go` 1.17.13+
 * `perl`
@@ -166,6 +166,16 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 . "$HOME/.cargo/env"
 ```
 
+### `make rpm` fails due to "rustc X.X.X is not supported by the following packages" ###
+
+Your system Rust is older than 1.91.1. Remove the system Rust, install via rustup, and build with `make rpm-without-system-rust`:
+```bash
+sudo yum remove -y cargo rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+. "$HOME/.cargo/env"
+make rpm-without-system-rust
+```
+
 ### You installed a new version of rust with the above command, but your system is still using the rust installed by the package manager ###
 
 When installing rust with the rustup script above, the script will fail if it detects a rust already exists on the system.
@@ -198,8 +208,8 @@ If rust dependencies was installed using rustup and the package manager does not
 
 ```
 error: Failed build dependencies:
-    cargo is needed by amazon-efs-utils-2.1.0-1.el7_9.x86_64
-    rust is needed by amazon-efs-utils-2.1.0-1.el7_9.x86_64
+    cargo is needed by amazon-efs-utils-3.1.0-1.el8.x86_64
+    rust is needed by amazon-efs-utils-3.1.0-1.el8.x86_64
 ```
 
 In this case, the 'make rpm' command in the installation script above should be replaced by 'make rpm-without-system-rust' to remove the rpmbuild dependency check.

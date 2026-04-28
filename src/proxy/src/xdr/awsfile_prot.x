@@ -29,9 +29,9 @@ struct ProxyIdentifier {
 
 struct ScaleUpConfig {
         int max_multiplexed_connections;
-        int scale_up_bytes_per_ms_threshold;
-        int scale_up_threshold_breached_duration_ms;
-        int scale_up_lookback_window_size_ms;
+        int scale_up_bytes_per_sec_threshold;
+        int scale_up_threshold_breached_duration_sec;
+        int scale_up_lookback_window_size_sec;
 };
 
 enum BindResponseType {

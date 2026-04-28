@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 3.1.0
+Version   : 3.1.1
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -215,6 +215,10 @@ fi
 %clean
 
 %changelog
+* Mon Apr 27 2026 Zachary Maguire <maguirza@amazon.com> - 3.1.1
+- Update proxy connection scaling logic
+- Fix IndexError in get_system_release_version on SUSE SLES 16
+
 * Fri Apr 17 2026 Samuel Hale <samuhale@amazon.com> - 3.1.0
 - Enable readahead caching in proxy for bypassed reads
 - Clean up warnings in proxy
