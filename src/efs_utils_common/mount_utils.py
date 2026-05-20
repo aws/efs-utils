@@ -87,12 +87,35 @@ def mount_nfs(config, dns_name, path, mountpoint, options, fallback_ip_address=N
     ):
         return
 
-    logging.info('Executing: "%s"', " ".join(command))
+    final_attempt_timeout_sec = get_int_value_from_config_file(
+        config,
+        "retry_nfs_mount_command_timeout_sec",
+        DEFAULT_NFS_MOUNT_COMMAND_TIMEOUT_SEC,
+    )
+
+    logging.info(
+        'Executing: "%s" with %s sec time limit.'
+        % (" ".join(command), final_attempt_timeout_sec)
+    )
 
     proc = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True
     )
-    out, err = proc.communicate()
+    try:
+        out, err = proc.communicate(timeout=final_attempt_timeout_sec)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        proc.wait()
+        err = b"final mount attempt timed out after %d sec" % final_attempt_timeout_sec
+        message = 'Failed to mount %s at %s: %s' % (
+            dns_name,
+            mountpoint,
+            err.decode("utf-8", errors="replace"),
+        )
+        fatal_error(err.decode("utf-8", errors="replace"), message, 32)
 
     if proc.returncode == 0:
         post_mount_nfs_success(config, options, dns_name, mountpoint)
