@@ -45,6 +45,7 @@ def _test_main(
     crossaccount=False,
     stunnel=False,
     macos=False,
+    fake=False,
 ):
     options = {}
 
@@ -92,7 +93,7 @@ def _test_main(
         )
     parse_arguments_mock = mocker.patch(
         "mount_efs.parse_arguments",
-        return_value=("fs-deadbeef", "/", "/mnt", options),
+        return_value=("fs-deadbeef", "/", "/mnt", options, fake),
     )
     bootstrap_proxy_mock = mocker.patch(
         "efs_utils_common.mount_utils.bootstrap_proxy", side_effect=dummy_contextmanager
@@ -124,6 +125,12 @@ def _test_main(
     utils.assert_called_once(network_status_check_mock)
     utils.assert_called_once(get_dns_mock)
     utils.assert_called_once(parse_arguments_mock)
+
+    if fake:
+        utils.assert_not_called(mount_mock)
+        utils.assert_not_called(bootstrap_proxy_mock)
+        return
+
     utils.assert_called_once(mount_mock)
 
     stunnel_mode_enabled = stunnel or macos or ocsp
@@ -375,3 +382,18 @@ def test_main_crossaccount_without_tls_option(mocker):
 
 def test_main_crossaccount_tls_and_ap_option(mocker):
     _test_main(mocker, crossaccount=True, tls=True, ap_id=AP_ID, tlsport=TLS_PORT)
+
+
+def test_main_fake_mount_no_tls(mocker):
+    """Test that -f/--fake skips the actual mount (non-TLS path)."""
+    _test_main(mocker, fake=True)
+
+
+def test_main_fake_mount_with_tls(mocker):
+    """Test that -f/--fake skips the actual mount (TLS path)."""
+    _test_main(mocker, tls=True, tlsport=TLS_PORT, fake=True)
+
+
+def test_main_fake_mount_with_stunnel(mocker):
+    """Test that -f/--fake skips the actual mount (stunnel path)."""
+    _test_main(mocker, stunnel=True, fake=True)

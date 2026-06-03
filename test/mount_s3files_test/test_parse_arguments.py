@@ -31,7 +31,7 @@ def test_parse_arguments_with_fqdn_uses_azid_not_az(mocker):
         "mount_s3files.match_device", return_value=("fs-deadbeef", "/", "use1-az2")
     )
 
-    fsid, path, mountpoint, options = mount_s3files.parse_arguments(
+    fsid, path, mountpoint, options, fake = mount_s3files.parse_arguments(
         None, ["mount", dns_name, "/dir", "-o", "rw"]
     )
 
@@ -41,3 +41,4 @@ def test_parse_arguments_with_fqdn_uses_azid_not_az(mocker):
     assert "azid" in options
     assert options["azid"] == "use1-az2"
     assert "az" not in options, "'az' is unsupported for s3files, should use 'azid'"
+    assert fake is False

@@ -96,13 +96,14 @@ def parse_arguments_early_exit(args=None):
 
 
 def parse_arguments(config, args=None):
-    """Parse arguments, return (fsid, path, mountpoint, options)"""
+    """Parse mount helper arguments, return (fsid, path, mountpoint, options, fake)."""
     if args is None:
         args = sys.argv
 
     fsname = None
     mountpoint = None
     options = {}
+    fake = False
 
     if not check_if_platform_is_mac():
         if len(args) > 1:
@@ -112,6 +113,9 @@ def parse_arguments(config, args=None):
         if len(args) > 4 and "-o" in args[:-1]:
             options_index = args.index("-o") + 1
             options = parse_options(args[options_index])
+        # "-f" means "fake mount" on Linux and "force a RW-to-RO permission downgrade" on macOS
+        if "-f" in args[3:]:
+            fake = True
     else:
         if len(args) > 1:
             fsname = args[-2]
@@ -129,7 +133,7 @@ def parse_arguments(config, args=None):
     # even if they don't provide az with option, we update the options with that info
     fs_id, path, az = match_device(config, fsname, options)
 
-    return fs_id, path, mountpoint, add_field_in_options(options, "az", az)
+    return fs_id, path, mountpoint, add_field_in_options(options, "az", az), fake
 
 
 def main():
@@ -153,7 +157,7 @@ def main():
     context.config_file_path = CONFIG_FILE
     context.unsupported_options = MOUNT_TYPE_SPECIFIC_UNSUPPORTED_OPTIONS
 
-    fs_id, path, mountpoint, options = parse_arguments(config)
+    fs_id, path, mountpoint, options, fake = parse_arguments(config)
 
     # Use stunnel instead of efs-proxy for tls mounts,
     # and attach non-tls mounts directly to the mount target.
@@ -180,6 +184,10 @@ def main():
 
     if check_if_platform_is_mac() and "notls" not in options:
         options["tls"] = None
+
+    if fake:
+        logging.info("Fake mount mode enabled (-f), skipping actual mount")
+        return
 
     if "tls" not in options and legacy_stunnel_mode_enabled(options, config):
         mount_nfs(
