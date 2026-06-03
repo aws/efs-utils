@@ -71,7 +71,7 @@ def test_parse_arguments_no_mount_point(capsys):
 
 
 def test_parse_arguments_default_path():
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
         None, ["mount", "fs-deadbeef", "/dir"]
     )
 
@@ -79,10 +79,11 @@ def test_parse_arguments_default_path():
     assert "/" == path
     assert "/dir" == mountpoint
     assert {} == options
+    assert fake is False
 
 
 def test_parse_arguments_custom_path():
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
         None, ["mount", "fs-deadbeef:/home", "/dir"]
     )
 
@@ -90,10 +91,11 @@ def test_parse_arguments_custom_path():
     assert "/home" == path
     assert "/dir" == mountpoint
     assert {} == options
+    assert fake is False
 
 
 def test_parse_arguments_verbose():
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
         None, ["mount", "fs-deadbeef:/home", "/dir", "-v", "-o", "foo,bar=baz,quux"]
     )
 
@@ -101,10 +103,11 @@ def test_parse_arguments_verbose():
     assert "/home" == path
     assert "/dir" == mountpoint
     assert {"foo": None, "bar": "baz", "quux": None} == options
+    assert fake is False
 
 
 def test_parse_arguments():
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
         None, ["mount", "fs-deadbeef:/home", "/dir", "-o", "foo,bar=baz,quux"]
     )
 
@@ -112,6 +115,7 @@ def test_parse_arguments():
     assert "/home" == path
     assert "/dir" == mountpoint
     assert {"foo": None, "bar": "baz", "quux": None} == options
+    assert fake is False
 
 
 def test_parse_arguments_with_az_dns_name_mount_az_not_in_option(mocker):
@@ -121,7 +125,7 @@ def test_parse_arguments_with_az_dns_name_mount_az_not_in_option(mocker):
     mocker.patch(
         "mount_efs.match_device", return_value=("fs-deadbeef", "/", "us-east-1a")
     )
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
         None, ["mount", dns_name, "/dir", "-o", "foo,bar=baz,quux"]
     )
 
@@ -129,11 +133,12 @@ def test_parse_arguments_with_az_dns_name_mount_az_not_in_option(mocker):
     assert "/" == path
     assert "/dir" == mountpoint
     assert {"foo": None, "bar": "baz", "quux": None, "az": "us-east-1a"} == options
+    assert fake is False
 
 
 def test_parse_arguments_macos(mocker):
     mocker.patch("mount_efs.check_if_platform_is_mac", return_value=True)
-    fsid, path, mountpoint, options = mount_efs.parse_arguments(
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
         None,
         [
             "mount",
@@ -152,3 +157,103 @@ def test_parse_arguments_macos(mocker):
     assert "/home" == path
     assert "/dir" == mountpoint
     assert {"foo": None, "bar": "baz", "quux": None} == options
+    assert fake is False
+
+
+# ---------------------------------------------------------------------------
+# Fake mount (-f) detection tests
+#
+# On Linux, mount(8) passes -f as a standalone flag to the helper after the
+# positional args (spec, dir). See the EXTERNAL HELPERS section of mount(8):
+#   /sbin/mount.suffix spec dir [-sfnv] [-o options]
+#   https://man7.org/linux/man-pages/man8/mount.8.html
+#
+# On macOS, mount(8) does NOT pass -f to the helper. -f means MNT_FORCE
+# (force permission downgrade), not fake/dry-run, and is converted to "-o force".
+#   Source: mountfs() in apple-oss-distributions/diskdev_cmds/mount.tproj/mount.c
+# ---------------------------------------------------------------------------
+
+
+def test_parse_arguments_fake_mount_linux():
+    """Linux: -f after fsname and mountpoint is detected as fake mount."""
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
+        None, ["mount.efs", "fs-deadbeef", "/mnt", "-f"]
+    )
+    assert fake is True
+
+
+def test_parse_arguments_fake_mount_linux_with_options():
+    """Linux: -f before -o options is detected as fake mount while respecting options.
+
+    mount(8) constructs: /sbin/mount.efs spec dir [-sfnv] [-o options]
+    """
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
+        None, ["mount.efs", "fs-deadbeef", "/mnt", "-f", "-o", "tls"]
+    )
+    assert fake is True
+    assert "tls" in options
+
+
+def test_parse_arguments_fake_mount_linux_with_verbose():
+    """Linux: -f alongside -v (verbose) flag."""
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
+        None, ["mount.efs", "fs-deadbeef", "/mnt", "-f", "-v", "-o", "tls"]
+    )
+    assert fake is True
+
+
+def test_parse_arguments_no_fake_mount_linux():
+    """Linux: no -f flag means fake is False."""
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
+        None, ["mount.efs", "fs-deadbeef", "/mnt", "-o", "tls"]
+    )
+    assert fake is False
+
+
+def test_parse_arguments_no_fake_mount_minimal():
+    """Linux: minimal args (no flags, no options) means fake is False."""
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
+        None, ["mount.efs", "fs-deadbeef", "/mnt"]
+    )
+    assert fake is False
+
+
+def test_parse_arguments_fake_not_in_spec(mocker):
+    """Linux: -f appearing as the spec (args[1]) is not treated as fake.
+
+    args[1] is the file system name, not a flag. Only args[3:] are checked.
+    match_device is mocked because "-f" is not a valid file system name
+    and would fail before we can check the fake flag.
+    """
+    mocker.patch("mount_efs.match_device", return_value=("-f", "/", None))
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
+        None, ["mount.efs", "-f", "/mnt"]
+    )
+    assert fake is False
+
+
+def test_parse_arguments_fake_not_in_dir():
+    """Linux: -f appearing as the dir (args[2]) is not treated as fake.
+
+    args[2] is the mountpoint, not a flag. Only args[3:] are checked.
+    """
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
+        None, ["mount.efs", "fs-deadbeef", "-f"]
+    )
+    assert fake is False
+    assert mountpoint == "-f"
+
+
+def test_parse_arguments_fake_mount_macos_ignored(mocker):
+    """macOS: -f in argv is NOT treated as fake mount.
+
+    On macOS, mount(8) converts -f to MNT_FORCE and passes it as "-o force",
+    never as a standalone -f flag. If -f somehow appeared in argv on macOS
+    (e.g. direct invocation), it should be ignored.
+    """
+    mocker.patch("mount_efs.check_if_platform_is_mac", return_value=True)
+    fsid, path, mountpoint, options, fake = mount_efs.parse_arguments(
+        None,
+        ["mount_efs", "-o", "tls", "-f", "fs-deadbeef:/home", "/dir"],
+    )
+    assert fake is False
