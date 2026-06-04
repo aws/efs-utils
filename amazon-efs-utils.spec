@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 3.1.1
+Version   : 3.1.2
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -215,6 +215,11 @@ fi
 %clean
 
 %changelog
+* Tue Jun 2 2026 Michael Adams <admsam@amazon.com> - 3.1.2
+- Fix channel init deadline establishment
+- Update STS endpoint resolution
+- Add RHEL10 support to efs-utils
+
 * Mon Apr 27 2026 Zachary Maguire <maguirza@amazon.com> - 3.1.1
 - Update proxy connection scaling logic
 - Fix IndexError in get_system_release_version on SUSE SLES 16

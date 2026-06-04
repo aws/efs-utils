@@ -137,16 +137,6 @@ impl<S: ProxyStream> Controller<S> {
         let mut ready_connections = None;
         // Main Proxy incarnation management loop
         loop {
-            // Set init_deadline to be 1 second less than the `proxy_init_timeout_sec`, as we
-            // expect this proxy to be killed if the initial NFS mount did not succeed when the full
-            // `proxy_init_timeout_sec` has elapsed.
-            let init_deadline = create_deadline(Duration::from_secs(
-                self.proxy_config
-                    .nested_config
-                    .proxy_init_timeout_sec
-                    .saturating_sub(1),
-            ));
-
             info!("Starting new incarnation of proxy");
             let nfs_client = match self.listener.accept().await {
                 Ok((client, socket_addr)) => {
@@ -175,6 +165,18 @@ impl<S: ProxyStream> Controller<S> {
                 error!("Failed to check if data was sent by the NFS client. {}", e);
                 return Some(ShutdownReason::UnexpectedError);
             }
+
+            // Set init_deadline to be 1 second less than the `proxy_init_timeout_sec`, as we
+            // expect this proxy to be killed if the initial NFS mount did not succeed when the full
+            // `proxy_init_timeout_sec` has elapsed.
+            // Set after accept so the timeout budget is not consumed by time spent waiting for
+            // the NFS client to reconnect.
+            let init_deadline = create_deadline(Duration::from_secs(
+                self.proxy_config
+                    .nested_config
+                    .proxy_init_timeout_sec
+                    .saturating_sub(1),
+            ));
 
             // Create Status Notifications channel, to be used by Proxy's status_reporter for notifying controller about Proxy status
             let (status_events_tx, mut status_events_rx) = mpsc::channel(1024);
@@ -215,11 +217,11 @@ impl<S: ProxyStream> Controller<S> {
                 None => debug!("Established initial connection without a PartitionId"),
             }
 
-            let mut configs = Vec::new();
-
-            // Add read bypass config if requested
-            if self.proxy_config.nested_config.read_bypass_config.requested {
-                configs.push(ChannelConfigArgs::AWSFILE_READ_BYPASS_V2(
+            // Skip channel init if read bypass is not requested
+            let channel_init_config = if !self.proxy_config.nested_config.read_bypass_config.requested {
+                ChannelInitConfig::default()
+            } else {
+                let configs = vec![ChannelConfigArgs::AWSFILE_READ_BYPASS_V2(
                     AwsFileReadBypassConfigArgsV2 {
                         enabled: self.proxy_config.nested_config.read_bypass_config.enabled,
                         efs_utils_version: self
@@ -229,36 +231,36 @@ impl<S: ProxyStream> Controller<S> {
                             .as_bytes()
                             .to_vec(),
                     },
-                ));
-            }
+                )];
 
-            let channel_init_args = AwsFileChannelInitArgs {
-                minor_version: AWSFILE_CHANNEL_INIT_MINOR_VERSION,
-                configs,
-            };
+                let channel_init_args = AwsFileChannelInitArgs {
+                    minor_version: AWSFILE_CHANNEL_INIT_MINOR_VERSION,
+                    configs,
+                };
 
-            let channel_init_config = match rpc_client
-                .channel_init(
-                    init_deadline,
-                    &channel_init_args,
-                    partition_servers
-                        .get_mut(0)
-                        .expect("No awsfile server connections exist"),
-                )
-                .await
-            {
-                Ok(config) => {
-                    debug!("ChannelInitConfig: {:#?}", config);
-                    config
-                }
-                Err(e) => {
-                    warn!("{e}");
-                    if used_reused_connections && matches!(&e, RpcError::ChannelInitTimeout) {
-                        warn!("channel_init timed out on reused connections, restarting with fresh connections");
-                        ready_connections = None;
-                        continue;
+                match rpc_client
+                    .channel_init(
+                        init_deadline,
+                        &channel_init_args,
+                        partition_servers
+                            .get_mut(0)
+                            .expect("No awsfile server connections exist"),
+                    )
+                    .await
+                {
+                    Ok(config) => {
+                        debug!("ChannelInitConfig: {:#?}", config);
+                        config
                     }
-                    ChannelInitConfig::default()
+                    Err(e) => {
+                        warn!("{e}");
+                        if used_reused_connections && matches!(&e, RpcError::ChannelInitTimeout) {
+                            warn!("channel_init timed out on reused connections, restarting with fresh connections");
+                            ready_connections = None;
+                            continue;
+                        }
+                        ChannelInitConfig::default()
+                    }
                 }
             };
 
