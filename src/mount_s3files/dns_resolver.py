@@ -142,7 +142,8 @@ def match_device(config, device, options):
         return remote, path, None
 
     try:
-        primary, secondaries, _ = socket.gethostbyname_ex(remote)
+        fqdn = remote if remote.endswith(".") else remote + "."
+        primary, secondaries, _ = socket.gethostbyname_ex(fqdn)
         hostnames = list(filter(lambda e: e is not None, [primary] + secondaries))
     except socket.gaierror:
         create_default_cloudwatchlog_agent_if_not_exist(config, options)

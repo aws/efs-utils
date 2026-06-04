@@ -17,6 +17,7 @@ Efs-utils for EFS and S3 file systems are supported on the following Linux distr
 | Amazon Linux 2023    | `rpm` | `systemd` |
 | RHEL 8               | `rpm` | `systemd` |
 | RHEL 9               | `rpm` | `systemd` |
+| RHEL 10              | `rpm` | `systemd` |
 | Ubuntu 20.04         | `deb` | `systemd` |
 | Ubuntu 22.04         | `deb` | `systemd` |
 | Ubuntu 24.04         | `deb` | `systemd` |

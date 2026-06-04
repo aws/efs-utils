@@ -75,7 +75,7 @@ sudo yum -y install gcc13 gcc13-c++
 # For openSUSE Tumbleweed
 sudo zypper install -y gcc13 gcc13-c++
 
-# For Fedora 42 and RHEL 10, package manager does not provide GCC 13 or earlier
+# For Fedora 42, package manager does not provide GCC 13 or earlier
 # Follow offical GCC instruction to install desired version of GCC
 # https://gcc.gnu.org/install/
 
@@ -83,6 +83,19 @@ sudo zypper install -y gcc13 gcc13-c++
 export CC=gcc-13
 export CXX=g++-13
 # Then proceed with the normal build steps
+```
+
+**RHEL 10, use clang**
+
+```bash
+# Install clang
+sudo dnf install -y clang
+
+# Set clang as the compiler for the build
+export CC=clang
+export CXX=clang++
+export CFLAGS="-Wno-unused-command-line-argument"
+export CXXFLAGS="-Wno-unused-command-line-argument"
 ```
 
 **Ubuntu 20.04, upgrade to use gcc-10 and g++-10**

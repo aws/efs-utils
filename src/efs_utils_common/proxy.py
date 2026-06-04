@@ -54,7 +54,10 @@ from efs_utils_common.constants import (
 )
 from efs_utils_common.context import MountContext
 from efs_utils_common.error_reporting import fatal_error
-from efs_utils_common.file_utils import create_required_directory
+from efs_utils_common.file_utils import (
+    create_required_directory,
+    get_file_safe_mountpoint_name,
+)
 from efs_utils_common.metadata import (
     STUNNEL_EFS_CONFIG,
     STUNNEL_GLOBAL_CONFIG,
@@ -163,7 +166,7 @@ def find_existing_mount_using_tls_port(state_file_dir, tls_port):
 def get_mount_specific_filename(fs_id, mountpoint, tls_port):
     return "%s.%s.%d" % (
         fs_id,
-        os.path.abspath(mountpoint).replace(os.sep, ".").lstrip("."),
+        get_file_safe_mountpoint_name(mountpoint),
         tls_port,
     )
 

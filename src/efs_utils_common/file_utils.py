@@ -80,3 +80,24 @@ def check_and_remove_lock_file(path, file):
             logging.debug(
                 "%s does not exist, The file is already removed nothing to do", path
             )
+
+
+def get_file_safe_mountpoint_name(mountpoint):
+    """Convert a mount path to a dot-separated, filename-safe string.
+
+    State files on disk use the mountpoint as part of their filename (e.g.
+    fs-deadbeef.mnt.efs.20407). Since filenames cannot contain '/', this
+    function replaces path separators with dots and strips the leading dots
+    that result from the root '/'.
+
+    Both proxy.py (at mount time) and the watchdog (at health-check time)
+    must produce the same string for a given mountpoint, otherwise the
+    watchdog cannot match state files to active mounts and will incorrectly
+    kill TLS tunnels. See https://github.com/aws/efs-utils/issues/218.
+
+    Examples:
+        /mnt/efs   -> mnt.efs
+        /.efs      -> efs
+        /          -> '' (empty string)
+    """
+    return os.path.abspath(mountpoint).replace(os.sep, ".").lstrip(".")

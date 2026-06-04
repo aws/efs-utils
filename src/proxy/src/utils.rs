@@ -42,6 +42,7 @@ pub fn has_sufficient_memory_for_readahead_cache() -> bool {
 
 /// Ensures HOME environment variable is set by resolving it from /etc/passwd if missing.
 /// The AWS SDK needs HOME to resolve ~/.aws/credentials for profile-based credential loading.
+/// This matches the mount helper's approach of using getpwuid for home dir resolution.
 pub fn ensure_home_env_set() {
     if std::env::var("HOME").is_err() {
         let uid = unsafe { libc::getuid() };

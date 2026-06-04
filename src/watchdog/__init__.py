@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "3.1.1"
+VERSION = "3.1.2"
 SERVICE = "elasticfilesystem"
 FS_PREFIX = "fs-"
 
@@ -482,6 +482,8 @@ def get_aws_security_credentials_from_webidentity(config, role_arn, token_file, 
 
 def get_sts_endpoint_url(config, region):
     dns_name_suffix = get_dns_name_suffix(config, region)
+    if dns_name_suffix == "on.aws":
+        dns_name_suffix = "amazonaws.com"
     return STS_ENDPOINT_URL_FORMAT.format(region, dns_name_suffix)
 
 
@@ -712,10 +714,18 @@ def parse_options(options):
     return opts
 
 
+def get_file_safe_mountpoint_name(mountpoint):
+    """Convert a mount path to a dot-separated, filename-safe string.
+
+    This is a local copy of efs_utils_common.file_utils.get_file_safe_mountpoint_name().
+    The watchdog cannot import from efs_utils_common due to its install location.
+    Both copies must stay in sync — see https://github.com/aws/efs-utils/issues/218.
+    """
+    return os.path.abspath(mountpoint).replace(os.sep, ".").lstrip(".")
+
+
 def get_file_safe_mountpoint(mount):
-    mountpoint = os.path.abspath(mount.mountpoint).replace(os.sep, ".")
-    if mountpoint.startswith("."):
-        mountpoint = mountpoint[1:]
+    mountpoint = get_file_safe_mountpoint_name(mount.mountpoint)
 
     opts = parse_options(mount.options)
     if "port" not in opts:

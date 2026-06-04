@@ -1,3 +1,8 @@
+# v3.1.2
+- Fix channel init deadline establishment
+- Update STS endpoint resolution
+- Add RHEL10 support to efs-utils
+
 # v3.1.1
 - Update proxy connection scaling logic
 - Fix IndexError in get_system_release_version on SUSE SLES 16

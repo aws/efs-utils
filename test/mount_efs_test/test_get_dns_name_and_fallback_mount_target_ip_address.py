@@ -326,7 +326,7 @@ def test_dns_name_can_be_resolved_dns_resolve_failure(mocker):
     dns_mock = mocker.patch("socket.getaddrinfo", side_effect=socket.gaierror)
     result = network_utils.dns_name_can_be_resolved(DNS_NAME)
     assert not result
-    utils.assert_called(dns_mock)
+    dns_mock.assert_called_once_with(DNS_NAME + ".", None, socket.AF_UNSPEC)
 
 
 def test_dns_name_can_be_resolved_dns_resolve_succeed():

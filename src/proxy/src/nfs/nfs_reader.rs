@@ -180,6 +180,8 @@ mod tests {
     use tokio::sync::mpsc::error::SendError;
     use tokio_util::sync::CancellationToken;
 
+    /// Mock dispatcher that always returns SendError to simulate
+    /// a dropped connection (receiver side of channel gone).
     #[derive(Clone)]
     struct FailingDispatcher;
 
@@ -200,6 +202,10 @@ mod tests {
         }
     }
 
+    /// When the dispatcher channel is dropped (SendError), the
+    /// nfs_reader should signal NeedsRestart, not UnexpectedError.
+    /// This ensures the proxy restarts instead of exiting on
+    /// transient connection loss (e.g., load shedding RST).
     #[tokio::test]
     async fn test_dispatch_send_error_triggers_needs_restart() {
         let mut reader = NfsClientReader {

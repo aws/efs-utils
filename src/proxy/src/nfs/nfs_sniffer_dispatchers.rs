@@ -59,7 +59,6 @@ pub struct NfsSnifferServerDispatcher {
 #[async_trait]
 impl Dispatcher<NfsRpcInfo, NfsServerDispatcherError> for NfsSnifferServerDispatcher {
     async fn dispatch(&mut self, message: NfsRpcInfo) -> Result<(), NfsServerDispatcherError> {
-
         let rpc_batch: RpcBatch = message.into();
 
         return self

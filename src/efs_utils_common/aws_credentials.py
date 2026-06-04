@@ -308,6 +308,8 @@ def get_aws_security_credentials_from_pod_identity(config, is_fatal=False):
 
 def get_sts_endpoint_url(config, region):
     dns_name_suffix = get_dns_name_suffix(config, region)
+    if dns_name_suffix == "on.aws":
+        dns_name_suffix = "amazonaws.com"
     return STS_ENDPOINT_URL_FORMAT.format(region, dns_name_suffix)
 
 
