@@ -255,9 +255,6 @@ workflows:
           name: python3_14
           image: python:3.14.3
       - build-deb-package:
-          name: ubuntu-latest
-          image: ubuntu:latest
-      - build-deb-package:
           name: ubuntu18
           image: ubuntu:18.04
       - build-deb-package:
