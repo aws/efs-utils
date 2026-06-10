@@ -80,10 +80,7 @@ def get_ipv6_addresses(hostname):
 
 def dns_name_can_be_resolved(dns_name):
     try:
-        # Trailing dot forces absolute FQDN resolution, preventing the resolver
-        # from appending VPC search domains (e.g. .compute.internal).
-        fqdn = dns_name if dns_name.endswith(".") else dns_name + "."
-        addr_info = socket.getaddrinfo(fqdn, None, socket.AF_UNSPEC)
+        addr_info = socket.getaddrinfo(dns_name, None, socket.AF_UNSPEC)
         return len(addr_info) > 0
     except socket.gaierror:
         return False

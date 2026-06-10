@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 3.1.2
+Version   : 3.1.3
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -215,6 +215,9 @@ fi
 %clean
 
 %changelog
+* Tue Jun 9 2026 Samuel Hale <samuhale@amazon.com> - 3.1.3
+- Rollback DNS Query Change
+
 * Tue Jun 2 2026 Michael Adams <admsam@amazon.com> - 3.1.2
 - Fix channel init deadline establishment
 - Update STS endpoint resolution

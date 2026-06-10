@@ -1,3 +1,6 @@
+# v3.1.3
+- Rollback DNS Query Change
+
 # v3.1.2
 - Fix channel init deadline establishment
 - Update STS endpoint resolution
