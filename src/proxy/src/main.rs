@@ -100,7 +100,14 @@ async fn main() {
             status_reporter,
             cw_publisher.clone(),
         )
-        .await;
+        .await
+        .unwrap_or_else(|_| {
+            let p = std::path::Path::new(&proxy_config.pid_file_path);
+            if p.exists() {
+                let _ = std::fs::remove_file(p);
+            }
+            std::process::exit(1);
+        });
         tokio::spawn(controller.run(
             sigterm_cancellation_token.clone(),
             AwsFileRpcClient,
@@ -116,7 +123,14 @@ async fn main() {
             status_reporter,
             cw_publisher.clone(),
         )
-        .await;
+        .await
+        .unwrap_or_else(|_| {
+            let p = std::path::Path::new(&proxy_config.pid_file_path);
+            if p.exists() {
+                let _ = std::fs::remove_file(p);
+            }
+            std::process::exit(1);
+        });
         tokio::spawn(controller.run(
             sigterm_cancellation_token.clone(),
             AwsFileRpcClient,
