@@ -124,7 +124,9 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
                 ip_address=ip_address, fallback_message=fallback_message
             )
 
-    if dns_name_can_be_resolved(dns_name):
+    if dns_name_can_be_resolved(dns_name, get_boolean_config_item_value(
+        config, CONFIG_SECTION, "prefer_ipv4", default_value=False
+    )):
         return dns_name, None
 
     logging.info(
@@ -204,6 +206,12 @@ def get_fallback_mount_target_ip_address_helper(config, options, fs_id):
     if "IpAddress" in mount_target:
         return mount_target.get("IpAddress")
     elif "Ipv6Address" in mount_target:
+        if get_boolean_config_item_value(
+            config, CONFIG_SECTION, "prefer_ipv4", default_value=False
+        ):
+            raise FallbackException(
+                "Mount target has only an IPv6 address but prefer_ipv4 is enabled."
+            )
         return mount_target.get("Ipv6Address")
 
 
@@ -256,8 +264,12 @@ def match_device(config, device, options):
         return remote, path, None
 
     try:
+        prefer_ipv4 = get_boolean_config_item_value(
+            config, CONFIG_SECTION, "prefer_ipv4", default_value=False
+        )
         addrinfo = socket.getaddrinfo(
-            remote, None, socket.AF_UNSPEC, socket.SOCK_STREAM, 0, socket.AI_CANONNAME
+            remote, None, socket.AF_INET if prefer_ipv4 else socket.AF_UNSPEC,
+            socket.SOCK_STREAM, 0, socket.AI_CANONNAME
         )
         hostnames = list(
             set(

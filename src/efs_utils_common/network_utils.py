@@ -78,9 +78,10 @@ def get_ipv6_addresses(hostname):
         return []
 
 
-def dns_name_can_be_resolved(dns_name):
+def dns_name_can_be_resolved(dns_name, prefer_ipv4=False):
     try:
-        addr_info = socket.getaddrinfo(dns_name, None, socket.AF_UNSPEC)
+        family = socket.AF_INET if prefer_ipv4 else socket.AF_UNSPEC
+        addr_info = socket.getaddrinfo(dns_name, None, family)
         return len(addr_info) > 0
     except socket.gaierror:
         return False

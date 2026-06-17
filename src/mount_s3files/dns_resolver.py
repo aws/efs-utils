@@ -10,6 +10,7 @@ import logging
 import socket
 
 from efs_utils_common.cloudwatch import create_default_cloudwatchlog_agent_if_not_exist
+from efs_utils_common.config_utils import get_boolean_config_item_value
 from efs_utils_common.constants import CONFIG_SECTION, FS_ID_REGEX_PATTERN
 from efs_utils_common.context import MountContext
 from efs_utils_common.error_reporting import fatal_error
@@ -90,7 +91,9 @@ def get_dns_name_and_mount_target_ip_address(config, fs_id, options):
                 ip_address=ip_address, fallback_message=fallback_message
             )
 
-    if dns_name_can_be_resolved(dns_name):
+    if dns_name_can_be_resolved(dns_name, get_boolean_config_item_value(
+        config, CONFIG_SECTION, "prefer_ipv4", default_value=False
+    )):
         return dns_name, None
 
     logging.info(

@@ -188,6 +188,10 @@ pub struct EfsConfig {
     /// efs-utils version string for channel init
     #[serde(alias = "efs_utils_version", default)]
     pub efs_utils_version: String,
+
+    /// When true, only connect to IPv4 addresses when resolving the mount target hostname
+    #[serde(alias = "prefer_ipv4", deserialize_with = "deserialize_bool", default)]
+    pub prefer_ipv4: bool,
 }
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct ReadBypassConfig {
@@ -487,6 +491,7 @@ checkHost = fs-12341234.efs.us-east-1.amazonaws.com
                 proxy_logging_max_bytes: DEFAULT_PROXY_LOGGING_MAX_BYTES(),
                 proxy_logging_file_count: DEFAULT_PROXY_LOGGING_FILE_COUNT(),
                 efs_utils_version: String::new(),
+                prefer_ipv4: false,
             },
         };
 
@@ -584,6 +589,7 @@ jwt_path = baz
                 proxy_logging_max_bytes: DEFAULT_PROXY_LOGGING_MAX_BYTES(),
                 proxy_logging_file_count: DEFAULT_PROXY_LOGGING_FILE_COUNT(),
                 efs_utils_version: String::new(),
+                prefer_ipv4: false,
             },
         };
 
@@ -689,6 +695,7 @@ readahead_max_window_size_bytes = {test_value}
                 proxy_logging_max_bytes: DEFAULT_PROXY_LOGGING_MAX_BYTES(),
                 proxy_logging_file_count: DEFAULT_PROXY_LOGGING_FILE_COUNT(),
                 efs_utils_version: String::new(),
+                prefer_ipv4: false,
             },
         };
 

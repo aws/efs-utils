@@ -10,8 +10,10 @@ use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use log::{debug, info, warn};
 use s2n_tls_tokio::TlsStream;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
+use tokio::net::lookup_host;
 use tokio::task::JoinHandle;
 use tokio::time::{timeout_at, Instant};
 use tokio::{
@@ -334,14 +336,21 @@ pub fn get_bind_response_string(bind_response: &BindResponse) -> String {
 #[derive(Clone)]
 pub struct PlainTextPartitionFinder {
     pub mount_target_addr: String,
+    pub prefer_ipv4: bool,
 }
 
 #[async_trait]
 impl PartitionFinder<TcpStream> for PlainTextPartitionFinder {
     async fn create_connect_future(&self) -> BoxFuture<'static, Result<TcpStream, ConnectError>> {
         let mount_target_address = self.mount_target_addr.clone();
+        let prefer_ipv4 = self.prefer_ipv4;
         Box::pin(async move {
-            match TcpStream::connect(mount_target_address).await {
+            let stream = if prefer_ipv4 {
+                TcpStream::connect(resolve_addr(&mount_target_address).await?).await
+            } else {
+                TcpStream::connect(mount_target_address).await
+            };
+            match stream {
                 Ok(tcp_stream) => Ok(configure_stream(tcp_stream)),
                 Err(e) => Err(ConnectError::IoError(e)),
             }
@@ -351,11 +360,15 @@ impl PartitionFinder<TcpStream> for PlainTextPartitionFinder {
 
 pub struct TlsPartitionFinder {
     tls_config: Arc<tokio::sync::Mutex<TlsConfig>>,
+    pub prefer_ipv4: bool,
 }
 
 impl TlsPartitionFinder {
-    pub fn new(tls_config: Arc<tokio::sync::Mutex<TlsConfig>>) -> Self {
-        TlsPartitionFinder { tls_config }
+    pub fn new(tls_config: Arc<tokio::sync::Mutex<TlsConfig>>, prefer_ipv4: bool) -> Self {
+        TlsPartitionFinder {
+            tls_config,
+            prefer_ipv4,
+        }
     }
 }
 
@@ -364,9 +377,26 @@ impl PartitionFinder<TlsStream<TcpStream>> for TlsPartitionFinder {
     async fn create_connect_future(
         &self,
     ) -> BoxFuture<'static, Result<TlsStream<TcpStream>, ConnectError>> {
-        let tls_config_copy = self.tls_config.lock().await.clone();
-        Box::pin(establish_tls_stream(tls_config_copy))
+        let mut tls_config_copy = self.tls_config.lock().await.clone();
+        let prefer_ipv4 = self.prefer_ipv4;
+        Box::pin(async move {
+            if prefer_ipv4 {
+                let addr = resolve_addr(&tls_config_copy.remote_addr).await?;
+                tls_config_copy.remote_addr = addr.to_string();
+            }
+            establish_tls_stream(tls_config_copy).await
+        })
     }
+}
+
+/// Resolve `addr` (host:port) to the first IPv4 `SocketAddr`.
+/// Returns `ConnectError::IoError` if no IPv4 address is found.
+async fn resolve_addr(addr: &str) -> Result<SocketAddr, ConnectError> {
+    lookup_host(addr)
+        .await
+        .map_err(ConnectError::IoError)?
+        .find(|a| a.is_ipv4())
+        .ok_or_else(|| ConnectError::IoError(std::io::Error::other("no IPv4 address found")))
 }
 
 #[cfg(test)]
@@ -399,6 +429,7 @@ mod tests {
         let error = tokio::spawn(async move {
             let partition_finder = PlainTextPartitionFinder {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
+                prefer_ipv4: false,
             };
             partition_finder
                 .establish_connection(create_deadline(test_single_connection_timeout), PROXY_ID)
@@ -421,6 +452,7 @@ mod tests {
 
             let partition_finder = PlainTextPartitionFinder {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
+                prefer_ipv4: false,
             };
             partition_finder
                 .inner_establish_multiplex_connection(
@@ -453,6 +485,7 @@ mod tests {
         let task = tokio::spawn(async move {
             let partition_finder = PlainTextPartitionFinder {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
+                prefer_ipv4: false,
             };
             partition_finder
                 .inner_establish_multiplex_connection(
@@ -565,12 +598,48 @@ mod tests {
         });
         let tls_partition_finder = TlsPartitionFinder {
             tls_config: tls_config_ptr.clone(),
+            prefer_ipv4: false,
         };
         let _ = kill(nix::unistd::Pid::this(), Signal::SIGHUP);
         rx.await.unwrap();
         assert_ne!(
             old_cert,
             tls_partition_finder.tls_config.lock().await.client_cert
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_addr_returns_ipv4() {
+        let result = resolve_addr("127.0.0.1:2049").await;
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert!(result.unwrap().is_ipv4());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_addr_no_ipv4_returns_error() {
+        let result = resolve_addr("[::1]:2049").await;
+        assert!(
+            matches!(result, Err(ConnectError::IoError(_))),
+            "expected IoError for IPv6-only address, got {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_plain_text_finder_prefer_ipv4_connects() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { listener.accept().await });
+
+        let finder = PlainTextPartitionFinder {
+            mount_target_addr: format!("127.0.0.1:{}", port),
+            prefer_ipv4: true,
+        };
+        let stream = finder.create_connect_future().await.await;
+        assert!(
+            stream.is_ok(),
+            "expected connection to succeed, got {:?}",
+            stream
         );
     }
 }

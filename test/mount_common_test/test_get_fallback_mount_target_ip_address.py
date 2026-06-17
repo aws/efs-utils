@@ -367,3 +367,24 @@ def test_get_fallback_mount_target_ip_address_helper_prefer_ipv4(mocker):
     )
 
     assert ip_address == ipv4_address
+
+
+def test_get_fallback_mount_target_ip_address_helper_ipv6_only_prefer_ipv4(mocker):
+    config = _get_mock_config()
+    config.set(efs_utils_common.constants.CONFIG_SECTION, "prefer_ipv4", "true")
+
+    mocker.patch(
+        "mount_efs.dns_resolver.get_botocore_client",
+        side_effect=[MOCK_EFS_AGENT, MOCK_EC2_AGENT],
+    )
+
+    ipv6_address = "2001:db8:3333:4444:5555:6666:7777:8888"
+    mocker.patch(
+        "mount_efs.dns_resolver.get_mount_target_in_az",
+        return_value={"Ipv6Address": ipv6_address},
+    )
+
+    with pytest.raises(efs_utils_common.exceptions.FallbackException) as excinfo:
+        dns_resolver.get_fallback_mount_target_ip_address_helper(config, {}, FS_ID)
+
+    assert "prefer_ipv4" in str(excinfo.value)

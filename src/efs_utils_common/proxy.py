@@ -424,6 +424,10 @@ def write_stunnel_config_file(
         efs_config["fs_id"] = fs_id
         efs_config["region"] = region
         efs_config["efs_utils_version"] = VERSION
+        if get_boolean_config_item_value(
+            config, CONFIG_SECTION, "prefer_ipv4", default_value=False
+        ):
+            efs_config["prefer_ipv4"] = "true"
 
     stunnel_config = "\n".join(
         serialize_stunnel_config(global_config)
