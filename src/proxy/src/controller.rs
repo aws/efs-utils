@@ -138,12 +138,17 @@ impl<S: ProxyStream> Controller<S> {
         partition_finder: Arc<impl PartitionFinder<S> + Sync + Send + 'static>,
         status_reporter: StatusReporter,
         cw_publisher: Option<Arc<dyn CloudWatchClient>>,
-    ) -> Self {
-        let Ok(listener) = TcpListener::bind(listen_addr).await else {
-            panic!("Failed to bind {}", listen_addr);
-        };
+    ) -> Result<Self, std::io::Error> {
+        let listener = TcpListener::bind(listen_addr).await.map_err(|e| {
+            error!(
+                "Failed to bind to {}: {}. \
+                Ensure the address is reachable and the port is not already in use.",
+                listen_addr, e
+            );
+            e
+        })?;
 
-        Self {
+        Ok(Self {
             listener,
             partition_finder,
             proxy_id: ProxyIdentifier::new(),
@@ -157,7 +162,7 @@ impl<S: ProxyStream> Controller<S> {
             last_reachability_emit_at: None,
             reachability_emit_period: METRICS_EMISSION_PERIOD,
             consecutive_connect_failures: 0,
-        }
+        })
     }
 
     pub async fn run<T: RpcClient, V: S3ClientBuilder>(
@@ -838,5 +843,24 @@ mod tests {
             matches!(reached, Ok(Some(()))),
             "NFS client connecting after the idle socket was dropped was not served"
         );
+    }
+
+    #[tokio::test]
+    async fn test_controller_new_bind_failure_returns_err() {
+        // Occupy a port so the second bind attempt fails.
+        let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = occupied.local_addr().unwrap();
+
+        let (_status_requester, status_reporter) = create_status_channel();
+        let result = Controller::new(
+            &addr.to_string(),
+            ProxyConfig::default(),
+            Arc::new(MockPartitionFinder),
+            status_reporter,
+            None,
+        )
+        .await;
+
+        assert!(result.is_err(), "expected Err when port is already bound");
     }
 }
