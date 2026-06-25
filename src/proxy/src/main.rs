@@ -96,7 +96,10 @@ async fn main() {
         let controller = Controller::new(
             &proxy_config.nested_config.listen_addr,
             proxy_config.clone(),
-            Arc::new(TlsPartitionFinder::new(tls_config)),
+            Arc::new(TlsPartitionFinder::new(
+                tls_config,
+                proxy_config.nested_config.address_family.clone(),
+            )),
             status_reporter,
             cw_publisher.clone(),
         )
@@ -112,6 +115,7 @@ async fn main() {
             proxy_config.clone(),
             Arc::new(PlainTextPartitionFinder {
                 mount_target_addr: proxy_config.nested_config.mount_target_addr.clone(),
+                address_family: proxy_config.nested_config.address_family.clone(),
             }),
             status_reporter,
             cw_publisher.clone(),

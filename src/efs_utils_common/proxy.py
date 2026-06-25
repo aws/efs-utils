@@ -271,6 +271,7 @@ def write_stunnel_config_file(
     cert_details=None,
     fallback_ip_address=None,
     efs_proxy_enabled=True,
+    address_family=None,
 ):
     """
     Serializes stunnel configuration to a file. Unfortunately this does not conform to Python's config file format, so we have to
@@ -424,6 +425,12 @@ def write_stunnel_config_file(
         efs_config["fs_id"] = fs_id
         efs_config["region"] = region
         efs_config["efs_utils_version"] = VERSION
+        if address_family is not None:
+            if address_family == socket.AF_INET6:
+                efs_config["address_family"] = "ipv6"
+            elif address_family == socket.AF_INET:
+                efs_config["address_family"] = "ipv4"
+            # AF_UNSPEC: omit the key, proxy uses its own default (unspec)
 
     stunnel_config = "\n".join(
         serialize_stunnel_config(global_config)
@@ -693,6 +700,7 @@ def bootstrap_proxy(
     state_file_dir=STATE_FILE_DIR,
     fallback_ip_address=None,
     efs_proxy_enabled=True,
+    address_family=None,
 ):
     """
     Generates a TLS private key and client-side certificate, a stunnel configuration file, and a state file
@@ -809,6 +817,7 @@ def bootstrap_proxy(
             cert_details=cert_details,
             fallback_ip_address=fallback_ip_address,
             efs_proxy_enabled=efs_proxy_enabled,
+            address_family=address_family,
         )
         if efs_proxy_enabled:
             tunnel_args = [_efs_proxy_bin(), stunnel_config_file]

@@ -78,9 +78,9 @@ def get_ipv6_addresses(hostname):
         return []
 
 
-def dns_name_can_be_resolved(dns_name):
+def dns_name_can_be_resolved(dns_name, family=socket.AF_UNSPEC):
     try:
-        addr_info = socket.getaddrinfo(dns_name, None, socket.AF_UNSPEC)
+        addr_info = socket.getaddrinfo(dns_name, None, family)
         return len(addr_info) > 0
     except socket.gaierror:
         return False

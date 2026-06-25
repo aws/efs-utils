@@ -266,6 +266,7 @@ def mount_with_proxy(
     mountpoint,
     options,
     fallback_ip_address=None,
+    address_family=None,
 ):
     """
     This function is responsible for launching a efs-proxy process and attaching a NFS mount to that process
@@ -291,6 +292,7 @@ def mount_with_proxy(
         options,
         fallback_ip_address=fallback_ip_address,
         efs_proxy_enabled=efs_proxy_enabled,
+        address_family=address_family,
     ) as tunnel_proc:
         mount_completed = threading.Event()
         t = threading.Thread(

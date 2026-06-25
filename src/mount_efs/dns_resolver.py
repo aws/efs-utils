@@ -48,7 +48,7 @@ def get_target_az(config, options):
     return None
 
 
-def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
+def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options, address_family=socket.AF_UNSPEC):
     def _validate_replacement_field_count(format_str, expected_ct):
         if format_str.count("{") != expected_ct or format_str.count("}") != expected_ct:
             raise ValueError(
@@ -124,7 +124,7 @@ def get_dns_name_and_fallback_mount_target_ip_address(config, fs_id, options):
                 ip_address=ip_address, fallback_message=fallback_message
             )
 
-    if dns_name_can_be_resolved(dns_name):
+    if dns_name_can_be_resolved(dns_name, family=address_family):
         return dns_name, None
 
     logging.info(
@@ -177,6 +177,33 @@ def get_fallback_mount_target_ip_address(config, options, fs_id, dns_name):
         throw_ip_address_connect_failure_with_fallback_message(
             dns_name, mount_target_ip_address, e.message
         )
+
+
+def get_mount_target_address_family(config, options, fs_id):
+    """Return socket.AF_INET, socket.AF_INET6, or socket.AF_UNSPEC based on the actual mount target IP type.
+    Falls back to socket.AF_UNSPEC if the API call fails or the feature is disabled."""
+    if not get_boolean_config_item_value(config, CONFIG_SECTION, "dynamic_address_family_enabled", default_value=True):
+        return socket.AF_UNSPEC
+
+    try:
+        efs_client = get_botocore_client(config, "efs", options)
+        if efs_client is None:
+            return socket.AF_UNSPEC
+
+        az_name = get_target_az(config, options)
+        ec2_client = get_botocore_client(config, "ec2", options)
+        if ec2_client is None:
+            return socket.AF_UNSPEC
+
+        mount_target = get_mount_target_in_az(efs_client, ec2_client, fs_id, az_name)
+        if "Ipv6Address" in mount_target and "IpAddress" not in mount_target:
+            return socket.AF_INET6
+
+        return socket.AF_INET
+    except Exception:
+        logging.info("Failed to determine mount target address family, defaulting to AF_UNSPEC")
+        logging.debug("get_mount_target_address_family exception detail", exc_info=True)
+        return socket.AF_UNSPEC
 
 
 def check_if_fall_back_to_mount_target_ip_address_is_enabled(config):

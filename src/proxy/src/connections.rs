@@ -11,12 +11,13 @@ use futures::future::{self, BoxFuture};
 use log::{debug, info, warn};
 use s2n_tls_tokio::TlsStream;
 use std::sync::Arc;
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, time::Duration};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout_at, Instant};
 use tokio::{
     io::AsyncWriteExt,
     io::{AsyncRead, AsyncWrite},
+    net::lookup_host,
     net::TcpStream,
     sync::mpsc,
 };
@@ -334,14 +335,22 @@ pub fn get_bind_response_string(bind_response: &BindResponse) -> String {
 #[derive(Clone)]
 pub struct PlainTextPartitionFinder {
     pub mount_target_addr: String,
+    pub address_family: String,
 }
 
 #[async_trait]
 impl PartitionFinder<TcpStream> for PlainTextPartitionFinder {
     async fn create_connect_future(&self) -> BoxFuture<'static, Result<TcpStream, ConnectError>> {
         let mount_target_address = self.mount_target_addr.clone();
+        let address_family = self.address_family.clone();
         Box::pin(async move {
-            match TcpStream::connect(mount_target_address).await {
+            let stream = if address_family == "unspec" {
+                TcpStream::connect(&mount_target_address).await
+            } else {
+                let addr = resolve_addr(&mount_target_address, &address_family).await?;
+                TcpStream::connect(addr).await
+            };
+            match stream {
                 Ok(tcp_stream) => Ok(configure_stream(tcp_stream)),
                 Err(e) => Err(ConnectError::IoError(e)),
             }
@@ -351,11 +360,15 @@ impl PartitionFinder<TcpStream> for PlainTextPartitionFinder {
 
 pub struct TlsPartitionFinder {
     tls_config: Arc<tokio::sync::Mutex<TlsConfig>>,
+    pub address_family: String,
 }
 
 impl TlsPartitionFinder {
-    pub fn new(tls_config: Arc<tokio::sync::Mutex<TlsConfig>>) -> Self {
-        TlsPartitionFinder { tls_config }
+    pub fn new(tls_config: Arc<tokio::sync::Mutex<TlsConfig>>, address_family: String) -> Self {
+        TlsPartitionFinder {
+            tls_config,
+            address_family,
+        }
     }
 }
 
@@ -364,9 +377,38 @@ impl PartitionFinder<TlsStream<TcpStream>> for TlsPartitionFinder {
     async fn create_connect_future(
         &self,
     ) -> BoxFuture<'static, Result<TlsStream<TcpStream>, ConnectError>> {
-        let tls_config_copy = self.tls_config.lock().await.clone();
-        Box::pin(establish_tls_stream(tls_config_copy))
+        let mut tls_config_copy = self.tls_config.lock().await.clone();
+        let address_family = self.address_family.clone();
+        Box::pin(async move {
+            if address_family != "unspec" {
+                let addr = resolve_addr(&tls_config_copy.remote_addr, &address_family).await?;
+                tls_config_copy.remote_addr = addr.to_string();
+            }
+            establish_tls_stream(tls_config_copy).await
+        })
     }
+}
+
+/// Resolve `addr` (host:port) to a `SocketAddr` matching the requested address family.
+/// `address_family`: `"ipv4"` selects the first IPv4 result, `"ipv6"` selects the first IPv6 result.
+/// Returns an error if no address of the requested family is found.
+/// Callers must not pass `"unspec"` — use `TcpStream::connect(hostname)` directly instead.
+async fn resolve_addr(addr: &str, address_family: &str) -> Result<SocketAddr, ConnectError> {
+    let addrs: Vec<SocketAddr> = lookup_host(addr)
+        .await
+        .map_err(ConnectError::IoError)?
+        .collect();
+    let result = match address_family {
+        "ipv4" => addrs.iter().find(|a| a.is_ipv4()).copied(),
+        "ipv6" => addrs.iter().find(|a| a.is_ipv6()).copied(),
+        _ => None,
+    };
+    result.ok_or_else(|| {
+        ConnectError::IoError(std::io::Error::other(format!(
+            "no {} address found for {}",
+            address_family, addr
+        )))
+    })
 }
 
 #[cfg(test)]
@@ -399,6 +441,7 @@ mod tests {
         let error = tokio::spawn(async move {
             let partition_finder = PlainTextPartitionFinder {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
+                address_family: "unspec".to_string(),
             };
             partition_finder
                 .establish_connection(create_deadline(test_single_connection_timeout), PROXY_ID)
@@ -421,6 +464,7 @@ mod tests {
 
             let partition_finder = PlainTextPartitionFinder {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
+                address_family: "unspec".to_string(),
             };
             partition_finder
                 .inner_establish_multiplex_connection(
@@ -453,6 +497,7 @@ mod tests {
         let task = tokio::spawn(async move {
             let partition_finder = PlainTextPartitionFinder {
                 mount_target_addr: format!("127.0.0.1:{}", port.clone()),
+                address_family: "unspec".to_string(),
             };
             partition_finder
                 .inner_establish_multiplex_connection(
@@ -565,12 +610,39 @@ mod tests {
         });
         let tls_partition_finder = TlsPartitionFinder {
             tls_config: tls_config_ptr.clone(),
+            address_family: "unspec".to_string(),
         };
         let _ = kill(nix::unistd::Pid::this(), Signal::SIGHUP);
         rx.await.unwrap();
         assert_ne!(
             old_cert,
             tls_partition_finder.tls_config.lock().await.client_cert
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_addr_ipv4_success() {
+        // "127.0.0.1:2049" is a numeric address — lookup_host returns it without DNS.
+        let result = resolve_addr("127.0.0.1:2049", "ipv4").await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ipv4());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_addr_ipv6_success() {
+        // "[::1]:2049" is a numeric IPv6 address — lookup_host returns it without DNS.
+        let result = resolve_addr("[::1]:2049", "ipv6").await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ipv6());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_addr_ipv6_only_with_ipv4_requested_returns_error() {
+        // "[::1]:2049" is a numeric IPv6 address — guaranteed to resolve to only an IPv6 SocketAddr.
+        let result = resolve_addr("[::1]:2049", "ipv4").await;
+        assert!(
+            matches!(result, Err(ConnectError::IoError(_))),
+            "expected error when no IPv4 address available"
         );
     }
 }

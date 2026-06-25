@@ -367,3 +367,101 @@ def test_get_fallback_mount_target_ip_address_helper_prefer_ipv4(mocker):
     )
 
     assert ip_address == ipv4_address
+
+
+def test_get_mount_target_address_family_disabled_returns_unspec(mocker):
+    config = _get_mock_config()
+    config.set(efs_utils_common.constants.CONFIG_SECTION, "dynamic_address_family_enabled", "false")
+    botocore_mock = mocker.patch("mount_efs.dns_resolver.get_botocore_client")
+
+    assert dns_resolver.get_mount_target_address_family(config, {}, FS_ID) == socket.AF_UNSPEC
+    botocore_mock.assert_not_called()
+
+
+def test_get_mount_target_address_family_ipv4(mocker):
+    config = _get_mock_config()
+    mocker.patch("mount_efs.dns_resolver.get_botocore_client", side_effect=[MOCK_EFS_AGENT, MOCK_EC2_AGENT])
+    mocker.patch("mount_efs.dns_resolver.get_target_az", return_value=DEFAULT_AZ)
+    mocker.patch("mount_efs.dns_resolver.get_mount_target_in_az", return_value={"IpAddress": "1.2.3.4"})
+
+    assert dns_resolver.get_mount_target_address_family(config, {}, FS_ID) == socket.AF_INET
+
+
+def test_get_mount_target_address_family_ipv6_only(mocker):
+    config = _get_mock_config()
+    mocker.patch("mount_efs.dns_resolver.get_botocore_client", side_effect=[MOCK_EFS_AGENT, MOCK_EC2_AGENT])
+    mocker.patch("mount_efs.dns_resolver.get_target_az", return_value=DEFAULT_AZ)
+    mocker.patch(
+        "mount_efs.dns_resolver.get_mount_target_in_az",
+        return_value={"Ipv6Address": "2001:db8::1"},
+    )
+
+    assert dns_resolver.get_mount_target_address_family(config, {}, FS_ID) == socket.AF_INET6
+
+
+def test_get_mount_target_address_family_dual_stack_returns_ipv4(mocker):
+    config = _get_mock_config()
+    mocker.patch("mount_efs.dns_resolver.get_botocore_client", side_effect=[MOCK_EFS_AGENT, MOCK_EC2_AGENT])
+    mocker.patch("mount_efs.dns_resolver.get_target_az", return_value=DEFAULT_AZ)
+    mocker.patch(
+        "mount_efs.dns_resolver.get_mount_target_in_az",
+        return_value={"IpAddress": "1.2.3.4", "Ipv6Address": "2001:db8::1"},
+    )
+
+    assert dns_resolver.get_mount_target_address_family(config, {}, FS_ID) == socket.AF_INET
+
+
+def test_get_mount_target_address_family_no_efs_client_returns_unspec(mocker):
+    config = _get_mock_config()
+    mocker.patch("mount_efs.dns_resolver.get_botocore_client", side_effect=[None])
+
+    assert dns_resolver.get_mount_target_address_family(config, {}, FS_ID) == socket.AF_UNSPEC
+
+
+def test_get_mount_target_address_family_no_ec2_client_returns_unspec(mocker):
+    config = _get_mock_config()
+    mocker.patch("mount_efs.dns_resolver.get_botocore_client", side_effect=[MOCK_EFS_AGENT, None])
+    mocker.patch("mount_efs.dns_resolver.get_target_az", return_value=DEFAULT_AZ)
+
+    assert dns_resolver.get_mount_target_address_family(config, {}, FS_ID) == socket.AF_UNSPEC
+
+
+def test_get_mount_target_address_family_api_error_returns_unspec(mocker):
+    config = _get_mock_config()
+    mocker.patch("mount_efs.dns_resolver.get_botocore_client", side_effect=[MOCK_EFS_AGENT, MOCK_EC2_AGENT])
+    mocker.patch("mount_efs.dns_resolver.get_target_az", return_value=DEFAULT_AZ)
+    mocker.patch("mount_efs.dns_resolver.get_mount_target_in_az", side_effect=Exception("API error"))
+
+    assert dns_resolver.get_mount_target_address_family(config, {}, FS_ID) == socket.AF_UNSPEC
+
+
+def test_get_dns_name_with_address_family_passed(mocker):
+    """address_family param is forwarded to dns_name_can_be_resolved."""
+    try:
+        config = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        config = ConfigParser()
+    config.add_section(efs_utils_common.constants.CONFIG_SECTION)
+    config.set(efs_utils_common.constants.CONFIG_SECTION, "dns_name_format", "{fs_id}.efs.{region}.{dns_name_suffix}")
+    config.set(efs_utils_common.constants.CONFIG_SECTION, "dns_name_suffix", "amazonaws.com")
+    config.set(
+        efs_utils_common.constants.CONFIG_SECTION,
+        efs_utils_common.constants.FALLBACK_TO_MOUNT_TARGET_IP_ADDRESS_ITEM,
+        "false",
+    )
+
+    mocker.patch("mount_efs.dns_resolver.get_target_region", return_value=DEFAULT_REGION)
+    dns_mock = mocker.patch(
+        "efs_utils_common.network_utils.socket.getaddrinfo",
+        return_value=[("", "", "", "", ("1.2.3.4", 0))],
+    )
+
+    dns_name, ip = dns_resolver.get_dns_name_and_fallback_mount_target_ip_address(
+        config, FS_ID, {}, address_family=socket.AF_INET
+    )
+
+    assert dns_name is not None
+    assert ip is None
+    # getaddrinfo was called with AF_INET
+    args = dns_mock.call_args[0]
+    assert args[2] == socket.AF_INET

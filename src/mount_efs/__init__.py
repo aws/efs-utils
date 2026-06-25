@@ -34,6 +34,7 @@
 import logging
 import platform
 import re
+import socket
 import sys
 
 from efs_utils_common.cloudwatch import bootstrap_cloudwatch_logging
@@ -69,6 +70,7 @@ from efs_utils_common.process_utils import add_field_in_options, assert_root
 from efs_utils_common.proxy import get_init_system
 from mount_efs.dns_resolver import (
     get_dns_name_and_fallback_mount_target_ip_address,
+    get_mount_target_address_family,
     match_device,
 )
 
@@ -178,8 +180,13 @@ def main():
     init_system = get_init_system()
     check_network_status(fs_id, init_system)
 
+    address_family = (
+        get_mount_target_address_family(config, options, fs_id)
+        if "mounttargetip" not in options
+        else socket.AF_UNSPEC
+    )
     dns_name, fallback_ip_address = get_dns_name_and_fallback_mount_target_ip_address(
-        config, fs_id, options
+        config, fs_id, options, address_family=address_family
     )
 
     if check_if_platform_is_mac() and "notls" not in options:
@@ -208,6 +215,7 @@ def main():
             mountpoint,
             options,
             fallback_ip_address=fallback_ip_address,
+            address_family=address_family,
         )
 
 

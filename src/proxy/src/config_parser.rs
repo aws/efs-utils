@@ -64,6 +64,10 @@ fn default_log_format() -> Option<String> {
     Some("file".to_string())
 }
 
+fn default_address_family() -> String {
+    "unspec".to_string()
+}
+
 #[derive(Default, Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct ProxyConfig {
     #[serde(alias = "fips", deserialize_with = "deserialize_bool")]
@@ -188,6 +192,10 @@ pub struct EfsConfig {
     /// efs-utils version string for channel init
     #[serde(alias = "efs_utils_version", default)]
     pub efs_utils_version: String,
+
+    /// Address family to use when resolving the mount target hostname ("ipv4" or "ipv6")
+    #[serde(default = "default_address_family")]
+    pub address_family: String,
 }
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct ReadBypassConfig {
