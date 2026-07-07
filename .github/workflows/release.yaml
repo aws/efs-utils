@@ -1,0 +1,93 @@
+name: Auto-tag GitHub Release
+
+# Automatically creates a git tag and GitHub release when the version in
+# config.ini changes on the main branch (i.e. after a release PR is merged).
+#
+# The version in config.ini is the source of truth. On every push to master the
+# workflow reads that version and, if a matching tag does not already exist,
+# creates tag `v<version>` at the pushed commit and publishes a GitHub release
+# whose body links to the manually-maintained CHANGELOG-<major>.x.md. Ordinary
+# (non-version-bump) merges are no-ops because the tag already exists.
+
+on:
+  push:
+    branches:
+      - master
+  # Allow manual re-runs against the current master HEAD if a release was missed.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from config.ini
+        id: version
+        run: |
+          set -euo pipefail
+          RAW_VERSION="$(grep -oE '^version=[0-9]+\.[0-9]+\.[0-9]+' config.ini | head -n1 | cut -d= -f2)"
+          if [ -z "${RAW_VERSION}" ]; then
+            echo "::error::Could not parse a semantic version (X.Y.Z) from config.ini"
+            exit 1
+          fi
+          TAG="v${RAW_VERSION}"
+          MAJOR="${RAW_VERSION%%.*}"
+          echo "version=${RAW_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "changelog=CHANGELOG-${MAJOR}.x.md" >> "${GITHUB_OUTPUT}"
+          echo "Parsed version=${RAW_VERSION}, tag=${TAG}, changelog=CHANGELOG-${MAJOR}.x.md"
+
+      - name: Check version against latest release
+        id: check
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Highest existing semver tag on origin (strip refs/tags/ and the v
+          # prefix); empty if the repo has no release tags yet.
+          LATEST="$(git ls-remote --tags --refs origin 'v*' \
+            | sed -E 's#.*refs/tags/v##' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V | tail -n1 || true)"
+
+          if [ -z "${LATEST}" ]; then
+            echo "release=true" >> "${GITHUB_OUTPUT}"
+            echo "No existing release tags; proceeding with ${TAG}."
+          elif [ "${VERSION}" = "${LATEST}" ]; then
+            echo "release=false" >> "${GITHUB_OUTPUT}"
+            echo "Version ${VERSION} already released (tag ${TAG}); nothing to do."
+          elif [ "$(printf '%s\n%s\n' "${LATEST}" "${VERSION}" | sort -V | tail -n1)" = "${VERSION}" ]; then
+            echo "release=true" >> "${GITHUB_OUTPUT}"
+            echo "Version ${VERSION} is newer than latest release ${LATEST}; proceeding."
+          else
+            echo "::error::config.ini version ${VERSION} is OLDER than latest release ${LATEST}; refusing to release a regression."
+            exit 1
+          fi
+
+      - name: Create tag and GitHub release
+        if: steps.check.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          CHANGELOG: ${{ steps.version.outputs.changelog }}
+        run: |
+          set -euo pipefail
+          # The changelog is maintained manually; the release body just links to it.
+          # gh release create creates and pushes the tag at --target implicitly.
+          gh release create "${TAG}" \
+            --target "${GITHUB_SHA}" \
+            --title "${TAG}" --notes-file - <<EOF
+          Amazon efs-utils
+
+          ## CHANGELOG
+          See [CHANGELOG](https://github.com/${GITHUB_REPOSITORY}/blob/master/${CHANGELOG}) for full list of changes
+          EOF
+          echo "Created release and tag ${TAG} at ${GITHUB_SHA}"
