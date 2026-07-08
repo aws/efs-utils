@@ -79,7 +79,6 @@ There are currently a few limitations:
      on fixed-size arrays with 0..32 elements; if you have an array larger than
      this, the generated code will fail to compile. Right now, the only workaround
      is to manually implement `Pack` and `Unpack` for such types.
-     (TODO: add an option to omit derived traits.)
 
 ## License
 

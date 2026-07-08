@@ -330,7 +330,6 @@ impl ReadBypassAgent {
             .expect("ReadBypassAgent is expecting to have one compound in the batch!");
 
         if let RefNfsCompound::Compound4res(compound_info) = &mut envelope.body {
-            // Full buffer clone to avoid uncontrolled memory consumption growth
             match Self::process_compound(
                 read_bypass_request_context.clone(),
                 &compound_info,

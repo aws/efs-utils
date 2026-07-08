@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import random
+import re
 import socket
 import sys
 import time
@@ -123,6 +124,9 @@ STUNNEL_EFS_CONFIG = {
 }
 
 
+VALID_REGION_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?")
+
+
 def get_target_region(config, options):
     def _fatal_error(message):
         fatal_error(
@@ -133,7 +137,10 @@ def get_target_region(config, options):
         )
 
     if "region" in options:
-        return options.get("region")
+        region = options.get("region")
+        if not VALID_REGION_PATTERN.fullmatch(region):
+            fatal_error('Invalid "region" mount option specified: %r' % region)
+        return region
 
     # Check environment variable
     env_region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")

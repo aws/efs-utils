@@ -80,9 +80,20 @@ def get_ipv6_addresses(hostname):
 
 def dns_name_can_be_resolved(dns_name):
     try:
+        # Try resolution as-is first
         addr_info = socket.getaddrinfo(dns_name, None, socket.AF_UNSPEC)
         return len(addr_info) > 0
     except socket.gaierror:
+        # If resolution fails and hostname is not already FQDN, retry with trailing
+        # dot to force absolute resolution and bypass VPC search domain suffixing
+        # (e.g. .compute.internal) which can cause transient NXDOMAIN failures.
+        if not dns_name.endswith("."):
+            try:
+                fqdn = dns_name + "."
+                addr_info = socket.getaddrinfo(fqdn, None, socket.AF_UNSPEC)
+                return len(addr_info) > 0
+            except socket.gaierror:
+                return False
         return False
 
 

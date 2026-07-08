@@ -307,9 +307,13 @@ def get_aws_security_credentials_from_pod_identity(config, is_fatal=False):
 
 
 def get_sts_endpoint_url(config, region):
+    # The dns_name_suffix from config may be an S3 Files "on.*" domain that
+    # doesn't match the STS endpoint domain. Map to the correct STS domain.
     dns_name_suffix = get_dns_name_suffix(config, region)
     if dns_name_suffix == "on.aws":
         dns_name_suffix = "amazonaws.com"
+    elif dns_name_suffix == "on.amazonwebservices.com.cn":
+        dns_name_suffix = "amazonaws.com.cn"
     return STS_ENDPOINT_URL_FORMAT.format(region, dns_name_suffix)
 
 

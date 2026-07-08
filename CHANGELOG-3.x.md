@@ -1,3 +1,7 @@
+# v3.2.0
+- Use partition-aware DNS suffix for S3 Files for aws-cn
+- Add regex for region mount option
+
 # v3.1.3
 - Rollback DNS Query Change
 

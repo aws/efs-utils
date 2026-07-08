@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 3.1.3
+Version   : 3.2.0
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -215,6 +215,10 @@ fi
 %clean
 
 %changelog
+* Wed Jul 8 2026 Samuel Hale <samuhale@amazon.com> - 3.2.0
+- Use partition-aware DNS suffix for S3 Files for aws-cn
+- Add regex for region mount option
+
 * Tue Jun 9 2026 Samuel Hale <samuhale@amazon.com> - 3.1.3
 - Rollback DNS Query Change
 
