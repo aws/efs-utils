@@ -200,3 +200,33 @@ def test_s3files_match_device_with_path(mocker):
     assert result_fs_id == fs_id
     assert path == "/some/path"
     assert az is None
+
+
+def test_s3files_dns_resolution_china_region(mocker):
+    """Test that S3 Files uses on.amazonwebservices.com.cn in China, not amazonaws.com.cn"""
+    config = _get_mock_config(dns_name_suffix="on.amazonwebservices.com.cn")
+    options = {}
+
+    mock_get_az_id = mocker.patch(
+        "mount_s3files.dns_resolver.get_az_id_from_instance_metadata"
+    )
+    mock_get_region = mocker.patch("mount_s3files.dns_resolver.get_target_region")
+    mock_get_suffix = mocker.patch("mount_s3files.dns_resolver.get_dns_name_suffix")
+    mock_dns_resolve = mocker.patch(
+        "mount_s3files.dns_resolver.dns_name_can_be_resolved"
+    )
+
+    mock_get_az_id.return_value = "cnn1-az2"
+    mock_get_region.return_value = "cn-north-1"
+    mock_get_suffix.return_value = "on.amazonwebservices.com.cn"
+    mock_dns_resolve.return_value = True
+
+    dns_name, fallback_ip = dns_resolver.get_dns_name_and_mount_target_ip_address(
+        config, fs_id, options
+    )
+
+    assert (
+        dns_name
+        == "cnn1-az2.fs-deadbeef.s3files.cn-north-1.on.amazonwebservices.com.cn"
+    )
+    assert fallback_ip is None

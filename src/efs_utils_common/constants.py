@@ -11,7 +11,7 @@ import os
 import pwd
 import re
 
-VERSION = "3.1.3"
+VERSION = "3.2.0"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
 AMAZON_LINUX_2_PRETTY_NAME = "Amazon Linux 2"

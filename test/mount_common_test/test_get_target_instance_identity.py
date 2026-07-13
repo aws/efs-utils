@@ -326,3 +326,56 @@ def test_get_target_az_from_options(mocker):
 
 def test_get_target_region_from_options(mocker):
     assert TARGET_REGION == get_target_region_helper(options={"region": TARGET_REGION})
+
+
+"""
+Validate the region mount option
+"""
+
+
+@pytest.mark.parametrize(
+    "region",
+    [
+        "us-east-1",
+        "eu-west-2",
+        "ap-southeast-3",
+        "me-central-1",
+        "us-gov-east-1",
+        "cn-northwest-1",
+        "us-iso-east-1",
+        "us-isob-east-1",
+        "us-isof-south-1",
+        "eu-isoe-west-1",
+        "eusc-de-east-1",
+        "aws-global",
+        "fips-us-east-1",
+    ],
+)
+def test_get_target_region_valid_region_options(mocker, region):
+    # Valid region tokens across all partitions (and pseudo-regions) are accepted.
+    assert region == get_target_region_helper(options={"region": region})
+
+
+@pytest.mark.parametrize(
+    "region",
+    [
+        "not.a" * 10,
+        "UPPER-CASE-1",
+        "-leading-hyphen",
+        "trailing-hyphen-",
+        "",
+        "a" * 64,
+        "has spaces",
+        "has/slash",
+        "has#hash",
+        "has@at",
+    ],
+)
+def test_get_target_region_rejects_malicious_region_options(mocker, capsys, region):
+    # Malformed region tokens are rejected via fatal_error (SystemExit).
+    with pytest.raises(SystemExit) as ex:
+        get_target_region_helper(options={"region": region})
+
+    assert 0 != ex.value.code
+    out, err = capsys.readouterr()
+    assert "Invalid" in err and "region" in err

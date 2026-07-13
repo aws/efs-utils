@@ -142,15 +142,33 @@ def match_device(config, device, options):
         return remote, path, None
 
     try:
+        # Try resolution as-is first
         primary, secondaries, _ = socket.gethostbyname_ex(remote)
         hostnames = list(filter(lambda e: e is not None, [primary] + secondaries))
     except socket.gaierror:
-        create_default_cloudwatchlog_agent_if_not_exist(config, options)
-        fatal_error(
-            'Failed to resolve "%s" - check that the specified DNS name is a CNAME record resolving to a valid S3Files DNS '
-            "name" % remote,
-            'Failed to resolve "%s"' % remote,
-        )
+        # If resolution fails, retry with trailing dot to bypass VPC search domain
+        # suffixing (e.g. .compute.internal) which causes transient NXDOMAIN for S3Files.
+        if not remote.endswith("."):
+            try:
+                fqdn = remote + "."
+                primary, secondaries, _ = socket.gethostbyname_ex(fqdn)
+                hostnames = list(
+                    filter(lambda e: e is not None, [primary] + secondaries)
+                )
+            except socket.gaierror:
+                create_default_cloudwatchlog_agent_if_not_exist(config, options)
+                fatal_error(
+                    'Failed to resolve "%s" - check that the specified DNS name is a CNAME record resolving to a valid S3Files DNS '
+                    "name" % remote,
+                    'Failed to resolve "%s"' % remote,
+                )
+        else:
+            create_default_cloudwatchlog_agent_if_not_exist(config, options)
+            fatal_error(
+                'Failed to resolve "%s" - check that the specified DNS name is a CNAME record resolving to a valid S3Files DNS '
+                "name" % remote,
+                'Failed to resolve "%s"' % remote,
+            )
 
     if not hostnames:
         create_default_cloudwatchlog_agent_if_not_exist(config, options)
