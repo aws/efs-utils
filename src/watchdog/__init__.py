@@ -749,6 +749,43 @@ def get_file_safe_mountpoint(mount):
     return mountpoint + "." + opts["port"]
 
 
+def _get_freebsd_established_loopback_ports():
+    """
+    Return the set of local ports (as strings) with an ESTABLISHED tcp4
+    loopback (127.0.0.1) connection, per sockstat(1), or None if sockstat
+    could not be run. The kernel NFS client's connection to a live efs-proxy
+    shows up here; an orphaned efs-proxy (e.g. left over from a failed mount
+    attempt) only has its LISTEN socket, which sockstat reports with a
+    foreign address of "*:*".
+    """
+    try:
+        process = subprocess.run(
+            ["sockstat", "-4"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            universal_newlines=True,
+            timeout=5,
+        )
+    except Exception as e:
+        logging.warning("Unable to run sockstat: %s", e)
+        return None
+
+    established_ports = set()
+    for line in process.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        proto, local, foreign = parts[-3], parts[-2], parts[-1]
+        if not proto.startswith("tcp"):
+            continue
+        if foreign in ("*:*", "*.*"):
+            continue
+        if not local.startswith("127.0.0.1:"):
+            continue
+        established_ports.add(local.rsplit(":", 1)[1])
+    return established_ports
+
+
 def get_current_local_nfs_mounts(mount_file="/proc/mounts"):
     """
     Return a dict of the current NFS mounts for servers running on localhost, keyed by the mountpoint and port as it
@@ -762,9 +799,11 @@ def get_current_local_nfs_mounts(mount_file="/proc/mounts"):
         # source of truth: each mount created by mount.efs has a state file
         #   fs-<id>.<mountpoint-with-slashes-as-dots>.<port>
         # in STATE_FILE_DIR. Cross-check with `mount -t nfs` so we skip state
-        # files whose mountpoint has already been unmounted. Keying off the
-        # state file (not the live proxy) lets the watchdog notice a dead
-        # efs-proxy and restart it.
+        # files whose mountpoint has already been unmounted. State files (not
+        # live proxy sockets) are the source of truth for which mounts exist, so
+        # the watchdog still notices a dead efs-proxy and restarts it; sockstat
+        # is used only below to pick the live port when a mountpoint has more
+        # than one state file (see the dedup note there).
         live_mps = set()
         try:
             process = subprocess.run(
@@ -785,7 +824,22 @@ def get_current_local_nfs_mounts(mount_file="/proc/mounts"):
                 state_files = os.listdir(STATE_FILE_DIR)
             except OSError:
                 state_files = []
-            seen = set()
+            # A mountpoint can end up with more than one state file/port pair,
+            # e.g. when mount.efs is retried on cold start after efs-proxy lost
+            # the race against mount_nfs: the failed attempt's efs-proxy + state
+            # file are never cleaned up, leaving a stale port alongside the one
+            # the mount actually uses. The kernel NFS client's loopback
+            # connection to the live proxy's port shows up as an ESTABLISHED
+            # tcp4 socket on 127.0.0.1:<port> in sockstat(1), whereas an
+            # orphaned proxy only has its LISTEN socket. Use that to identify
+            # the truly live port per mountpoint; any other duplicate for the
+            # same mountpoint is left out of the returned mounts so the existing
+            # stale-mount cleanup path in check_efs_mounts
+            # (mark_as_unmounted/clean_up_mount_state) can reap its orphaned
+            # efs-proxy and state file.
+            established_ports = _get_freebsd_established_loopback_ports()
+
+            candidates = {}
             for sf in state_files:
                 if not sf.startswith("fs-"):
                     continue
@@ -805,9 +859,20 @@ def get_current_local_nfs_mounts(mount_file="/proc/mounts"):
                     continue
                 _, _, mp_enc = inner.partition(".")
                 mp = "/" + mp_enc.replace(".", "/")
-                if mp not in live_mps or (mp, port) in seen:
+                if mp not in live_mps:
                     continue
-                seen.add((mp, port))
+                is_established = established_ports is None or port in established_ports
+                current = candidates.get(mp)
+                # Prefer a port with a confirmed established loopback connection
+                # over one without; if sockstat is unavailable (established_ports
+                # is None) or ambiguous (e.g. more than one port for the
+                # mountpoint looks established, such as during the brief overlap
+                # of a watchdog-triggered restart), keep the first one found
+                # rather than silently dropping a possibly-live mount.
+                if current is None or (is_established and not current[1]):
+                    candidates[mp] = (port, is_established)
+
+            for mp, (port, _is_established) in candidates.items():
                 mounts.append(
                     Mount._make(
                         ["127.0.0.1:/", mp, "nfs", "port=" + port, 0, 0]

@@ -8,10 +8,21 @@
 
 import logging
 
+import pytest
+
 import watchdog
 
 MOUNT_FMT_LINE = "{address}:/ {mountpoint} {fs_type} {options} 0 0"
 DEFAULT_OPTS = "rw,port=12345"
+
+
+@pytest.fixture(autouse=True)
+def _pin_linux_platform(monkeypatch):
+    # These tests feed a fake /proc/mounts file to get_current_local_nfs_mounts,
+    # which is the Linux code path. Pin the platform so they run identically on
+    # any host; the FreeBSD branch reads state files + sockstat instead and is
+    # covered separately.
+    monkeypatch.setattr(watchdog.sys, "platform", "linux")
 
 
 def _create_mount_file(tmpdir, lines):
