@@ -786,6 +786,21 @@ def _get_freebsd_established_loopback_ports():
     return established_ports
 
 
+def _freebsd_proxy_port_established(port):
+    """
+    Return True if `port` has an ESTABLISHED tcp4 loopback connection (efs-proxy
+    alive and serving the kernel NFS client), False if it does not, or None if
+    sockstat could not be run. Used by the FreeBSD stunnel health check in place
+    of a `df` probe: a live proxy keeps a persistent ESTABLISHED loopback socket
+    even when the mount is idle, whereas `df` measures the whole end-to-end path
+    (including the EFS backend) and times out on backend slowness alone.
+    """
+    established_ports = _get_freebsd_established_loopback_ports()
+    if established_ports is None:
+        return None
+    return port in established_ports
+
+
 def get_current_local_nfs_mounts(mount_file="/proc/mounts"):
     """
     Return a dict of the current NFS mounts for servers running on localhost, keyed by the mountpoint and port as it
@@ -1600,6 +1615,65 @@ def check_stunnel_health(
         rewrite_state_file(state, state_file_dir, state_file)
 
     stunnel_pid = state["pid"]
+
+    if sys.platform.startswith("freebsd"):
+        # FreeBSD does not probe with `df`. `df` triggers an NFS GETATTR that
+        # traverses the whole path (kernel -> efs-proxy -> TLS -> EFS backend),
+        # so its latency is dominated by the backend, not the tunnel: a slow or
+        # throttled backend makes `df` block past the timeout even though the
+        # proxy is perfectly healthy. Reacting to that by SIGKILLing efs-proxy
+        # mid-RPC can leave FreeBSD's NFSv4.1 session unrecoverable (nfsbadse),
+        # wedging the next `df` in unkillable D-state - the check manufacturing
+        # the failure it then reacts to.
+        #
+        # Instead, probe the proxy directly: a live efs-proxy keeps a persistent
+        # ESTABLISHED tcp4 loopback connection to the kernel NFS client, even
+        # when the mount is idle. Only restart when the proxy is genuinely gone,
+        # confirmed by BOTH signals: no ESTABLISHED socket on its port AND the
+        # proxy process no longer running. If sockstat is unavailable we have no
+        # evidence of failure, so we do nothing rather than kill on a guess.
+        port = os.path.basename(state_file).rsplit(".", 1)[-1]
+        established = _freebsd_proxy_port_established(port)
+        state["last_stunnel_check_time"] = current_time
+
+        if established or established is None:
+            logging.debug(
+                "efs-proxy [PID: %s] for tls mount on %s passed health check "
+                "(port %s established=%s).",
+                stunnel_pid,
+                mountpoint,
+                port,
+                established,
+            )
+            rewrite_state_file(state, state_file_dir, state_file)
+            return
+
+        # No established connection on the proxy's port. Only treat this as a
+        # dead proxy if the process is also gone; a live-but-not-serving proxy
+        # (e.g. mid-reconnect) is left alone rather than SIGKILLed mid-recovery.
+        if is_mount_stunnel_proc_running(stunnel_pid, state_file, state_file_dir):
+            logging.warning(
+                "efs-proxy [PID: %s] for %s is running but has no established "
+                "connection on port %s; leaving it alone (not restarting).",
+                stunnel_pid,
+                mountpoint,
+                port,
+            )
+            rewrite_state_file(state, state_file_dir, state_file)
+            return
+
+        logging.warning(
+            "efs-proxy for %s is not running and has no established connection "
+            "on port %s, restarting a new efs-proxy process.",
+            mountpoint,
+            port,
+        )
+        send_signal_to_running_stunnel_process_group(
+            stunnel_pid, state_file, state_file_dir, SIGKILL
+        )
+        restart_tls_tunnel(child_procs, state, state_file_dir, state_file)
+        return
+
     process = subprocess.Popen(
         ["df", mountpoint],
         stdout=subprocess.DEVNULL,
