@@ -100,7 +100,8 @@ async fn main() {
             status_reporter,
             cw_publisher.clone(),
         )
-        .await;
+        .await
+        .unwrap_or_else(|_| bind_failure_exit(&proxy_config.pid_file_path));
         tokio::spawn(controller.run(
             sigterm_cancellation_token.clone(),
             AwsFileRpcClient,
@@ -116,7 +117,8 @@ async fn main() {
             status_reporter,
             cw_publisher.clone(),
         )
-        .await;
+        .await
+        .unwrap_or_else(|_| bind_failure_exit(&proxy_config.pid_file_path));
         tokio::spawn(controller.run(
             sigterm_cancellation_token.clone(),
             AwsFileRpcClient,
@@ -153,6 +155,14 @@ async fn write_pid_file(pid_file_path: &Path) -> Result<(), anyhow::Error> {
     pid_file.write_u8(b'\x0A').await?;
     pid_file.flush().await?;
     Ok(())
+}
+
+fn bind_failure_exit(pid_file_path: &str) -> ! {
+    let p = Path::new(pid_file_path);
+    if p.exists() {
+        let _ = std::fs::remove_file(p);
+    }
+    std::process::exit(1);
 }
 
 fn run_sighup_handler(proxy_config: ProxyConfig, tls_config: Arc<Mutex<TlsConfig>>) {
