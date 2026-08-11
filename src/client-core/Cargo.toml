@@ -1,0 +1,68 @@
+[package]
+name = "amzn-efs-client-core"
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+
+[lib]
+name = "efs_client_core"
+
+[features]
+# Enables the in-crate test-only constructors (e.g. ReadBypassContext::default,
+# create_test_read_bypass_context) so that efs-proxy's tests can reuse them.
+test-util = []
+
+[dependencies]
+anyhow = "1.0.72"
+async-trait = "0.1"
+aws-config = "1.6.3"
+aws-credential-types = "1.2.3"
+# The AWS SDK crates are taken without default features so that the deprecated
+# `rustls` alias stays off. That alias resolves to
+# aws-smithy-runtime/tls-rustls, which pulls the ring-based rustls 0.21 over
+# hyper 0.14 alongside the modern stack. `default-https-client` already selects
+# rustls-aws-lc (rustls 0.23 + aws-lc), and s3_client.rs picks the provider
+# explicitly (CryptoMode::AwsLcFips / AwsLc), so every other default feature is
+# kept and only the legacy alias is dropped.
+aws-sdk-s3 = { version = "1.87.0", default-features = false, features = ["sigv4a", "http-1x", "default-https-client", "rt-tokio"] }
+aws-sdk-cloudwatch = { version = "1.64.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-cloudwatchlogs = { version = "1.64.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-smithy-http-client = { version = "1.1.9", features = ["default-client", "rustls-aws-lc", "rustls-aws-lc-fips"] }
+aws-smithy-types = "1.3"
+atomic_enum = "0.2"
+bytes = { version = "1.11.1" }
+dashmap = "6.0.1"
+dyn-clone = "1.0"
+futures = "0.3"
+log = "0.4"
+libc = "0.2"
+lru = "0.16"
+moka = { version = "0.12.10", features = ["sync"] }
+onc-rpc = "0.3.3"
+# regex-lite: same API and pattern syntax as `regex` for the bucket-name check,
+# built as a single backtracking engine. Keeps the DFA/SIMD engines and the
+# Unicode tables out of the client binary.
+regex-lite = "0.1.9"
+s2n-tls = { version = "^0.3.19", features = ["fips"] }
+serde = { version = "1.0.175", features = ["derive"] }
+serde_ini = "0.2.0"
+sysinfo = "0.33"
+thiserror = "1.0.44"
+tokio = { version = "^1.40.0", features = ["full"] }
+tokio-util = "0.7.8"
+uuid = { version = "1.4.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
+# XDR runtime + shared NFSv4.1 wire bindings. xdr_codec keeps its lib name so
+# `use xdr_codec` is unchanged; the nfs bindings are re-exported under crate::nfs.
+xdr_codec = { package = "amzn-xdr-codec", path = "../nfs-xdr-bindings/rust-xdr/xdr-codec" }
+amzn-nfs-xdr-bindings = { path = "../nfs-xdr-bindings" }
+
+[dev-dependencies]
+test-case = "*"
+tokio = { version = "1.29.0", features = ["test-util"] }
+tempfile = "3.10.1"
+aws-smithy-mocks = "0.1.1"
+aws-sdk-s3 = { version = "1.87.0", features = ["test-util"] }
+aws-smithy-runtime-api = "1.8.0"
+rand = "0.8.5"
+serial_test = "3.0"
+

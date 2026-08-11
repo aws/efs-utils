@@ -13,19 +13,21 @@ import sys
 from logging.handlers import RotatingFileHandler
 
 try:
-    from configparser import ConfigParser, NoOptionError
+    from configparser import ConfigParser, NoOptionError, NoSectionError
 except ImportError:
     import ConfigParser
-    from ConfigParser import NoOptionError
+    from ConfigParser import NoOptionError, NoSectionError
 
 from efs_utils_common.constants import (
     CONFIG_FILE,
     CONFIG_SECTION,
+    DEFAULT_URL_REQUEST_TIMEOUT_SEC,
     LOG_DIR,
     LOG_FILE,
     MOUNT_TYPE_EFS,
     MOUNT_TYPE_S3FILES,
     S3FILES_CONFIG_FILE,
+    URL_REQUEST_TIMEOUT_ITEM,
 )
 from efs_utils_common.context import MountContext
 
@@ -183,3 +185,43 @@ def bootstrap_logging(config, log_dir=LOG_DIR):
             raw_level,
             level,
         )
+
+
+def get_url_request_timeout(config, config_section=CONFIG_SECTION):
+    """Read the URL request timeout from config, falling back to DEFAULT_URL_REQUEST_TIMEOUT_SEC.
+
+    Reads the 'url_request_timeout_sec' option from the given config section.
+    If the option is not set, returns the default. If the value is invalid
+    (non-numeric), logs a warning and returns the default.
+    """
+    try:
+        timeout = config.getfloat(config_section, URL_REQUEST_TIMEOUT_ITEM)
+        if timeout <= 0:
+            logging.warning(
+                "Invalid value for '%s' in config section [%s]: %s "
+                "(must be positive), falling back to %ss",
+                URL_REQUEST_TIMEOUT_ITEM,
+                config_section,
+                timeout,
+                DEFAULT_URL_REQUEST_TIMEOUT_SEC,
+            )
+            return DEFAULT_URL_REQUEST_TIMEOUT_SEC
+        if timeout != DEFAULT_URL_REQUEST_TIMEOUT_SEC:
+            logging.debug(
+                "Using configured %s=%s from section [%s]",
+                URL_REQUEST_TIMEOUT_ITEM,
+                timeout,
+                config_section,
+            )
+        return timeout
+    except (NoOptionError, NoSectionError):
+        return DEFAULT_URL_REQUEST_TIMEOUT_SEC
+    except ValueError:
+        logging.warning(
+            "Invalid (non-numeric) value for '%s' in config section [%s], "
+            "falling back to %ss",
+            URL_REQUEST_TIMEOUT_ITEM,
+            config_section,
+            DEFAULT_URL_REQUEST_TIMEOUT_SEC,
+        )
+        return DEFAULT_URL_REQUEST_TIMEOUT_SEC

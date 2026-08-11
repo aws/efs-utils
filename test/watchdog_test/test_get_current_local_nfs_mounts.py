@@ -7,6 +7,7 @@
 #
 
 import logging
+from unittest.mock import MagicMock
 
 import watchdog
 
@@ -132,6 +133,42 @@ def test_local_nfs_mount(tmpdir):
 
     assert 1 == len(mounts)
     assert "mnt.12345" in mounts
+
+
+def test_macos_local_nfs_mount(mocker):
+    """
+    macOS branch: mounts are discovered via `mount -t nfs` output (not /proc/mounts),
+    and per-mount options come from get_nfs_mount_options_on_macos.
+    """
+    mocker.patch("watchdog.check_if_running_on_macos", return_value=True)
+    process_mock = MagicMock()
+    process_mock.stdout = "127.0.0.1:/ on /Users/ec2-user/efs (nfs)\n"
+    run_mock = mocker.patch("subprocess.run", return_value=process_mock)
+    mocker.patch(
+        "watchdog.get_nfs_mount_options_on_macos", return_value="rw,port=12345"
+    )
+
+    mounts = watchdog.get_current_local_nfs_mounts()
+
+    # Verify the macOS code path (mount -t nfs) was used, not /proc/mounts.
+    run_mock.assert_called_once()
+    assert ["mount", "-t", "nfs"] == run_mock.call_args[0][0]
+    assert 1 == len(mounts)
+    assert "Users.ec2-user.efs.12345" in mounts
+
+
+def test_macos_no_nfs_mounts_logs_warning(mocker, caplog):
+    """macOS branch: empty `mount -t nfs` output logs a warning and returns no mounts."""
+    mocker.patch("watchdog.check_if_running_on_macos", return_value=True)
+    process_mock = MagicMock()
+    process_mock.stdout = ""
+    mocker.patch("subprocess.run", return_value=process_mock)
+
+    with caplog.at_level(logging.WARNING):
+        mounts = watchdog.get_current_local_nfs_mounts()
+
+    assert {} == mounts
+    assert "No nfs mounts found" in caplog.text
 
 
 def test_local_nfs_mount_default_nfs_port(tmpdir):

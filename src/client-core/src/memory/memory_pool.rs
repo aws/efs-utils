@@ -51,7 +51,7 @@ impl Drop for MemoryChunk {
     ///
     /// **Example:**
     /// ```
-    /// use efs_proxy::memory::memory_pool::{MemoryPool, MemoryPoolConfig};
+    /// use efs_client_core::memory::memory_pool::{MemoryPool, MemoryPoolConfig};
     ///
     /// let pool = MemoryPool::new(MemoryPoolConfig::default());
     /// {
@@ -67,7 +67,7 @@ impl Drop for MemoryChunk {
     ///
     /// **Examples:**
     /// ```
-    /// use efs_proxy::memory::memory_pool::{MemoryPool, MemoryPoolConfig};
+    /// use efs_client_core::memory::memory_pool::{MemoryPool, MemoryPoolConfig};
     ///
     /// {
     ///     let pool = MemoryPool::new(MemoryPoolConfig::default());
@@ -303,7 +303,7 @@ impl MemoryPool {
                 MemoryChunk::new()
             };
             // Set the pool reference so it knows where to return when dropped
-            chunk.pool = Some(Arc::downgrade(&self));
+            chunk.pool = Some(Arc::downgrade(self));
             chunks.push(chunk);
         }
 

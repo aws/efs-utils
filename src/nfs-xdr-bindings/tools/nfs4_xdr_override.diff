@@ -1,0 +1,913 @@
+diff --git a/src/nfs/nfs4_1_xdr.rs b/src/nfs/nfs4_1_xdr.rs
+index 605b59215e3fe5c0cb04efbedb7f633b5b8695cf..389538a424b6c83578789823092d7706e53b7f66 100644
+@@ -1,8 +1,16 @@
+ // GENERATED CODE
+ //
+-// Generated from src/xdr/nfs_4_1_prot.x by xdrgen.
++// Originally Generated from src/nfs/nfs_4_1_prot.x by xdrgen.
++// Modifications are done to implement optimizations for memory copy for opaque data payloads.
+ //
+-// DO NOT EDIT
++#![allow(warnings)]
++#![allow(clippy)]
++#![allow(unknown_lints)]
++#![allow(deprecated)]
++#![allow(invalid_value)]
++#![allow(unused)]
++
++use bytes::Bytes;
+ 
+ pub const ACCESS4_DELETE: i64 = 16i64;
+ 
+@@ -760,6 +768,7 @@ pub struct COMPOUND4args {
+     pub argarray: Vec<nfs_argop4>,
+ }
+ 
++#[derive(Clone, Debug, Eq, PartialEq)]
+ pub struct COMPOUND4res {
+     pub status: nfsstat4,
+     pub tag: utf8str_cs,
+@@ -1291,7 +1300,7 @@ pub enum READ4res {
+ #[derive(Clone, Debug, Eq, PartialEq)]
+ pub struct READ4resok {
+     pub eof: bool,
+-    pub data: Vec<u8>,
++    pub data: DataPayload,
+ }
+ 
+ #[derive(Clone, Debug, Eq, PartialEq)]
+@@ -1303,11 +1312,13 @@ pub struct READDIR4args {
+     pub attr_request: bitmap4,
+ }
+ 
++#[derive(Clone, Debug, Eq, PartialEq)]
+ pub enum READDIR4res {
+     NFS4_OK(READDIR4resok),
+     default,
+ }
+ 
++#[derive(Clone, Debug, Eq, PartialEq)]
+ pub struct READDIR4resok {
+     pub cookieverf: verifier4,
+     pub reply: dirlist4,
+@@ -1559,12 +1570,29 @@ pub enum WANT_DELEGATION4res {
+     default,
+ }
+ 
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub enum DataPayload {
++    Data(Bytes),
++    DataRef(OpaqueRaw),
++}
++
++/// Represents a slice of opaque data within a larger buffer,
++/// defined by its starting offset and length.
++#[derive(Copy, Clone, Debug, Eq, PartialEq)]
++pub struct OpaqueRaw {
++    /// The starting position (byte offset) of the data slice within a the *compound* buffer.
++    /// Note: this is after the "4 byte opaque data length", directly pointing at the beginning of the real data buffer.
++    pub offset: usize,
++    /// The length of the data slice in bytes.
++    pub len: usize,
++}
++
+ #[derive(Clone, Debug, Eq, PartialEq)]
+ pub struct WRITE4args {
+     pub stateid: stateid4,
+     pub offset: offset4,
+     pub stable: stable_how4,
+-    pub data: Vec<u8>,
++    pub data: DataPayload,
+ }
+ 
+ #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+@@ -1724,11 +1752,13 @@ pub struct device_addr4 {
+ #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+ pub struct deviceid4(pub [u8; NFS4_DEVICEID4_SIZE as usize]);
+ 
++#[derive(Clone, Debug, Eq, PartialEq)]
+ pub struct dirlist4 {
+     pub entries: Option<Box<entry4>>,
+     pub eof: bool,
+ }
+ 
++#[derive(Clone, Debug, Eq, PartialEq)]
+ pub struct entry4 {
+     pub cookie: nfs_cookie4,
+     pub name: component4,
+@@ -2062,7 +2092,7 @@ pub enum nfs_cb_argop4 {
+     OP_CB_AWSFILE_HEARTBEAT(CB_AWSFILE_HEARTBEAT4args),
+ }
+ 
+-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
++#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+ pub enum nfs_cb_opnum4 {
+     OP_CB_GETATTR = 3isize,
+     OP_CB_RECALL = 4isize,
+@@ -2141,7 +2171,7 @@ pub struct nfs_modified_limit4 {
+     pub bytes_per_block: uint32_t,
+ }
+ 
+-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
++#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+ pub enum nfs_opnum4 {
+     OP_ACCESS = 3isize,
+     OP_CLOSE = 4isize,
+@@ -2207,6 +2237,7 @@ pub enum nfs_opnum4 {
+     OP_AWSFILE_READ_BYPASS = 200001isize,
+ }
+ 
++#[derive(Clone, Debug, Eq, PartialEq)]
+ pub enum nfs_resop4 {
+     OP_ACCESS(ACCESS4res),
+     OP_CLOSE(CLOSE4res),
+@@ -2292,7 +2323,7 @@ pub struct nfsacl41 {
+     pub na41_aces: Vec<nfsace4>,
+ }
+ 
+-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
++#[derive(Copy, Clone, Debug, strum_macros::Display, thiserror::Error, Eq, PartialEq)]
+ pub enum nfsstat4 {
+     NFS4_OK = 0isize,
+     NFS4ERR_PERM = 1isize,
+@@ -4133,7 +4164,12 @@ impl<Out: xdr_codec::Write> xdr_codec::Pack<Out> for READ4res {
+ 
+ impl<Out: xdr_codec::Write> xdr_codec::Pack<Out> for READ4resok {
+     fn pack(&self, out: &mut Out) -> xdr_codec::Result<usize> {
+-        Ok(self.eof.pack(out)? + xdr_codec::pack_opaque_flex(&self.data, None, out)? + 0)
++        match self.data {
++            DataPayload::Data(ref data) => {
++                Ok(self.eof.pack(out)? + xdr_codec::pack_opaque_flex(&data, None, out)? + 0)
++            }
++            _ => Err(xdr_codec::Error::invalidcase(-1)),
++        }
+     }
+ }
+ 
+@@ -4499,8 +4535,12 @@ impl<Out: xdr_codec::Write> xdr_codec::Pack<Out> for WRITE4args {
+         Ok(self.stateid.pack(out)?
+             + self.offset.pack(out)?
+             + self.stable.pack(out)?
+-            + xdr_codec::pack_opaque_flex(&self.data, None, out)?
+-            + 0)
++            + match self.data {
++                DataPayload::Data(ref data) => xdr_codec::pack_opaque_flex(data, None, out)?,
++                DataPayload::DataRef(ref data) => {
++                    return Err(xdr_codec::Error::invalidcase(-1));
++                }
++            })
+     }
+ }
+ 
+@@ -6213,7 +6253,7 @@ impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for ACCESS4resok {
+     }
+ }
+ 
+-impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for AWSFILE_READ_BYPASS4res {
++impl<In: xdr_codec::Read + std::io::Seek> xdr_codec::Unpack<In> for AWSFILE_READ_BYPASS4res {
+     fn unpack(input: &mut In) -> xdr_codec::Result<(AWSFILE_READ_BYPASS4res, usize)> {
+         let mut sz = 0;
+         Ok((
+@@ -7095,7 +7135,7 @@ impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for COMMIT4resok {
+     }
+ }
+ 
+-impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for COMPOUND4args {
++impl<In: xdr_codec::Read + std::io::Seek> xdr_codec::Unpack<In> for COMPOUND4args {
+     fn unpack(input: &mut In) -> xdr_codec::Result<(COMPOUND4args, usize)> {
+         let mut sz = 0;
+         Ok((
+@@ -7121,7 +7161,7 @@ impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for COMPOUND4args {
+     }
+ }
+ 
+-impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for COMPOUND4res {
++impl<In: xdr_codec::Read + std::io::Seek> xdr_codec::Unpack<In> for COMPOUND4res {
+     fn unpack(input: &mut In) -> xdr_codec::Result<(COMPOUND4res, usize)> {
+         let mut sz = 0;
+         Ok((
+@@ -9009,7 +9049,7 @@ impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for READ4args {
+     }
+ }
+ 
+-impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for READ4res {
++impl<In: xdr_codec::Read + std::io::Seek> xdr_codec::Unpack<In> for READ4res {
+     fn unpack(input: &mut In) -> xdr_codec::Result<(READ4res, usize)> {
+         let mut sz = 0;
+         Ok((
+@@ -9030,21 +9070,33 @@ impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for READ4res {
+     }
+ }
+ 
+-impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for READ4resok {
++impl<In: xdr_codec::Read + std::io::Seek> xdr_codec::Unpack<In> for READ4resok {
+     fn unpack(input: &mut In) -> xdr_codec::Result<(READ4resok, usize)> {
+         let mut sz = 0;
++        let (eof, fsz) = xdr_codec::Unpack::unpack(input)?;
++        sz += fsz;
++        let (data_len, fsz) = xdr_codec::Unpack::unpack(input)?;
++        sz += fsz;
++        // Calculate the length padded to the next 4-byte boundary.
++        // This is achieved by adding 3 (to ensure ceiling behavior)
++        // and then clearing the lower two bits using bitwise AND with !3 (...11111100),
++        // effectively rounding up to the nearest multiple of 4.
++        let padded_len = (data_len + 3) & !3;
++
++        // calculate the data payload offset from the full compound buffer
++        let current_position = input.stream_position()?;
++        let data_payload_offset = current_position as usize;
++        // Seek to the end of the padded length
++        input.seek(std::io::SeekFrom::Current(padded_len as i64))?;
++        sz += padded_len;
++
+         Ok((
+             READ4resok {
+-                eof: {
+-                    let (v, fsz) = xdr_codec::Unpack::unpack(input)?;
+-                    sz += fsz;
+-                    v
+-                },
+-                data: {
+-                    let (v, fsz) = xdr_codec::unpack_opaque_flex(input, None)?;
+-                    sz += fsz;
+-                    v
+-                },
++                eof,
++                data: DataPayload::DataRef(OpaqueRaw {
++                    offset: data_payload_offset,
++                    len: data_len,
++                }),
+             },
+             sz,
+         ))
+@@ -9980,31 +10032,41 @@ impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for WANT_DELEGATION4res {
+     }
+ }
+ 
+-impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for WRITE4args {
++impl<In: xdr_codec::Read + std::io::Seek> xdr_codec::Unpack<In> for WRITE4args {
+     fn unpack(input: &mut In) -> xdr_codec::Result<(WRITE4args, usize)> {
+         let mut sz = 0;
++
++        let (stateid, fsz) = xdr_codec::Unpack::unpack(input)?;
++        sz += fsz;
++        let (offset, fsz) = xdr_codec::Unpack::unpack(input)?;
++        sz += fsz;
++        let (stable, fsz) = xdr_codec::Unpack::unpack(input)?;
++        sz += fsz;
++        let (data_len, fsz) = xdr_codec::Unpack::unpack(input)?;
++        sz += fsz;
++
++        // Calculate the length padded to the next 4-byte boundary.
++        // This is achieved by adding 3 (to ensure ceiling behavior)
++        // and then clearing the lower two bits using bitwise AND with !3 (...11111100),
++        // effectively rounding up to the nearest multiple of 4.
++        let padded_len = (data_len + 3) & !3;
++
++        // calculate the data payload offset from the full compound buffer
++        let current_position = input.stream_position()?;
++        let data_payload_offset = current_position as usize;
++        // Seek to the end of the padded length
++        input.seek(std::io::SeekFrom::Current(padded_len as i64))?;
++        sz += padded_len;
++
+         Ok((
+             WRITE4args {
+-                stateid: {
+-                    let (v, fsz) = xdr_codec::Unpack::unpack(input)?;
+-                    sz += fsz;
+-                    v
+-                },
+-                offset: {
+-                    let (v, fsz) = xdr_codec::Unpack::unpack(input)?;
+-                    sz += fsz;
+-                    v
+-                },
+-                stable: {
+-                    let (v, fsz) = xdr_codec::Unpack::unpack(input)?;
+-                    sz += fsz;
+-                    v
+-                },
+-                data: {
+-                    let (v, fsz) = xdr_codec::unpack_opaque_flex(input, None)?;
+-                    sz += fsz;
+-                    v
+-                },
++                stateid,
++                offset,
++                stable,
++                data: DataPayload::DataRef(OpaqueRaw {
++                    offset: data_payload_offset,
++                    len: data_len,
++                }),
+             },
+             sz,
+         ))
+@@ -11545,7 +11607,7 @@ impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for newtime4 {
+     }
+ }
+ 
+-impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for nfs_argop4 {
++impl<In: xdr_codec::Read + std::io::Seek> xdr_codec::Unpack<In> for nfs_argop4 {
+     fn unpack(input: &mut In) -> xdr_codec::Result<(nfs_argop4, usize)> {
+         let mut sz = 0;
+         Ok((
+@@ -12287,7 +12349,7 @@ impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for nfs_opnum4 {
+     }
+ }
+ 
+-impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for nfs_resop4 {
++impl<In: xdr_codec::Read + std::io::Seek> xdr_codec::Unpack<In> for nfs_resop4 {
+     fn unpack(input: &mut In) -> xdr_codec::Result<(nfs_resop4, usize)> {
+         let mut sz = 0;
+         Ok((
+@@ -14476,3 +14538,589 @@ impl<In: xdr_codec::Read> xdr_codec::Unpack<In> for xattrvalue4 {
+         ))
+     }
+ }
++#[cfg(test)]
++mod tests {
++    use crate::nfs::nfs4_1_xdr_ext::{READ4RES_FIXED_SIZE_BEFORE_PAYLOAD, WRITE4ARGS_FIXED_SIZE_BEFORE_PAYLOAD};
++
++    use super::*;
++    use bytes::Bytes;
++    use std::any::Any;
++    use std::io::{Cursor, Read, Write};
++    use xdr_codec::{Pack, Unpack};
++
++    // --- Tests for write4args ---
++
++    #[test]
++    fn test_write4args_pack() {
++        // Prepare the input struct
++        let original_data = Bytes::from_static(b"Test payload data.");
++        // Size of stateid(4+12) + offset(8) + stable(4) + payload_opaque_size(4) = 32 bytes
++        let data_payload_offset = 4 + 12 + 8 + 4 + 4;
++
++        let args = WRITE4args {
++            stateid: stateid4 {
++                seqid: 123,
++                other: [0xaa; 12],
++            },
++            offset: 1024,
++            stable: stable_how4::DATA_SYNC4, // Enum value 1
++            // The actual data is held here and packed by WRITE4args::pack itself
++            data: DataPayload::Data(original_data.clone()),
++        };
++
++        // Pack the struct
++        let mut buffer = Cursor::new(Vec::new());
++        let packed_size = args.pack(&mut buffer).expect("Packing failed");
++
++        // Define the expected packed bytes (struct fields only)
++        let expected_bytes: Vec<u8> = [
++            // stateid.seqid (123 = 0x7B)
++            &[0x00, 0x00, 0x00, 0x7b][..],
++            // stateid.other ([0xAA; 12])
++            &[0xaa; 12][..],
++            // offset (1024 = 0x400)
++            &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00][..],
++            // stable (DATA_SYNC4 = 1)
++            &[0x00, 0x00, 0x00, 0x01][..],
++            // data_opaque_len
++            &[0x00, 0x00, 0x00, 0x12][..],
++            // data
++            original_data.as_ref(),
++            // padding
++            &[0x00; 2][..],
++        ]
++        .concat();
++
++        assert_eq!(
++            packed_size,
++            expected_bytes.len(),
++            "Packed size mismatch, expeced_bytes {:?}, got {:?}",
++            expected_bytes,
++            buffer
++        );
++        assert_eq!(buffer.into_inner(), expected_bytes, "Packed bytes mismatch");
++    }
++    #[test]
++    fn test_write4args_unpack() {
++        // Prepare the input bytes (representing a packed WRITE4args struct)
++        let payload_len: usize = 18;
++        let payload_offset: usize = 32; // Offset where payload would start
++        let input_bytes: Vec<u8> = [
++            // stateid.seqid (123 = 0x7B)
++            &[0x00, 0x00, 0x00, 0x7b][..],
++            // stateid.other ([0xAA; 12])
++            &[0xaa; 12][..],
++            // offset (1024 = 0x400)
++            &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00][..],
++            // stable (DATA_SYNC4 = 1)
++            &[0x00, 0x00, 0x00, 0x01][..],
++            // opaque_data.len (payload_len = 18)
++            &[0x00, 0x00, 0x00, 0x12][..],
++            // opaque_data
++            &[0x00; 18][..],
++            // padding
++            &[0x00; 2][..],
++        ]
++        .concat();
++        let expected_unpacked_size = input_bytes.len();
++        let mut buffer = Cursor::new(input_bytes);
++
++        // Unpack the struct
++        let (unpacked, unpacked_size) = WRITE4args::unpack(&mut buffer).expect("Unpacking failed");
++
++        // Assert results
++        assert_eq!(
++            unpacked_size, expected_unpacked_size,
++            "Unpacked size should match input struct bytes length"
++        );
++        assert_eq!(unpacked.stateid.seqid, 123);
++        assert_eq!(unpacked.stateid.other, [0xaa; 12]);
++        assert_eq!(unpacked.offset, 1024);
++        assert_eq!(unpacked.stable, stable_how4::DATA_SYNC4);
++
++        // Check the data reference field specifically
++        assert_eq!(unpacked.data, DataPayload::DataRef(OpaqueRaw {
++            offset: payload_offset,
++            len: payload_len,
++        }));
++
++        // Check that the buffer cursor is at the end of the struct data
++        assert_eq!(
++            buffer.position(),
++            expected_unpacked_size as u64,
++            "Cursor not positioned correctly after unpack"
++        );
++    }
++
++    #[test]
++    fn test_write4args_pack_error_missing_data() {
++        // 1. Prepare the input struct with data_ref indicating data, but data field is None
++        let args = WRITE4args {
++            stateid: stateid4 {
++                seqid: 123,
++                other: [0xaa; 12],
++            },
++            offset: 1024,
++            stable: stable_how4::DATA_SYNC4,
++            // data_ref indicates a payload of 10 bytes exists
++            data: DataPayload::DataRef(OpaqueRaw {
++                offset: 32,
++                len: 10,
++            }), // offset doesn't matter here
++            // Actual data payload is missing
++        };
++
++        // 2. Attempt to pack the struct
++        let mut buffer = Cursor::new(Vec::new());
++        let result = args.pack(&mut buffer);
++
++        // 3. Assert that packing failed with an error
++        assert!(
++            result.is_err(),
++            "Packing should fail when data is missing but data_ref indicates length > 0"
++        );
++
++        // Optional: Check for a specific error kind if applicable
++        if let Err(e) = result {
++            match e.kind() {
++                // Match on the error's kind
++                xdr_codec::ErrorKind::InvalidCase(_) => { /* Expected error */ }
++                _ => panic!("Expected InvalidCase error, but got {:?}", e),
++            }
++        }
++    }
++
++    // --- Tests for compound4args with write4args ---
++    #[test]
++    fn test_compound4args_roundtrip_with_write() {
++        let write_op_data = Bytes::from_static(b"Data within a compound request.");
++        let write_op = nfs_argop4::OP_WRITE(WRITE4args {
++            stateid: stateid4 {
++                seqid: 789,
++                other: [0xef; 12],
++            },
++            stable: stable_how4::DATA_SYNC4,
++            offset: 8192,
++            data: DataPayload::Data(write_op_data.clone()),
++        });
++
++        let getattr_op = nfs_argop4::OP_GETATTR(GETATTR4args {
++            attr_request: bitmap4(vec![1, 2, 3]),
++        });
++
++        let putfh_op = nfs_argop4::OP_PUTFH(PUTFH4args {
++            object: nfs_fh4(Bytes::from_static(b"some_file_handle").to_vec()),
++        });
++        let putfh_op_len = putfh_op
++            .pack(&mut Cursor::new(Vec::new()))
++            .expect("Packing putfh_op failed");
++
++        let original = COMPOUND4args {
++            tag: utf8string(Bytes::from_static(b"").to_vec()),
++            minorversion: 1,
++            argarray: vec![putfh_op, write_op.clone(), getattr_op],
++        };
++
++        let mut pack_buffer = Cursor::new(Vec::new());
++        let _compound_packed_size = original
++            .pack(&mut pack_buffer)
++            .expect("Compound packing failed");
++
++        // --- Unpacking Part ---
++        let mut unpack_buffer = Cursor::new(pack_buffer.into_inner());
++        let (unpacked, _compound_unpacked_size) =
++            COMPOUND4args::unpack(&mut unpack_buffer).expect("Compound unpacking failed");
++
++        assert_eq!(unpacked.tag.0, b"");
++        assert_eq!(unpacked.minorversion, 1);
++
++        // Find the WRITE op and check it
++        let mut found_write = false;
++        for op in &unpacked.argarray {
++            if let nfs_argop4::OP_WRITE(unpacked_write) = op {
++                found_write = true;
++                assert_eq!(unpacked_write.offset, 8192);
++                assert_eq!(unpacked_write.stable, stable_how4::DATA_SYNC4);
++                assert_eq!(unpacked_write.stateid.seqid, 789);
++
++                // Verify data_ref points correctly within the original packed buffer
++                let data_ref = match unpacked_write.data {
++                    DataPayload::DataRef(ref data) => {
++                        assert!(
++                            data.offset < (_compound_unpacked_size as usize),
++                            "Data offset exceeds compound size"
++                        ); // Basic sanity check
++                        data
++                    }
++                    _ => panic!("Data should be DataRef"),
++                };
++
++                // Read the payload from the original buffer using the unpacked reference
++                let mut payload_read_buffer = unpack_buffer.into_inner(); // Get the original bytes back
++                let mut actual_payload = vec![0u8; data_ref.len as usize];
++                let mut payload_cursor = Cursor::new(&payload_read_buffer[..]);
++                // calculate the offset manually by adding up the packed ops fields before writes:
++                let mut expected_offset_before_write_payload = 0;
++                expected_offset_before_write_payload += 8; // tag = 0, minorversion = 4 bytes, argarray_len = 4 bytes
++                expected_offset_before_write_payload += 4; // putfh_op code
++                expected_offset_before_write_payload += putfh_op_len;
++                expected_offset_before_write_payload += 4; // write4args op code
++                expected_offset_before_write_payload += WRITE4ARGS_FIXED_SIZE_BEFORE_PAYLOAD;
++                expected_offset_before_write_payload += 4; // data_opaque_len
++
++                // Assert that we didn't extract data payload
++                // Assert unpacked_write.data is DataRef
++                assert!(matches!(unpacked_write.data, DataPayload::DataRef(_)));
++
++                // Read the payload using the data_ref
++                assert_eq!(
++                    data_ref.offset,
++                    expected_offset_before_write_payload as usize
++                );
++                payload_cursor.set_position(data_ref.offset as u64);
++                payload_cursor
++                    .read_exact(&mut actual_payload)
++                    .expect("Failed to read payload using data_ref");
++
++                assert_eq!(
++                    actual_payload,
++                    write_op_data.as_ref(),
++                    "Payload read via data_ref mismatch"
++                );
++
++                break;
++            }
++        }
++        assert!(
++            found_write,
++            "Did not find OP_WRITE in unpacked compound args"
++        );
++    }
++
++    #[test]
++    fn test_read4resok_pack() {
++        // Prepare the input struct
++        let original_data = Bytes::from_static(b"Read data payload.");
++        // Size of eof(4) + payload_opaque_size(4) = 8 bytes
++        let data_payload_offset = 4 + 4;
++
++        let resok = READ4resok {
++            eof: false,
++            data: DataPayload::Data(original_data.clone()),
++        };
++
++        // Pack the struct
++        let mut buffer = Cursor::new(Vec::new());
++        let packed_size = resok.pack(&mut buffer).expect("Packing failed");
++
++        // Define the expected packed bytes
++        let expected_bytes: Vec<u8> = [
++            // eof (false = 0)
++            &[0x00, 0x00, 0x00, 0x00][..],
++            // data_opaque_len (18 = 0x12)
++            &[0x00, 0x00, 0x00, 0x12][..],
++            // data
++            original_data.as_ref(),
++            // padding (to multiple of 4)
++            &[0x00; 2][..],
++        ]
++        .concat();
++
++        assert_eq!(
++            packed_size,
++            expected_bytes.len(),
++            "Packed size mismatch, expected_bytes {:?}, got {:?}",
++            expected_bytes,
++            buffer.get_ref() // Use get_ref() to see the buffer contents without consuming it
++        );
++        assert_eq!(buffer.into_inner(), expected_bytes, "Packed bytes mismatch");
++    }
++
++    #[test]
++    fn test_read4resok_unpack() {
++        // Prepare the input bytes (representing a packed READ4resok struct)
++        let payload_data = b"Unpack this data."; // 17 bytes
++        let payload_len: usize = payload_data.len();
++        let payload_offset: usize = 8; // Offset where payload starts (after eof and length)
++        let input_bytes: Vec<u8> = [
++            // eof (true = 1)
++            &[0x00, 0x00, 0x00, 0x01][..],
++            // opaque_data.len (payload_len = 17 = 0x11)
++            &[0x00, 0x00, 0x00, 0x11][..],
++            // opaque_data
++            payload_data,
++            // padding (to multiple of 4)
++            &[0x00; 3][..],
++        ]
++        .concat();
++        let expected_unpacked_size = input_bytes.len();
++        let mut buffer = Cursor::new(input_bytes.clone()); // Clone input_bytes for potential debugging
++
++        // Unpack the struct
++        let (unpacked, unpacked_size) = READ4resok::unpack(&mut buffer).expect("Unpacking failed");
++
++        // Assert results
++        assert_eq!(
++            unpacked_size, expected_unpacked_size,
++            "Unpacked size ({}) should match input struct bytes length ({})",
++            unpacked_size, expected_unpacked_size
++        );
++        assert_eq!(unpacked.eof, true, "EOF flag mismatch");
++
++        // Check the data reference field specifically
++        let data_ref = match unpacked.data {
++            DataPayload::DataRef(data_ref) => data_ref,
++            _ => panic!("Data should be DataRef"),
++        };
++        assert_eq!(data_ref.offset, payload_offset, "data_ref offset mismatch");
++        assert_eq!(data_ref.len, payload_len, "data_ref length mismatch");
++
++        // Check that the buffer cursor is at the end of the struct data
++        assert_eq!(
++            buffer.position(),
++            expected_unpacked_size as u64,
++            "Cursor position ({}) not at expected end ({}) after unpack",
++            buffer.position(),
++            expected_unpacked_size
++        );
++    }
++
++    #[test]
++    fn test_read4resok_pack_error_missing_data() {
++        // 1. Prepare the input struct with data field as None
++        // Assuming the pack implementation requires `data` to be Some, like WRITE4args
++        let resok = READ4resok {
++            eof: false,
++            data: DataPayload::DataRef(OpaqueRaw {
++                offset: 123,
++                len: 321, // Len and offset doesn't matter here
++            }),
++        };
++
++        // 2. Attempt to pack the struct
++        let mut buffer = Cursor::new(Vec::new());
++        let result = resok.pack(&mut buffer);
++
++        // 3. Assert that packing failed with an error
++        // This assumes pack() returns an error if data is None. If packing None
++        // results in a zero-length opaque, this test needs adjustment.
++        assert!(
++            result.is_err(),
++            "Packing should fail when data is None (assuming pack requires Some)"
++        );
++
++        // Optional: Check for a specific error kind if applicable
++        if let Err(e) = result {
++            match e.kind() {
++                // Match on the error's kind, likely InvalidCase if mirroring WRITE4args
++                xdr_codec::ErrorKind::InvalidCase(_) => { /* Expected error */ }
++                _ => panic!("Expected InvalidCase error, but got {:?}", e),
++            }
++        }
++    }
++
++    #[test]
++    fn test_compound4res_roundtrip_with_read() {
++        let read_op_data = Bytes::from_static(b"Data read from server."); // 22 bytes
++        let read_resok = READ4resok {
++            eof: true,
++            data: DataPayload::Data(read_op_data.clone())
++        };
++        let read_op = nfs_resop4::OP_READ(READ4res::NFS4_OK(read_resok));
++
++        // Create some other dummy operations for context
++        let putfh_op = nfs_resop4::OP_PUTFH(PUTFH4res {
++            status: nfsstat4::NFS4_OK,
++        }); // Status only
++        let putfh_op_packed_len = putfh_op
++            .pack(&mut Cursor::new(Vec::new()))
++            .expect("Packing putfh_op failed"); // Should be 8 (op code + status)
++
++        let getattr_resok = GETATTR4resok {
++            obj_attributes: fattr4 {
++                attrmask: bitmap4(vec![1, 2, 3]),
++                attr_vals: attrlist4(vec![]),
++            },
++        }; // Empty attributes
++
++        let getattr_op = nfs_resop4::OP_GETATTR(GETATTR4res::NFS4_OK(getattr_resok));
++        let getattr_op_packed_len = getattr_op
++            .pack(&mut Cursor::new(Vec::new()))
++            .expect("Packing getattr_op failed"); // Should be 8 (op code + status) + fattr4 size
++
++        let original = COMPOUND4res {
++            status: nfsstat4::NFS4_OK,
++            tag: utf8string(Bytes::from_static(b"response_tag").to_vec()),
++            resarray: vec![putfh_op, read_op.clone(), getattr_op],
++        };
++
++        // --- Packing Part ---
++        let mut pack_buffer = Cursor::new(Vec::new());
++        let compound_packed_size = original
++            .pack(&mut pack_buffer)
++            .expect("Compound packing failed");
++        let packed_bytes = pack_buffer.into_inner(); // Get the packed bytes
++
++        // --- Unpacking Part ---
++        let mut unpack_buffer = Cursor::new(packed_bytes.clone()); // Use clone for potential later inspection
++        let (unpacked, compound_unpacked_size) =
++            COMPOUND4res::unpack(&mut unpack_buffer).expect("Compound unpacking failed");
++
++        // Basic checks on COMPOUND4res
++        assert_eq!(unpacked.status, nfsstat4::NFS4_OK);
++        assert_eq!(unpacked.tag.0, b"response_tag");
++        assert_eq!(unpacked.resarray.len(), 3);
++        assert_eq!(
++            compound_unpacked_size, compound_packed_size,
++            "Packed and unpacked sizes differ"
++        );
++
++        // Find the READ op result and check it
++        let mut found_read = false;
++        for op_res in &unpacked.resarray {
++            if let nfs_resop4::OP_READ(read_res) = op_res {
++                match read_res {
++                    READ4res::NFS4_OK(unpacked_readok) => {
++                        found_read = true;
++                        assert_eq!(unpacked_readok.eof, true, "Unpacked READ op eof mismatch");
++
++                        // Verify data_ref points correctly within the original packed buffer
++                        let data_ref = match unpacked_readok.data {
++                            DataPayload::DataRef(data_ref) => data_ref,
++                            _ => panic!("Data should be DataRef"),
++                        };
++                        assert_eq!(data_ref.len, read_op_data.len(), "data_ref length mismatch");
++                        assert!(
++                            data_ref.offset < (compound_unpacked_size as usize),
++                            "Data offset exceeds compound size"
++                        ); // Basic sanity check
++
++                        // Calculate the expected offset manually
++                        // Size of: tag_len(4) + tag(?) + status(4) + resarray_len(4)
++                        let mut expected_offset_before_read_payload =
++                            4 + unpacked.tag.0.len() + 4 + 4;
++                        // Add size of preceding ops in resarray
++                        expected_offset_before_read_payload += putfh_op_packed_len; // PUTFH result size
++                        expected_offset_before_read_payload += 4; // READ4res op code
++                        expected_offset_before_read_payload += READ4RES_FIXED_SIZE_BEFORE_PAYLOAD;
++                        expected_offset_before_read_payload += 4; // READ4resok data length field
++
++                        assert_eq!(
++                            data_ref.offset, expected_offset_before_read_payload as usize,
++                            "data_ref offset mismatch"
++                        );
++
++                        // Read the payload from the original buffer using the unpacked reference
++                        let mut actual_payload = vec![0u8; data_ref.len as usize];
++                        let mut payload_cursor = Cursor::new(&packed_bytes[..]); // Read from the original bytes
++                        payload_cursor.set_position(data_ref.offset as u64);
++                        payload_cursor
++                            .read_exact(&mut actual_payload)
++                            .expect("Failed to read payload using data_ref");
++
++                        assert_eq!(
++                            actual_payload,
++                            read_op_data.as_ref(),
++                            "Payload read via data_ref mismatch"
++                        );
++                        break; // Found and checked the read op
++                    }
++                    _ => panic!("Expected READ4res::NFS4_OK, but got other status"),
++                }
++            }
++        }
++        assert!(
++            found_read,
++            "Did not find OP_READ result in unpacked compound response"
++        );
++
++        // Check buffer position after unpack
++        assert_eq!(
++            unpack_buffer.position(),
++            compound_unpacked_size as u64,
++            "Cursor position after unpacking COMPOUND4res is incorrect"
++        );
++    }
++
++
++    #[test]
++    fn test_encoding_and_parsing_nfs_compound_with_awsfile_read_bypass() {
++        let mut basic_compound_res = COMPOUND4res {
++            status: nfsstat4::NFS4_OK,
++            tag: utf8string(b"test_tag".to_vec()),
++            resarray: vec![],
++        };
++        let read_data_payload = Bytes::from_static(b"Data within a compound request.");
++        let read_bypass_args0 = AWSFILE_READ_BYPASS4res::NFS4_OK(READ4resok {
++            eof: false,
++            data: DataPayload::Data(read_data_payload.clone()),
++        });
++        let read_bypass_args1 =
++            AWSFILE_READ_BYPASS4res::NFS4ERR_AWSFILE_BYPASS(AWSFILE_READ_BYPASS4resok {
++                filehandle: nfs_fh4(vec![0xef; 16]),
++                data_locator: awsfile_bypass_data_locator {
++                    bucket_name: vec![0xef; 16],
++                    s3_key: vec![0xef; 16],
++                    etag: vec![0xef; 16],
++                    offset: 123,
++                    count: 123,
++                },
++                file_size: 123,
++            });
++
++        basic_compound_res
++            .resarray
++            .push(nfs_resop4::OP_AWSFILE_READ_BYPASS(read_bypass_args0));
++        basic_compound_res
++            .resarray
++            .push(nfs_resop4::OP_AWSFILE_READ_BYPASS(read_bypass_args1));
++
++        let mut raw_bytes = Vec::new();
++        basic_compound_res
++            .pack(&mut raw_bytes)
++            .expect("Failed to pack compound_args");
++        let parsed_compound_res = COMPOUND4res::unpack(&mut Cursor::new(&raw_bytes[..]));
++        assert!(parsed_compound_res.is_ok(), "Parsing failed");
++        // len of compound res array is 4
++        let (parsed_compound_res, _) = parsed_compound_res.unwrap();
++        assert_eq!(parsed_compound_res.resarray.len(), 2);
++        // check if the first res is read_bypass_args0
++        assert!(matches!(
++            &parsed_compound_res.resarray[0],
++            nfs_resop4::OP_AWSFILE_READ_BYPASS(AWSFILE_READ_BYPASS4res::NFS4_OK(_))
++        ));
++        // check the READ4res contains data_ref, calculate the offset of the data_ref and check
++        let compound_res_offset_before_op = 
++            size_of::<nfsstat4>() // nfsstat4
++            + size_of::<uint32_t>() // tag size
++            + ((basic_compound_res.tag.0.len() + 3) & !3) // Tag
++            + size_of::<uint32_t>(); // OP count
++        let data_ref_offset = compound_res_offset_before_op 
++        + size_of::<uint32_t>() // op code
++        + size_of::<uint32_t>() // nfsstat4
++        + size_of::<uint32_t>() // eof
++        + size_of::<uint32_t>(); // opaque size
++        if let nfs_resop4::OP_AWSFILE_READ_BYPASS(AWSFILE_READ_BYPASS4res::NFS4_OK(read_res)) = &parsed_compound_res.resarray[0] {
++            let data_ref = &read_res.data;
++            match data_ref {
++                DataPayload::DataRef(data_ref) => {
++                    assert_eq!(data_ref.offset, data_ref_offset);
++                    assert_eq!(data_ref.len, read_data_payload.len());
++                }
++                _ => panic!("Expected DataPayload::DataRef"),
++            }
++        }
++        // check if the second res is read_bypass_args1
++        if let nfs_resop4::OP_AWSFILE_READ_BYPASS(AWSFILE_READ_BYPASS4res::NFS4ERR_AWSFILE_BYPASS(bypass_resok)) = &parsed_compound_res.resarray[1] {
++            assert_eq!(bypass_resok.filehandle.0, vec![0xef; 16]);
++            assert_eq!(bypass_resok.data_locator.bucket_name, vec![0xef; 16]);
++            assert_eq!(bypass_resok.data_locator.s3_key, vec![0xef; 16]);
++            assert_eq!(bypass_resok.data_locator.etag, vec![0xef; 16]);
++            assert_eq!(bypass_resok.data_locator.offset, 123);
++            assert_eq!(bypass_resok.data_locator.count, 123);
++            assert_eq!(bypass_resok.file_size, 123);
++        } else {
++            panic!("Expected OP_AWSFILE_READ_BYPASS with NFS4ERR_AWSFILE_BYPASS");
++        }
++    }
++}

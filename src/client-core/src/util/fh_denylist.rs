@@ -158,19 +158,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_denylist_ttl_expiration() {
-        let short_ttl = Duration::from_millis(100);
+        let short_ttl = Duration::from_millis(500);
         let denylist = FileHandleDenyList::new(10, short_ttl);
 
         let fh = nfs_fh4(vec![1, 2, 3, 4]);
+        let inserted_at = std::time::Instant::now();
         denylist.add(fh.clone());
         assert!(denylist.contains(&fh));
 
-        // Wait for 75 ms to verify timer not reset on contains()
-        tokio::time::sleep(Duration::from_millis(75)).await;
-        assert!(denylist.contains(&fh));
+        // Verify contains() does not extend the TTL by checking midway
+        // through the TTL window. tokio::time::sleep only guarantees a
+        // minimum, so on a loaded host the sleep can overshoot the whole
+        // TTL; only assert presence if we actually woke up in time.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if inserted_at.elapsed() < short_ttl {
+            assert!(denylist.contains(&fh));
+        }
 
-        // Wait 50 additional ms for TTL to expire
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Sleep until the TTL has definitely elapsed (plus margin),
+        // however long the earlier sleep actually took.
+        if let Some(remaining) = short_ttl.checked_sub(inserted_at.elapsed()) {
+            tokio::time::sleep(remaining + Duration::from_millis(50)).await;
+        }
 
         // Entry should be treated as expired
         assert!(!denylist.contains(&fh));

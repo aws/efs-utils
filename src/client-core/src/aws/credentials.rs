@@ -196,9 +196,37 @@ pub async fn get_aws_config_loader(proxy_config: &ProxyConfig) -> aws_config::Co
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+
+    // Save/restore an env var across a test so that env-mutating tests do not
+    // pollute each other (cargo runs tests in parallel threads within one
+    // process). Pair with `#[serial]` on tests that read or write process env.
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn new(key: &'static str) -> Self {
+            let original = std::env::var(key).ok();
+            std::env::remove_var(key);
+            EnvGuard { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     #[tokio::test]
+    #[serial]
     async fn test_aws_creds_uri_override_existing() {
+        let _guard = EnvGuard::new(AWS_CONTAINER_CREDENTIALS_RELATIVE_URI);
         std::env::set_var(
             AWS_CONTAINER_CREDENTIALS_RELATIVE_URI,
             "/v2/credentials/old",
@@ -214,5 +242,121 @@ mod tests {
             std::env::var(AWS_CONTAINER_CREDENTIALS_RELATIVE_URI).ok(),
             Some("/v2/credentials/new".to_string())
         );
+    }
+
+    // aws_creds_uri unset: new_from_config must not touch the ECS relative-URI
+    // env var (the else branch of the aws_creds_uri check builds the ECS
+    // provider without setting it).
+    #[tokio::test]
+    #[serial]
+    async fn test_aws_creds_uri_absent_does_not_set_env() {
+        let _guard = EnvGuard::new(AWS_CONTAINER_CREDENTIALS_RELATIVE_URI);
+
+        let config = ProxyConfig::default();
+        assert!(config
+            .nested_config
+            .read_bypass_config
+            .aws_creds_uri
+            .is_none());
+
+        let _chain = ProxyCredentialsChain::new_from_config(&config).await;
+
+        assert_eq!(
+            std::env::var(AWS_CONTAINER_CREDENTIALS_RELATIVE_URI).ok(),
+            None,
+            "ECS relative-URI env must remain unset when aws_creds_uri is not configured"
+        );
+    }
+
+    // Chain assembly (non-Lambda path): a bare default config must build a
+    // provider chain without panicking. The SDK's CredentialsProviderChain does
+    // not expose provider names, so we assert the observable outcome:
+    // construction succeeds.
+    #[tokio::test]
+    #[serial]
+    async fn test_new_from_config_default_succeeds() {
+        let _guard = EnvGuard::new(AWS_CONTAINER_CREDENTIALS_RELATIVE_URI);
+
+        let config = ProxyConfig::default();
+        let _chain = ProxyCredentialsChain::new_from_config(&config).await;
+        // Reaching here without panicking is the assertion; the chain is
+        // Profile -> EcsContainer -> WebIdentityTokenFromEnv -> Ec2InstanceMetadata
+        // when neither jwt_path nor role_arn are set.
+    }
+
+    // Web-identity present branch: with BOTH jwt_path and role_arn set, the
+    // WebIdentityToken provider is inserted into the chain. We can only observe
+    // that construction still succeeds.
+    #[tokio::test]
+    #[serial]
+    async fn test_new_from_config_with_web_identity_succeeds() {
+        let _guard = EnvGuard::new(AWS_CONTAINER_CREDENTIALS_RELATIVE_URI);
+
+        let mut config = ProxyConfig::default();
+        config.nested_config.read_bypass_config.jwt_path = Some("/tmp/token.jwt".to_string());
+        config.nested_config.read_bypass_config.role_arn =
+            Some("arn:aws:iam::123456789012:role/example".to_string());
+
+        let _chain = ProxyCredentialsChain::new_from_config(&config).await;
+    }
+
+    // Web-identity absent branch: only ONE of jwt_path / role_arn set -> the
+    // WebIdentityToken provider is skipped. Construction must still succeed.
+    #[tokio::test]
+    #[serial]
+    async fn test_new_from_config_partial_web_identity_succeeds() {
+        let _guard = EnvGuard::new(AWS_CONTAINER_CREDENTIALS_RELATIVE_URI);
+
+        // Only role_arn set (jwt_path missing) -> presence tuple match fails.
+        let mut config = ProxyConfig::default();
+        config.nested_config.read_bypass_config.role_arn =
+            Some("arn:aws:iam::123456789012:role/example".to_string());
+        let _chain = ProxyCredentialsChain::new_from_config(&config).await;
+
+        // Only jwt_path set (role_arn missing) -> presence tuple match fails.
+        let mut config2 = ProxyConfig::default();
+        config2.nested_config.read_bypass_config.jwt_path = Some("/tmp/token.jwt".to_string());
+        let _chain2 = ProxyCredentialsChain::new_from_config(&config2).await;
+    }
+
+    // resolve_region precedence: an explicit read_bypass_config.region is
+    // returned verbatim as the resolved Region. This is the deterministic,
+    // fully-testable branch.
+    #[tokio::test]
+    #[serial]
+    async fn test_resolve_region_returns_configured_region() {
+        let mut config = ProxyConfig::default();
+        config.nested_config.read_bypass_config.region = Some("us-west-2".to_string());
+
+        let region = resolve_region(&config).await;
+        assert_eq!(region, Some(Region::new("us-west-2".to_string())));
+    }
+
+    // A different configured region value is honored (guards against a
+    // hard-coded/ignored region).
+    #[tokio::test]
+    #[serial]
+    async fn test_resolve_region_honors_distinct_region() {
+        let mut config = ProxyConfig::default();
+        config.nested_config.read_bypass_config.region = Some("eu-central-1".to_string());
+
+        let region = resolve_region(&config).await;
+        assert_eq!(region, Some(Region::new("eu-central-1".to_string())));
+    }
+
+    // resolve_region fallthrough: with no configured region, resolution falls
+    // through to the AWS default region chain. In the unit-test environment
+    // that may yield Some or None depending on ambient config; we only assert
+    // it completes without panic.
+    //
+    #[tokio::test]
+    #[serial]
+    async fn test_resolve_region_default_chain_no_panic() {
+        let _region_guard = EnvGuard::new("AWS_REGION");
+        let config = ProxyConfig::default();
+        assert!(config.nested_config.read_bypass_config.region.is_none());
+
+        // Should not panic regardless of ambient environment.
+        let _region = resolve_region(&config).await;
     }
 }

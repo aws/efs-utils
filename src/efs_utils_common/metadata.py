@@ -47,12 +47,14 @@ except ImportError:
 from efs_utils_common.config_utils import (
     get_boolean_config_item_value,
     get_config_file_path,
+    get_url_request_timeout,
 )
 from efs_utils_common.constants import (
     AWS_FIPS_ENDPOINT_CONFIG_ENV,
     CONFIG_FILE_SETTINGS_HELP_URL,
     CONFIG_SECTION,
     DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT,
+    DEFAULT_URL_REQUEST_TIMEOUT_SEC,
     DISABLE_FETCH_EC2_METADATA_TOKEN_ITEM,
     ECS_FARGATE_CLIENT_IDENTIFIER,
     ECS_FARGATE_TASK_METADATA_ENDPOINT_ENV,
@@ -341,16 +343,20 @@ def fetch_ec2_metadata_token_disabled(config):
 
 
 def get_aws_ec2_metadata_token(
-    request_timeout=0.5,
+    timeout=DEFAULT_URL_REQUEST_TIMEOUT_SEC,
     max_retries=DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT,
     retry_delay=0.5,
 ):
     """
     Retrieves the AWS EC2 metadata token. Typically, the token is fetched
-    within 10ms. We set a default timeout of 0.5 seconds to prevent mount
+    within 10ms. We set a default timeout of 1 second to prevent mount
     failures caused by slow requests.
 
+    The timeout can be configured via the efs-utils config file using the
+    'url_request_timeout_sec' option in the [mount] section.
+
     Args:
+        timeout (float): The timeout in seconds for each request.
         max_retries (int): The maximum number of retries.
         retry_delay (int): The delay in seconds between retries.
 
@@ -381,7 +387,7 @@ def get_aws_ec2_metadata_token(
     retries = 0
     while retries < max_retries:
         try:
-            return get_token(timeout=request_timeout)
+            return get_token(timeout=timeout)
         except socket.timeout:
             logging.debug(
                 "Timeout when getting the aws ec2 metadata token. Attempt: %s/%s"
@@ -439,6 +445,8 @@ def url_request_helper(config, url, unsuccessful_resp, url_error_msg, headers={}
         for k, v in headers.items():
             req.add_header(k, v)
 
+        timeout = get_url_request_timeout(config)
+
         if not fetch_ec2_metadata_token_disabled(config) and is_instance_metadata_url(
             url
         ):
@@ -447,11 +455,11 @@ def url_request_helper(config, url, unsuccessful_resp, url_error_msg, headers={}
             # IMDSv2 is a session-oriented method to access instance metadata
             # We expect the token retrieve will fail in bridge networking environment (e.g. container) since the default hop
             # limit for getting the token is 1. If the token retrieve does timeout, we fallback to use IMDSv1 instead
-            token = get_aws_ec2_metadata_token()
+            token = get_aws_ec2_metadata_token(timeout=timeout)
             if token:
                 req.add_header("X-aws-ec2-metadata-token", token)
 
-        request_resp = urlopen(req, timeout=1)
+        request_resp = urlopen(req, timeout=timeout)
 
         return get_resp_obj(request_resp, url, unsuccessful_resp)
     except socket.timeout:

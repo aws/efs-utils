@@ -5,19 +5,12 @@
 #![allow(unused)]
 
 use std::time::Duration;
-use tokio::sync::mpsc::error::SendError;
 
 use crate::{
     aws::s3_client::S3Client,
     config_parser::{ProxyConfig, ReadBypassConfig},
-    domain::Parser,
-    nfs::nfs_rpc_envelope::{NfsRpcEnvelopeBatch, NfsRpcInfo},
-    rpc::rpc::RpcBatch,
     util::fh_denylist::FileHandleDenyList,
 };
-
-// Message data structure for ReadBypass domain to work with
-pub type NfsDispatcherError = SendError<RpcBatch>;
 
 pub struct ReadBypassContext {
     pub fh_denylist: FileHandleDenyList,
@@ -55,7 +48,7 @@ impl ReadBypassContext {
         self.s3_client.is_enabled()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn default() -> Self {
         Self {
             fh_denylist: FileHandleDenyList::default(),
@@ -67,11 +60,8 @@ impl ReadBypassContext {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn set_s3_client_enabled(&self, enabled: bool) {
         self.s3_client.set_enabled(enabled);
     }
 }
-
-// Message to be sent from ReadBypassServerDispatcher to ReadBypassAgent
-pub type ReadBypassMessage = NfsRpcInfo;

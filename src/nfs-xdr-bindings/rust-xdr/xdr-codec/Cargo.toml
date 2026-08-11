@@ -1,5 +1,8 @@
+# Fork of the crates.io `xdr-codec` 0.4.4 (jsgf/rust-xdr) with local patches.
+# The package is renamed to `amzn-xdr-codec`; the lib name stays `xdr_codec` so
+# `use xdr_codec` in source is unchanged.
 [package]
-name = "xdr-codec"
+name = "amzn-xdr-codec"
 version = "0.4.4"
 authors = ["Jeremy Fitzhardinge <jeremy@goop.org>"]
 license = "MIT OR Apache-2.0"
@@ -9,6 +12,13 @@ documentation = "https://docs.rs/xdr-codec"
 readme = "README.md"
 keywords = ["encoding", "protocol", "xdr", "rfc4506", "serialization"]
 include = [ "src/**/*.rs", "tests/**/*.rs", "*.md", "Cargo.toml"  ]
+# Upstream's own quickcheck-based test suite (quickcheck 0.4, bytecodec feature)
+# is not maintained here; we vendor this crate for its runtime, not its tests.
+autotests = false
+autobenches = false
+
+[lib]
+name = "xdr_codec"
 
 [features]
 # Enable use of `Pack`/`Unpack` traits for `i8`/`u8`. Normally this is disabled to
@@ -16,6 +26,12 @@ include = [ "src/**/*.rs", "tests/**/*.rs", "*.md", "Cargo.toml"  ]
 bytecodec = []
 # For travis
 unstable = []
+
+# Vendored third-party fork (jsgf/rust-xdr). Downgrade clippy's deny-by-default
+# correctness lints to warn so upstream patterns we don't own can't fail the
+# build; diagnostics still surface and no source edits are needed.
+[lints.clippy]
+correctness = "warn"
 
 [dependencies]
 byteorder = "1.0"

@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "3.2.0"
+VERSION = "3.3.0"
 SERVICE = "elasticfilesystem"
 FS_PREFIX = "fs-"
 
@@ -66,10 +66,13 @@ MOUNT_CONFIG_SECTION = "mount"
 CLIENT_INFO_SECTION = "client-info"
 CLIENT_SOURCE_STR_LEN_LIMIT = 100
 DISABLE_FETCH_EC2_METADATA_TOKEN_ITEM = "disable_fetch_ec2_metadata_token"
+URL_REQUEST_TIMEOUT_ITEM = "url_request_timeout_sec"
 DEFAULT_UNKNOWN_VALUE = "unknown"
 DEFAULT_MACOS_VALUE = "macos"
-# 50ms
+# 50ms - sleep interval for lock file retry
 DEFAULT_TIMEOUT = 0.05
+# 1 second - default timeout for URL requests (configurable via url_request_timeout_sec)
+DEFAULT_URL_REQUEST_TIMEOUT_SEC = 1
 
 LOG_DIR = "/var/log/amazon/efs"
 LOG_FILE = "mount-watchdog.log"
@@ -191,6 +194,9 @@ DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER = 15
 NFS_READAHEAD_CONFIG_PATH_FORMAT = "/sys/class/bdi/%s:%s/read_ahead_kb"
 DEFAULT_RSIZE = 1048576
 UBUNTU_24_RELEASE = "Ubuntu 24"
+RHEL_10_RELEASE = "Red Hat Enterprise Linux release 10"
+RHEL_9_RELEASE = "Red Hat Enterprise Linux release 9"
+AL2027_RELEASE = "Amazon Linux release 2027"
 
 
 def fatal_error(user_message, log_message=None):
@@ -268,9 +274,48 @@ def fetch_ec2_metadata_token_disabled(config):
     )
 
 
-def get_aws_ec2_metadata_token(timeout=DEFAULT_TIMEOUT):
-    # Normally the session token is fetched within 10ms, setting a timeout of 50ms here to abort the request
-    # and return None if the token has not returned within 50ms
+def get_url_request_timeout(config):
+    """Read the URL request timeout from config, falling back to DEFAULT_URL_REQUEST_TIMEOUT_SEC.
+
+    This is a local copy for watchdog since it cannot import from efs_utils_common.
+    """
+    try:
+        timeout = config.getfloat(MOUNT_CONFIG_SECTION, URL_REQUEST_TIMEOUT_ITEM)
+        if timeout <= 0:
+            logging.warning(
+                "Invalid value for '%s' in config section [%s]: %s "
+                "(must be positive), falling back to %ss",
+                URL_REQUEST_TIMEOUT_ITEM,
+                MOUNT_CONFIG_SECTION,
+                timeout,
+                DEFAULT_URL_REQUEST_TIMEOUT_SEC,
+            )
+            return DEFAULT_URL_REQUEST_TIMEOUT_SEC
+        if timeout != DEFAULT_URL_REQUEST_TIMEOUT_SEC:
+            logging.debug(
+                "Using configured %s=%s from section [%s]",
+                URL_REQUEST_TIMEOUT_ITEM,
+                timeout,
+                MOUNT_CONFIG_SECTION,
+            )
+        return timeout
+    except (NoOptionError, NoSectionError):
+        return DEFAULT_URL_REQUEST_TIMEOUT_SEC
+    except ValueError:
+        logging.warning(
+            "Invalid (non-numeric) value for '%s' in config section [%s], "
+            "falling back to %ss",
+            URL_REQUEST_TIMEOUT_ITEM,
+            MOUNT_CONFIG_SECTION,
+            DEFAULT_URL_REQUEST_TIMEOUT_SEC,
+        )
+        return DEFAULT_URL_REQUEST_TIMEOUT_SEC
+
+
+def get_aws_ec2_metadata_token(timeout=DEFAULT_URL_REQUEST_TIMEOUT_SEC):
+    # Normally the session token is fetched within 10ms, setting a timeout of 1s here to abort the request
+    # and return None if the token has not returned within the timeout. This is configurable via
+    # 'url_request_timeout_sec' in efs-utils.conf.
     try:
         opener = build_opener(HTTPHandler)
         request = Request(INSTANCE_METADATA_TOKEN_URL)
@@ -598,6 +643,8 @@ def url_request_helper(config, url, unsuccessful_resp, url_error_msg, headers={}
         for k, v in headers.items():
             req.add_header(k, v)
 
+        timeout = get_url_request_timeout(config)
+
         if not fetch_ec2_metadata_token_disabled(config) and is_instance_metadata_url(
             url
         ):
@@ -606,11 +653,11 @@ def url_request_helper(config, url, unsuccessful_resp, url_error_msg, headers={}
             # IMDSv2 is a session-oriented method to access instance metadata
             # We expect the token retrieve will fail in bridge networking environment (e.g. container) since the default hop
             # limit for getting the token is 1. If the token retrieve does timeout, we fallback to use IMDSv1 instead
-            token = get_aws_ec2_metadata_token()
+            token = get_aws_ec2_metadata_token(timeout=timeout)
             if token:
                 req.add_header("X-aws-ec2-metadata-token", token)
 
-        request_resp = urlopen(req, timeout=1)
+        request_resp = urlopen(req, timeout=timeout)
 
         return get_resp_obj(request_resp, url, unsuccessful_resp)
     except socket.timeout:
@@ -1321,13 +1368,19 @@ def check_efs_mounts(
             )
 
 
-#  This function serves as a safeguard mechanism specifically for Ubuntu 24,
-#  where the initial readahead setting might be overwritten due to system
-#  processes. It checks the current readahead value and updates it if necessary.
+# This function serves as a safeguard mechanism where the initial readahead setting
+# might be overwritten due to system processes.
+# It checks the current readahead value and updates it if necessary.
 def verify_and_update_readahead(mount, config, mount_info):
     try:
         system_release_version = get_system_release_version()
-        if UBUNTU_24_RELEASE not in system_release_version:
+        if (
+            UBUNTU_24_RELEASE not in system_release_version
+            and RHEL_10_RELEASE not in system_release_version
+            and RHEL_9_RELEASE not in system_release_version
+            and AL2027_RELEASE not in system_release_version
+        ):
+
             return
 
         should_optimize_readahead = get_boolean_config_item_value(

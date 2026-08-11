@@ -136,7 +136,9 @@ impl<S: ProxyStream> ReadBypassDomainBuilder<S> {
         shutdown: ShutdownHandle,
         s3_client: S3Client,
     ) -> Self {
-        let server_cache_enabled = channel_init_config.read_bypass_config.readahead_cache_enabled;
+        let server_cache_enabled = channel_init_config
+            .read_bypass_config
+            .readahead_cache_enabled;
         let local_cache_enabled = proxy_config
             .nested_config
             .read_bypass_config
@@ -186,6 +188,14 @@ mod tests {
         let channel_config = ChannelInitConfig::default();
         let s3_client = S3Client::default().await;
 
+        // Capture the inputs to the cache_enabled formula before the configs are
+        // moved into the builder.
+        let server_cache_enabled = channel_config.read_bypass_config.readahead_cache_enabled;
+        let local_cache_enabled = config
+            .nested_config
+            .read_bypass_config
+            .readahead_cache_enabled;
+
         let builder = ReadBypassDomainBuilder::<TcpStream>::new(
             config,
             channel_config,
@@ -194,9 +204,16 @@ mod tests {
         )
         .await;
 
-        // Cache enabled depends on system memory (requires >= 30 GiB)
-        let expected_cache_enabled = crate::utils::has_sufficient_memory_for_readahead_cache();
-        assert_eq!(builder.read_bypass_context.cache_enabled, expected_cache_enabled);
+        // cache_enabled requires the server config, the local config, AND enough
+        // system memory (>= 30 GiB) to all be true. Mirror that here so the test
+        // is correct regardless of the build host's RAM.
+        let expected_cache_enabled = server_cache_enabled
+            && local_cache_enabled
+            && crate::utils::has_sufficient_memory_for_readahead_cache();
+        assert_eq!(
+            builder.read_bypass_context.cache_enabled,
+            expected_cache_enabled
+        );
 
         let (tx, _rx) = mpsc::channel(10);
 
@@ -216,7 +233,10 @@ mod tests {
         local_enabled: bool,
     ) -> ReadBypassDomainBuilder<TcpStream> {
         let mut config = ProxyConfig::default();
-        config.nested_config.read_bypass_config.readahead_cache_enabled = local_enabled;
+        config
+            .nested_config
+            .read_bypass_config
+            .readahead_cache_enabled = local_enabled;
 
         let mut channel_config = ChannelInitConfig::default();
         channel_config.read_bypass_config.readahead_cache_enabled = server_enabled;

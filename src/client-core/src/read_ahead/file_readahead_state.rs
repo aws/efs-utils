@@ -82,6 +82,7 @@ pub struct FileReadAheadState {
 }
 
 impl FileReadAheadState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         file_lru_id: u64,
         s3_key: Bytes,
@@ -259,7 +260,9 @@ impl FileReadAheadState {
                 result.len(),
                 read_pattern
             );
-            // Data was cached - trigger speculative readahead for next window
+            if let Some(cache) = self.cache.upgrade() {
+                cache.stats().hits.fetch_add(1, Ordering::Relaxed);
+            } // Data was cached - trigger speculative readahead for next window
             if read_pattern.invokes_readahead() {
                 self.clone().trigger_speculative_readahead(
                     read_bypass_request_context.clone(),
@@ -285,6 +288,9 @@ impl FileReadAheadState {
             range.end - range.start,
             read_pattern
         );
+        if let Some(cache) = self.cache.upgrade() {
+            cache.stats().misses.fetch_add(1, Ordering::Relaxed);
+        }
         let result = self
             .fetch_and_cache_data_internal(
                 read_bypass_request_context,
@@ -351,7 +357,12 @@ impl FileReadAheadState {
                 }
             }
 
-            (cached_ranges, missing_ranges, cached_data_objects, fetch_range)
+            (
+                cached_ranges,
+                missing_ranges,
+                cached_data_objects,
+                fetch_range,
+            )
         };
 
         // === STEP 2: Read from cached Arc refs ===
@@ -518,7 +529,7 @@ impl FileReadAheadState {
         let window_size = self.window_size.load(Ordering::SeqCst);
         let last_pos = self.last_read_position.load(Ordering::SeqCst);
 
-        let pattern = if range.start == 0 {
+        if range.start == 0 {
             ReadPattern::StartOfFile
         } else if last_pos == INVALID_U64
             && range.start < window_size
@@ -532,9 +543,7 @@ impl FileReadAheadState {
         } else {
             // Otherwise check if this is a concurrent sequential read via cache state
             self.get_potential_concurrent_read_pattern(range.clone(), window_size, data_cache)
-        };
-
-        pattern
+        }
     }
 
     fn get_potential_concurrent_read_pattern(
@@ -623,6 +632,7 @@ impl FileReadAheadState {
 
     /// Collect cached ranges that overlap with the request.
     /// Returns all available cached ranges (may be partial - gaps are OK).
+    #[allow(clippy::type_complexity)]
     fn collect_cached_ranges<T>(
         &self,
         _read_bypass_request_context: &ReadBypassRequestContext,
@@ -733,6 +743,21 @@ impl FileReadAheadState {
             return Err(ReadAheadCacheError {
                 message: format!("No data for range {}..{}", expected.start, expected.end),
             });
+        }
+
+        // Fast path: a single range fully covering the request is served as a zero-copy view
+        //
+        // Each `Bytes` here is either fully owned or holds an owned
+        // read guard on its cache entry's data, so eviction cannot free or
+        // recycle the underlying memory until the returned view is dropped —
+        // eviction of that entry is delayed until the response is written.
+        if ranges.len() == 1 {
+            let (range, _) = &ranges[0];
+            if range.start <= expected.start && range.end >= expected.end {
+                let local_start = (expected.start - range.start) as usize;
+                let local_end = (expected.end - range.start) as usize;
+                return Ok(ranges.pop().unwrap().1.slice(local_start..local_end));
+            }
         }
 
         ranges.sort_by_key(|(r, _)| r.start);
@@ -889,10 +914,7 @@ impl FileReadAheadState {
         let mut tasks = Vec::new();
 
         // Submit read tasks for the missing ranges
-        for (missing_range, cached_data) in missing_ranges
-            .into_iter()
-            .zip(cached_data_objects.into_iter())
-        {
+        for (missing_range, cached_data) in missing_ranges.into_iter().zip(cached_data_objects) {
             // Track if this range is needed for the original request
             let is_required = missing_range.start < original_request_range.end
                 && missing_range.end > original_request_range.start;
@@ -1295,6 +1317,80 @@ mod tests {
     use crate::memory::memory_pool::{MemoryPoolConfig, CHUNK_SIZE};
     use crate::util::read_bypass_context::ReadBypassContext;
     use std::sync::Arc;
+
+    // --- combine_ranges zero-copy fast path ---
+
+    #[test]
+    fn test_combine_ranges_exact_cover_returns_zero_copy_slice() {
+        // A single cached range that exactly covers the request must be returned
+        // as a zero-copy slice sharing the source allocation, not a fresh copy.
+        let data = Bytes::from(vec![7u8; 4096]);
+        let src_ptr = data.as_ptr();
+        let ranges = vec![(0u64..4096u64, data)];
+        let result = FileReadAheadState::combine_ranges(ranges, 0..4096).unwrap();
+        assert_eq!(result.len(), 4096);
+        assert!(result.iter().all(|&b| b == 7));
+        assert_eq!(
+            result.as_ptr(),
+            src_ptr,
+            "expected zero-copy slice, got a copy"
+        );
+    }
+
+    #[test]
+    fn test_combine_ranges_wider_range_returns_offset_zero_copy_slice() {
+        // A single cached range wider than the request is sliced zero-copy to
+        // the requested sub-range. The cached range starts at a non-zero file
+        // offset so the absolute→relative offset translation is exercised:
+        // request 5120..7168 must map to local bytes 1024..3072 of the source.
+        let mut buf = vec![0u8; 4096];
+        for (i, b) in buf.iter_mut().enumerate() {
+            *b = (i % 256) as u8;
+        }
+        let data = Bytes::from(buf);
+        let expected_ptr = data[1024..].as_ptr();
+        let ranges = vec![(4096u64..8192u64, data)];
+        let result = FileReadAheadState::combine_ranges(ranges, 5120..7168).unwrap();
+        assert_eq!(result.len(), 2048);
+        assert_eq!(result[0], (1024 % 256) as u8);
+        assert_eq!(result[2047], ((1024 + 2047) % 256) as u8);
+        assert_eq!(
+            result.as_ptr(),
+            expected_ptr,
+            "expected zero-copy slice view into the source range"
+        );
+    }
+
+    #[test]
+    fn test_combine_ranges_multiple_ranges_copied_in_order() {
+        // Two adjacent cached ranges fall through to the copy path and must be
+        // assembled contiguously in order.
+        let a = Bytes::from(vec![1u8; 2048]);
+        let b = Bytes::from(vec![2u8; 2048]);
+        let ranges = vec![(0u64..2048u64, a), (2048u64..4096u64, b)];
+        let result = FileReadAheadState::combine_ranges(ranges, 0..4096).unwrap();
+        assert_eq!(result.len(), 4096);
+        assert!(result[..2048].iter().all(|&x| x == 1));
+        assert!(result[2048..].iter().all(|&x| x == 2));
+    }
+
+    #[test]
+    fn test_combine_ranges_rejects_partial_coverage() {
+        // A single range that does not fully cover the request must be rejected
+        // rather than silently returning a short slice. Cover both sides of the
+        // fast-path condition:
+        // - range covers the start but ends short of the request
+        let data = Bytes::from(vec![9u8; 1024]);
+        let ranges = vec![(0u64..1024u64, data)];
+        let result = FileReadAheadState::combine_ranges(ranges, 0..2048);
+        assert!(result.is_err(), "short end coverage must be rejected");
+
+        // - range starts after the request (gap at the start)
+        let data = Bytes::from(vec![9u8; 3072]);
+        let ranges = vec![(1024u64..4096u64, data)];
+        let result = FileReadAheadState::combine_ranges(ranges, 0..2048);
+        assert!(result.is_err(), "gap at start must be rejected");
+    }
 
     async fn recognize_read_pattern_with_lock(
         state: &FileReadAheadState,

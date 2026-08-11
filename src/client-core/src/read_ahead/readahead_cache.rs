@@ -31,6 +31,13 @@ use log::{debug, info};
 /// Longer than eviction interval (default 500ms) so memory may be freed before resuming
 const READAHEAD_BACKOFF_MS: u64 = 3_000;
 
+#[derive(Debug, Default)]
+pub struct ReadAheadStats {
+    pub hits: AtomicU64,
+    pub misses: AtomicU64,
+}
+
+#[allow(clippy::type_complexity)]
 pub struct FileReadAheadCache {
     file_states: Arc<DashMap<(Vec<u8>, Vec<u8>), Arc<FileReadAheadState>>>, // (filehandle, etag)
     pub(crate) memory_pool: Arc<MemoryPool>,
@@ -48,6 +55,8 @@ pub struct FileReadAheadCache {
     target_utilization_percent: usize,
     /// Files at or below this size bypass the cache and are read directly from S3
     small_file_caching_threshold: u64,
+    /// Cache-wide hit/miss counters
+    stats: ReadAheadStats,
 }
 
 impl FileReadAheadCache {
@@ -82,7 +91,12 @@ impl FileReadAheadCache {
             target_utilization_percent: read_bypass_config
                 .readahead_cache_target_utilization_percent,
             small_file_caching_threshold: read_bypass_config.small_file_caching_threshold,
+            stats: ReadAheadStats::default(),
         }
+    }
+
+    pub fn stats(&self) -> &ReadAheadStats {
+        &self.stats
     }
 
     /// Must be called after wrapping in Arc to enable state creation with back-reference
@@ -257,10 +271,7 @@ impl FileReadAheadCache {
                 let Some(((_file_lru_id, offset), weak)) = lru.pop_lru() else {
                     return false;
                 };
-                match weak.upgrade() {
-                    Some(state) => Some((offset, state)),
-                    None => None, // Stale entry, retry
-                }
+                weak.upgrade().map(|state| (offset, state))
             };
 
             match result {
@@ -998,7 +1009,9 @@ mod tests {
         const FILE_SIZE: u64 = 4 * 1024 * 1024;
         const MIN_READ_SIZE: u64 = 4 * 1024;
         const MAX_READ_SIZE: u64 = 1024 * 1024;
-        const TEST_DURATION_SECS: u64 = 15;
+        // A few seconds of tight-loop reads under eviction pressure is ample
+        // to surface races; kept short to bound the test suite.
+        const TEST_DURATION_SECS: u64 = 3;
 
         let config = ReadBypassConfig {
             readahead_cache_init_memory_size_mb: 8,

@@ -22,6 +22,7 @@ DNS_NAME = "fs-deadbeef.efs.us-east-1.amazonaws.com"
 FS_ID = "fs-deadbeef"
 INIT_SYSTEM = "upstart"
 FALLBACK_IP_ADDRESS = "192.0.0.1"
+FALLBACK_IPV6_ADDRESS = "2001:db8::1"
 MOUNT_POINT = "/mnt"
 PATH = "/"
 
@@ -178,6 +179,40 @@ def test_mount_nfs_stunnel_with_fallback_ip_address(mocker):
     assert "/sbin/mount.nfs4" == args[NFS_BIN_ARG_IDX]
     assert DNS_NAME not in args[NFS_MOUNT_PATH_IDX]
     assert FALLBACK_IP_ADDRESS in args[NFS_MOUNT_PATH_IDX]
+    assert "/mnt" == args[NFS_MOUNT_POINT_IDX]
+
+    utils.assert_called_once(optimize_readahead_window_mock)
+
+
+def test_mount_nfs_stunnel_with_fallback_ipv6_address(mocker):
+    mock = _mock_popen(mocker)
+    optimize_readahead_window_mock = mocker.patch(
+        "efs_utils_common.mount_utils.optimize_readahead_window"
+    )
+
+    mock_context = mocker.MagicMock()
+    mock_context.proxy_mode = "stunnel"  # stunnel option is enabled
+    mocker.patch("efs_utils_common.metadata.MountContext", return_value=mock_context)
+
+    options = dict(DEFAULT_OPTIONS)
+    options["stunnel"] = None
+
+    mount_utils.mount_nfs(
+        _get_config(mount_nfs_command_retry="false"),
+        DNS_NAME,
+        "/",
+        "/mnt",
+        options,
+        fallback_ip_address=FALLBACK_IPV6_ADDRESS,
+    )
+
+    args, _ = mock.call_args
+    args = args[0]
+
+    assert "/sbin/mount.nfs4" == args[NFS_BIN_ARG_IDX]
+    assert DNS_NAME not in args[NFS_MOUNT_PATH_IDX]
+    # IPv6 fallback address must be bracketed in the NFS mount path: [addr]:path
+    assert "[%s]:/" % FALLBACK_IPV6_ADDRESS == args[NFS_MOUNT_PATH_IDX]
     assert "/mnt" == args[NFS_MOUNT_POINT_IDX]
 
     utils.assert_called_once(optimize_readahead_window_mock)

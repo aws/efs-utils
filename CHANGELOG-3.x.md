@@ -1,3 +1,8 @@
+# v3.3.0
+- Eliminate necessary data copies on the readbypass path
+- Consolidating dependencies
+- Upgrade AWS-LC-FIPS module to 4.x
+
 # v3.2.0
 - Use partition-aware DNS suffix for S3 Files for aws-cn
 - Add regex for region mount option

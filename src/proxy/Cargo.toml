@@ -1,21 +1,33 @@
+
 [package]
 name = "efs-proxy"
 edition = "2021"
-build = "build.rs"
 # The version of efs-proxy is tied to efs-utils.
-version = "3.2.0"
+version = "3.3.0"
 publish = false
 license = "MIT"
 
 [dependencies]
+# Shared client-core library. efs-proxy re-exports its modules under their
+# original crate paths (crate::aws, crate::config, crate::config_parser,
+# crate::proxy_identifier, crate::utils, crate::error, crate::awsfile_prot,
+# and the moved crate::util submodules) so existing references compile unchanged.
+amzn-efs-client-core = { path = "../client-core" }
 anyhow = "1.0.72"
 atomic_enum = "0.2"
 async-trait = "0.1"
 aws-config = "1.6.3"
 aws-credential-types = "1.2.3"
-aws-sdk-s3 = "1.87.0"
-aws-sdk-cloudwatch = "1.64.0"
-aws-sdk-cloudwatchlogs = "1.64.0"
+# The AWS SDK crates are taken without default features so that the deprecated
+# `rustls` alias stays off. That alias resolves to
+# aws-smithy-runtime/tls-rustls, which pulls the ring-based rustls 0.21 over
+# hyper 0.14 alongside the modern stack. `default-https-client` already selects
+# rustls-aws-lc (rustls 0.23 + aws-lc), and the TLS provider is chosen
+# explicitly on the aws-smithy-http-client builder, so every other default
+# feature is kept and only the legacy alias is dropped.
+aws-sdk-s3 = { version = "1.87.0", default-features = false, features = ["sigv4a", "http-1x", "default-https-client", "rt-tokio"] }
+aws-sdk-cloudwatch = { version = "1.64.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-cloudwatchlogs = { version = "1.64.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-smithy-http-client = { version = "1.1.9", features = ["default-client", "rustls-aws-lc", "rustls-aws-lc-fips"] }
 aws-smithy-types = "1.3"
 bytes = { version = "1.11.1" }
@@ -24,7 +36,6 @@ clap = { version = "=4.0.0", features = ["derive"] }
 dashmap = "6.0.1"
 dyn-clone = "1.0"
 futures = "0.3"
-hyper = "0.14"
 log = "0.4"
 libc = "0.2"
 log4rs = { version = "1.2.0", features = ["rolling_file_appender", "compound_policy", "size_trigger", "fixed_window_roller"]}
@@ -46,9 +57,16 @@ thiserror = "1.0.44"
 tokio = { version = "^1.40.0", features = ["full"] }
 tokio-util = "0.7.8"
 uuid = { version = "1.4.1", features = ["v4", "fast-rng", "macro-diagnostics"]}
-xdr-codec = { path = "rust-xdr/xdr-codec"}
+# XDR runtime + shared NFSv4.1 wire bindings. xdr_codec keeps its lib name so
+# `use xdr_codec` is unchanged; the nfs bindings are re-exported under crate::nfs.
+xdr_codec = { package = "amzn-xdr-codec", path = "../nfs-xdr-bindings/rust-xdr/xdr-codec" }
+amzn-nfs-xdr-bindings = { path = "../nfs-xdr-bindings" }
 
 [dev-dependencies]
+# efs-proxy tests reuse the client-core test-only constructors (S3Client::default,
+# ReadBypassContext::default, set_s3_client_enabled), gated behind the
+# `test-util` feature.
+amzn-efs-client-core = { path = "../client-core", features = ["test-util"] }
 mockall = "0.11.3"
 test-case = "*"
 tokio = { version = "1.29.0", features = ["test-util"] }
@@ -58,6 +76,3 @@ aws-smithy-mocks = "0.1.1"
 aws-sdk-s3 = { version = "1.87.0", features = ["test-util"] }
 aws-smithy-runtime-api = "1.8.0"
 serial_test = "3.0"
-
-[build-dependencies]
-xdrgen = { path = "rust-xdr/xdrgen" }

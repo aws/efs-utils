@@ -23,15 +23,11 @@ use tokio::signal;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-#[allow(clippy::all)]
-#[allow(dead_code)]
-#[allow(deprecated)]
-#[allow(invalid_value)]
-#[allow(non_camel_case_types)]
-#[allow(unused_assignments)]
-mod awsfile_prot {
-    include!(concat!(env!("OUT_DIR"), "/awsfile_prot_xdr.rs"));
-}
+// The AWS-file XDR protocol is generated in and exported by the efs-proxy lib
+// crate (which re-exports it from amzn-efs-client-core). Re-use it here instead
+// of regenerating from OUT_DIR.
+#[allow(unused_imports)]
+use efs_proxy::awsfile_prot;
 
 #[tokio::main]
 async fn main() {

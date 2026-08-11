@@ -15,7 +15,7 @@ use aws_sdk_s3::{operation::get_object::GetObjectError, Client};
 use aws_smithy_types::timeout::TimeoutConfig;
 use bytes::Bytes;
 use futures::stream::StreamExt;
-use regex::Regex;
+use regex_lite::Regex;
 
 use log::{debug, error, info, warn};
 use tokio::sync::Mutex;
@@ -454,12 +454,13 @@ impl S3Client {
                     actual: content_length,
                 });
             }
-            let chunk = response
-                .body
-                .collect()
-                .await
-                .map_err(|e| S3ClientError::NoAccess(e.into()))?;
-            result.extend_from_slice(&chunk.into_bytes());
+            // Drop each frame as soon as it is copied to allow hyper to reuse its per-connection read buffer
+            // within the response instead of reallocating.
+            let mut body = response.body;
+            while let Some(frame) = body.next().await {
+                let frame = frame.map_err(|e| S3ClientError::NoAccess(e.into()))?;
+                result.extend_from_slice(&frame);
+            }
         }
 
         Ok(result.freeze())
@@ -476,7 +477,7 @@ impl S3Client {
         bucket_name_regex.is_match(bucket_name)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn default() -> Self {
         let config = aws_config::defaults(BehaviorVersion::latest()).load().await;
         let s3_config = aws_sdk_s3::config::Builder::from(&config).build();
@@ -493,7 +494,7 @@ impl S3Client {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Relaxed);
     }

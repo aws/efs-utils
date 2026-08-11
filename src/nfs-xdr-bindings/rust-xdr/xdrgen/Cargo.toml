@@ -1,0 +1,58 @@
+# Fork of the crates.io `xdrgen` 0.4.4 (jsgf/rust-xdr) with local patches. The
+# package is renamed to `amzn-xdrgen`; the lib name stays `xdrgen` so
+# `xdrgen::compile` in build scripts is unchanged.
+[package]
+name = "amzn-xdrgen"
+version = "0.4.4"
+authors = ["Jeremy Fitzhardinge <jeremy@goop.org>"]
+license = "MIT/Apache-2.0"
+description = "XDR codec generator from specification. Designed for use with xdr-codec."
+repository = "https://github.com/jsgf/rust-xdr/tree/master/xdrgen"
+documentation = "https://docs.rs/xdrgen/"
+readme = "README.md"
+keywords = ["encoding", "protocol", "xdr", "rfc4506", "serialization"]
+include = [ "src/**/*.rs", "tests/**/*.rs", "*.md", "Cargo.toml"  ]
+# Upstream's own integration tests (tests/lib.rs) shell out to rustc and are not
+# maintained here; we vendor this crate for its code generator, not its tests.
+autotests = false
+autobenches = false
+
+[lib]
+name = "xdrgen"
+
+[[bin]]
+name = "xdrgen"
+path = "src/xdrgen.rs"
+test = false
+bench = false
+doc = false
+
+[features]
+unstable = []
+
+# Vendored third-party fork (jsgf/rust-xdr). Clippy's correctness lints are
+# deny-by-default and would fail the build on upstream patterns we don't own
+# (e.g. `if false && ...` compile-time toggles). Downgrade them to warn so the
+# diagnostics still surface without breaking the build — no source edits, and
+# every other clippy lint keeps its default level.
+[lints.clippy]
+correctness = "warn"
+
+[dependencies]
+log = "0.3"
+env_logger = "0.10"
+nom = { version="3.1", features=["verbose-errors"] }
+quote = "0.3"
+clap = "2.24"
+lazy_static = "0.2"
+bitflags = "0.9"
+
+[dependencies.xdr_codec]
+package = "amzn-xdr-codec"
+path = "../xdr-codec"
+version = "0.4"
+
+
+[dev-dependencies]
+tempdir = "0.3"
+error-chain = "0.10"

@@ -140,7 +140,9 @@ where
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::awsfile_prot::{self, AwsFileReadBypassConfigArgsV2, BindResponse, ChannelConfigArgs};
+    use crate::awsfile_prot::{
+        self, AwsFileReadBypassConfigArgsV2, BindResponse, ChannelConfigArgs,
+    };
     use crate::controller::{AWSFILE_CHANNEL_INIT_MINOR_VERSION, DEFAULT_SCALE_UP_CONFIG};
     use crate::proxy_identifier;
     use crate::test_utils::*;
@@ -166,11 +168,10 @@ pub mod tests {
 
     #[test]
     fn test_channel_init_request_serde() -> Result<(), RpcError> {
-        let config =
-            ChannelConfigArgs::AWSFILE_READ_BYPASS_V2(AwsFileReadBypassConfigArgsV2 {
-                enabled: true,
-                efs_utils_version: b"3.0.2".to_vec(),
-            });
+        let config = ChannelConfigArgs::AWSFILE_READ_BYPASS_V2(AwsFileReadBypassConfigArgsV2 {
+            enabled: true,
+            efs_utils_version: b"3.0.2".to_vec(),
+        });
         let channel_args = awsfile_prot::AwsFileChannelInitArgs {
             minor_version: AWSFILE_CHANNEL_INIT_MINOR_VERSION,
             configs: vec![config.clone()],
@@ -180,7 +181,10 @@ pub mod tests {
         let deserialized = onc_rpc::RpcMessage::try_from(request.as_slice())?;
         let deserialized_arg = parse_channel_init_request(&deserialized)?;
 
-        assert_eq!(AWSFILE_CHANNEL_INIT_MINOR_VERSION, deserialized_arg.minor_version);
+        assert_eq!(
+            AWSFILE_CHANNEL_INIT_MINOR_VERSION,
+            deserialized_arg.minor_version
+        );
         assert_eq!(vec![config], deserialized_arg.configs);
         Ok(())
     }

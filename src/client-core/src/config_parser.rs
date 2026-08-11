@@ -328,7 +328,7 @@ pub struct ReadBypassConfig {
     #[serde(alias = "region")]
     pub region: Option<String>,
 
-    /// For ReadBypass S3 client credentials  
+    /// For ReadBypass S3 client credentials
     #[serde(alias = "profile")]
     pub profile: Option<String>,
 
@@ -426,6 +426,77 @@ pub mod tests {
     #[test]
     fn test_read_config_from_file() {
         assert!(ProxyConfig::from_path(Path::new(TEST_CONFIG_PATH)).is_ok());
+    }
+
+    #[test]
+    fn default_config_uses_default_constants() {
+        let config = ReadBypassConfig::default();
+        assert_eq!(config.requested, DEFAULT_READ_BYPASS_REQUESTED());
+        // `enabled` is #[serde(skip)] (runtime state, set after negotiation);
+        // Default intentionally mirrors `requested`.
+        assert_eq!(config.enabled, DEFAULT_READ_BYPASS_REQUESTED());
+        assert_eq!(config.denylist_size, DEFAULT_READ_BYPASS_DENYLIST_SIZE());
+        assert_eq!(
+            config.denylist_ttl_seconds,
+            DEFAULT_READ_BYPASS_DENYLIST_TTL_SECONDS()
+        );
+        assert_eq!(
+            config.s3_idle_timeout_seconds,
+            DEFAULT_S3_IDLE_TIMEOUT_SECONDS()
+        );
+        assert_eq!(
+            config.s3_operation_timeout_seconds,
+            DEFAULT_S3_OPERATION_TIMEOUT_SECONDS()
+        );
+        assert_eq!(
+            config.s3_operation_attempt_timeout_ms,
+            DEFAULT_S3_OPERATION_ATTEMPT_TIMEOUT_MS()
+        );
+        assert_eq!(
+            config.s3_read_chunk_size_bytes,
+            DEFAULT_S3_READ_CHUNK_SIZE_BYTES()
+        );
+        assert_eq!(
+            config.readahead_cache_init_memory_size_mb,
+            DEFAULT_READAHEAD_CACHE_INIT_MEMORY_SIZE_MB()
+        );
+        assert_eq!(
+            config.readahead_cache_max_memory_size_mb,
+            DEFAULT_READAHEAD_CACHE_MAX_MEMORY_SIZE_MB()
+        );
+        assert_eq!(
+            config.readahead_init_window_size_bytes,
+            DEFAULT_READAHEAD_INIT_WINDOW_SIZE_BYTES()
+        );
+        assert_eq!(
+            config.readahead_max_window_size_bytes,
+            DEFAULT_READAHEAD_MAX_WINDOW_SIZE_BYTES()
+        );
+        assert_eq!(
+            config.readahead_cache_eviction_interval_ms,
+            DEFAULT_READAHEAD_CACHE_EVICTION_INTERVAL_MS()
+        );
+        assert_eq!(
+            config.readahead_cache_enabled,
+            DEFAULT_READAHEAD_CACHE_ENABLED()
+        );
+        assert_eq!(
+            config.readahead_cache_target_utilization_percent,
+            DEFAULT_READAHEAD_CACHE_TARGET_UTILIZATION_PERCENT()
+        );
+        assert_eq!(
+            config.read_bypass_max_in_flight_s3_bytes,
+            DEFAULT_READ_BYPASS_MAX_IN_FLIGHT_S3_BYTES()
+        );
+        assert_eq!(
+            config.small_file_caching_threshold,
+            DEFAULT_SMALL_FILE_CACHING_THRESHOLD()
+        );
+        assert_eq!(config.region, None);
+        assert_eq!(config.profile, None);
+        assert_eq!(config.role_arn, None);
+        assert_eq!(config.jwt_path, None);
+        assert_eq!(config.aws_creds_uri, None);
     }
 
     #[test]

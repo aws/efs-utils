@@ -22,6 +22,7 @@ from efs_utils_common.config_utils import (
     get_int_value_from_config_file,
 )
 from efs_utils_common.constants import (
+    AL2027_RELEASE,
     CONFIG_SECTION,
     DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER,
     DEFAULT_NFS_MOUNT_COMMAND_RETRY_COUNT,
@@ -30,6 +31,8 @@ from efs_utils_common.constants import (
     NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION,
     OPTIMIZE_READAHEAD_ITEM,
     RETRYABLE_ERRORS,
+    RHEL_9_RELEASE,
+    RHEL_10_RELEASE,
     UBUNTU_24_RELEASE,
 )
 from efs_utils_common.context import MountContext
@@ -331,8 +334,13 @@ def optimize_readahead_window(mountpoint, options, config):
             read_ahead_kb_config_file,
             str(fixed_readahead_kb),
         )
-        if UBUNTU_24_RELEASE in system_release_version:
-            # For Ubuntu 24, we use a delayed approach to setting the readahead value.
+        if (
+            UBUNTU_24_RELEASE in system_release_version
+            or RHEL_10_RELEASE in system_release_version
+            or RHEL_9_RELEASE in system_release_version
+            or AL2027_RELEASE in system_release_version
+        ):
+            # We use a delayed approach to setting the readahead value.
             # This is necessary because on Ubuntu 24, there's a race condition with udev
             # rules that can reset our readahead value immediately after we set it.
             p = subprocess.Popen(

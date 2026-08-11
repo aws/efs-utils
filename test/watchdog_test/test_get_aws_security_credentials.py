@@ -8,6 +8,11 @@ import logging
 import os
 import socket
 
+try:
+    from urllib.parse import parse_qs, urlparse
+except ImportError:
+    from urlparse import parse_qs, urlparse
+
 import pytest
 
 import watchdog
@@ -81,6 +86,19 @@ def get_fake_config(add_test_profile=False):
         config.add_section(AWSPROFILE)
 
     return config
+
+
+def get_fake_config_with_dns_suffix(dns_name_suffix):
+    config = get_fake_config()
+    config.add_section("mount")
+    config.set("mount", "dns_name_suffix", dns_name_suffix)
+    return config
+
+
+POD_IDENTITY_CREDS_URI = "http://169.254.170.23/v1/credentials"
+POD_IDENTITY_TOKEN_FILE = (
+    "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token"
+)
 
 
 def test_get_aws_security_credentials_credentials_file_found_credentials_found_without_token(
@@ -477,7 +495,7 @@ def test_get_aws_security_credentials_pod_identity(mocker):
         }
     )
 
-    mock_open = mocker.patch("builtins.open", mocker.mock_open(read_data=token_content))
+    mocker.patch("builtins.open", mocker.mock_open(read_data=token_content))
 
     mocker.patch("watchdog.url_request_helper", return_value=json.loads(response))
 
@@ -488,3 +506,171 @@ def test_get_aws_security_credentials_pod_identity(mocker):
     assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
     assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
     assert credentials["Token"] == SESSION_TOKEN_VAL
+
+
+def _well_formed_webidentity_response():
+    return {
+        "AssumeRoleWithWebIdentityResponse": {
+            "AssumeRoleWithWebIdentityResult": {
+                "Credentials": {
+                    "AccessKeyId": ACCESS_KEY_ID_VAL,
+                    "SecretAccessKey": SECRET_ACCESS_KEY_VAL,
+                    "SessionToken": SESSION_TOKEN_VAL,
+                }
+            }
+        }
+    }
+
+
+def test_get_aws_security_credentials_from_webidentity_real_builds_sts_url_and_parses_creds(
+    mocker,
+):
+    # Exercises the REAL watchdog get_aws_security_credentials_from_webidentity STS path,
+    # mocking only the token-file open and the url_request_helper I/O boundary.
+    config = get_fake_config_with_dns_suffix("amazonaws.com")
+    token_content = "FAKE_WEB_IDENTITY_JWT"
+
+    mocker.patch("builtins.open", mocker.mock_open(read_data=token_content))
+    url_request_mock = mocker.patch(
+        "watchdog.url_request_helper",
+        return_value=_well_formed_webidentity_response(),
+    )
+
+    credentials = watchdog.get_aws_security_credentials_from_webidentity(
+        config, ROLE_ARN, WEB_IDENTITY_TOKEN_FILE, "us-east-1"
+    )
+
+    requested_url = url_request_mock.call_args[0][1]
+    parsed = urlparse(requested_url)
+    assert parsed.scheme == "https"
+    assert parsed.netloc == "sts.us-east-1.amazonaws.com"
+    assert parsed.path == "/"
+    query = parse_qs(parsed.query)
+    assert query["Action"] == ["AssumeRoleWithWebIdentity"]
+    assert query["Version"] == ["2011-06-15"]
+    assert query["RoleArn"] == [ROLE_ARN]
+    assert query["RoleSessionName"] == ["efs-mount-helper"]
+    assert query["WebIdentityToken"] == [token_content]
+    assert url_request_mock.call_args[1]["headers"] == {"Accept": "application/json"}
+
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] == SESSION_TOKEN_VAL
+
+
+def test_get_aws_security_credentials_from_webidentity_real_no_response_returns_none(
+    mocker,
+):
+    # When STS returns nothing, the watchdog path returns None (it logs, does not fatal).
+    config = get_fake_config_with_dns_suffix("amazonaws.com")
+
+    mocker.patch("builtins.open", mocker.mock_open(read_data="FAKE_JWT"))
+    mocker.patch("watchdog.url_request_helper", return_value=None)
+
+    credentials = watchdog.get_aws_security_credentials_from_webidentity(
+        config, ROLE_ARN, WEB_IDENTITY_TOKEN_FILE, "us-east-1"
+    )
+
+    assert credentials is None
+
+
+def test_get_aws_security_credentials_from_webidentity_real_incomplete_creds_returns_none(
+    mocker,
+):
+    # Malformed response (missing SessionToken) returns None.
+    config = get_fake_config_with_dns_suffix("amazonaws.com")
+
+    mocker.patch("builtins.open", mocker.mock_open(read_data="FAKE_JWT"))
+    mocker.patch(
+        "watchdog.url_request_helper",
+        return_value={
+            "AssumeRoleWithWebIdentityResponse": {
+                "AssumeRoleWithWebIdentityResult": {
+                    "Credentials": {
+                        "AccessKeyId": ACCESS_KEY_ID_VAL,
+                        "SecretAccessKey": SECRET_ACCESS_KEY_VAL,
+                    }
+                }
+            }
+        },
+    )
+
+    credentials = watchdog.get_aws_security_credentials_from_webidentity(
+        config, ROLE_ARN, WEB_IDENTITY_TOKEN_FILE, "us-east-1"
+    )
+
+    assert credentials is None
+
+
+def test_get_sts_endpoint_url_standard_region():
+    config = get_fake_config_with_dns_suffix("amazonaws.com")
+    assert (
+        watchdog.get_sts_endpoint_url(config, "us-east-1")
+        == "https://sts.us-east-1.amazonaws.com/"
+    )
+
+
+def test_get_sts_endpoint_url_remaps_on_aws():
+    # An S3 Files "on.aws" dns_name_suffix must map to the STS "amazonaws.com" domain.
+    config = get_fake_config_with_dns_suffix("on.aws")
+    assert (
+        watchdog.get_sts_endpoint_url(config, "us-east-1")
+        == "https://sts.us-east-1.amazonaws.com/"
+    )
+
+
+def test_get_sts_endpoint_url_remaps_on_amazonwebservices_cn():
+    # The China "on.amazonwebservices.com.cn" suffix must map to "amazonaws.com.cn".
+    config = get_fake_config_with_dns_suffix("on.amazonwebservices.com.cn")
+    assert (
+        watchdog.get_sts_endpoint_url(config, "cn-north-1")
+        == "https://sts.cn-north-1.amazonaws.com.cn/"
+    )
+
+
+def test_get_aws_security_credentials_pod_identity_token_invalid_characters_returns_none(
+    mocker,
+):
+    # A token containing \r/\n is rejected (returns None) without reaching url_request_helper.
+    config = get_fake_config()
+    value = f"{POD_IDENTITY_CREDS_URI},{POD_IDENTITY_TOKEN_FILE}"
+
+    # .strip() removes leading/trailing whitespace, so embed the newline internally.
+    mocker.patch("builtins.open", mocker.mock_open(read_data="bad\ntoken"))
+    url_request_mock = mocker.patch("watchdog.url_request_helper")
+
+    credentials = watchdog.get_aws_security_credentials_from_pod_identity(config, value)
+
+    assert credentials is None
+    url_request_mock.assert_not_called()
+
+
+def test_get_aws_security_credentials_pod_identity_incomplete_response_returns_none(
+    mocker,
+):
+    # A response missing required credential keys returns None.
+    config = get_fake_config()
+    value = f"{POD_IDENTITY_CREDS_URI},{POD_IDENTITY_TOKEN_FILE}"
+
+    mocker.patch("builtins.open", mocker.mock_open(read_data="fake-token"))
+    mocker.patch(
+        "watchdog.url_request_helper",
+        return_value={"AccessKeyId": ACCESS_KEY_ID_VAL},
+    )
+
+    credentials = watchdog.get_aws_security_credentials_from_pod_identity(config, value)
+
+    assert credentials is None
+
+
+def test_get_aws_security_credentials_pod_identity_empty_response_returns_none(mocker):
+    # Empty response (None) returns None.
+    config = get_fake_config()
+    value = f"{POD_IDENTITY_CREDS_URI},{POD_IDENTITY_TOKEN_FILE}"
+
+    mocker.patch("builtins.open", mocker.mock_open(read_data="fake-token"))
+    mocker.patch("watchdog.url_request_helper", return_value=None)
+
+    credentials = watchdog.get_aws_security_credentials_from_pod_identity(config, value)
+
+    assert credentials is None

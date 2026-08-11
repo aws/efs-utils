@@ -8,6 +8,11 @@ import logging
 import os
 import socket
 
+try:
+    from urllib.parse import parse_qs, urlparse
+except ImportError:
+    from urlparse import parse_qs, urlparse
+
 import pytest
 
 import efs_utils_common
@@ -93,6 +98,13 @@ def get_fake_config(add_test_profile=False):
     return config
 
 
+def get_fake_config_with_dns_suffix(dns_name_suffix):
+    config = get_fake_config()
+    config.add_section("mount")
+    config.set("mount", "dns_name_suffix", dns_name_suffix)
+    return config
+
+
 def test_get_aws_security_credentials_config_or_creds_file_found_creds_found_without_token_with_awsprofile(
     mocker,
 ):
@@ -157,7 +169,7 @@ def test_get_aws_security_credentials_do_not_use_iam():
     assert not credentials_source
 
 
-def _test_get_aws_security_credentials_get_ecs_from_env_url(mocker):
+def test_get_aws_security_credentials_get_ecs_from_env_url(mocker):
     config = get_fake_config()
     mocker.patch.dict(os.environ, {})
     mocker.patch("os.path.exists", return_value=False)
@@ -549,6 +561,187 @@ def test_get_aws_security_credentials_from_webidentity_passed_in_one_param(
     )
 
 
+def _well_formed_webidentity_response():
+    return {
+        "AssumeRoleWithWebIdentityResponse": {
+            "AssumeRoleWithWebIdentityResult": {
+                "Credentials": {
+                    "AccessKeyId": ACCESS_KEY_ID_VAL,
+                    "SecretAccessKey": SECRET_ACCESS_KEY_VAL,
+                    "SessionToken": SESSION_TOKEN_VAL,
+                }
+            }
+        }
+    }
+
+
+def test_get_aws_security_credentials_from_webidentity_real_builds_sts_url_and_parses_creds(
+    mocker,
+):
+    # Exercises the REAL get_aws_security_credentials_from_webidentity STS path,
+    # mocking only the token-file open and the url_request_helper I/O boundary.
+    config = get_fake_config_with_dns_suffix("amazonaws.com")
+    token_content = "FAKE_WEB_IDENTITY_JWT"
+
+    mocker.patch("builtins.open", mocker.mock_open(read_data=token_content))
+    url_request_mock = mocker.patch(
+        "efs_utils_common.aws_credentials.url_request_helper",
+        return_value=_well_formed_webidentity_response(),
+    )
+
+    credentials, credentials_source = (
+        aws_credentials.get_aws_security_credentials_from_webidentity(
+            config,
+            WEB_IDENTITY_ROLE_ARN,
+            WEB_IDENTITY_TOKEN_FILE,
+            "us-east-1",
+            is_fatal=False,
+        )
+    )
+
+    # (a) the AssumeRoleWithWebIdentity STS URL is built correctly
+    requested_url = url_request_mock.call_args[0][1]
+    parsed = urlparse(requested_url)
+    assert parsed.scheme == "https"
+    assert parsed.netloc == "sts.us-east-1.amazonaws.com"
+    assert parsed.path == "/"
+    query = parse_qs(parsed.query)
+    assert query["Action"] == ["AssumeRoleWithWebIdentity"]
+    assert query["Version"] == ["2011-06-15"]
+    assert query["RoleArn"] == [WEB_IDENTITY_ROLE_ARN]
+    assert query["RoleSessionName"] == ["efs-mount-helper"]
+    assert query["WebIdentityToken"] == [token_content]
+    # JSON response is requested from STS
+    assert url_request_mock.call_args[1]["headers"] == {"Accept": "application/json"}
+
+    # (b) a well-formed response yields Credentials plus a webidentity: source
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] == SESSION_TOKEN_VAL
+    assert credentials_source == "webidentity:" + ",".join(
+        [WEB_IDENTITY_ROLE_ARN, WEB_IDENTITY_TOKEN_FILE]
+    )
+
+
+def test_get_aws_security_credentials_from_webidentity_real_is_fatal_failure(
+    mocker, capsys
+):
+    # When STS returns nothing and is_fatal=True, the real path must fatal (SystemExit).
+    config = get_fake_config_with_dns_suffix("amazonaws.com")
+
+    mocker.patch("builtins.open", mocker.mock_open(read_data="FAKE_JWT"))
+    mocker.patch(
+        "efs_utils_common.aws_credentials.url_request_helper", return_value=None
+    )
+
+    with pytest.raises(SystemExit) as ex:
+        aws_credentials.get_aws_security_credentials_from_webidentity(
+            config,
+            WEB_IDENTITY_ROLE_ARN,
+            WEB_IDENTITY_TOKEN_FILE,
+            "us-east-1",
+            is_fatal=True,
+        )
+
+    assert ex.value.code != 0
+    _, err = capsys.readouterr()
+    assert "Unsuccessful retrieval of AWS security credentials at" in err
+
+
+def test_get_aws_security_credentials_from_webidentity_real_not_fatal_returns_none(
+    mocker,
+):
+    # Malformed response (missing SessionToken) with is_fatal=False returns (None, None).
+    config = get_fake_config_with_dns_suffix("amazonaws.com")
+
+    mocker.patch("builtins.open", mocker.mock_open(read_data="FAKE_JWT"))
+    mocker.patch(
+        "efs_utils_common.aws_credentials.url_request_helper",
+        return_value={
+            "AssumeRoleWithWebIdentityResponse": {
+                "AssumeRoleWithWebIdentityResult": {
+                    "Credentials": {
+                        "AccessKeyId": ACCESS_KEY_ID_VAL,
+                        "SecretAccessKey": SECRET_ACCESS_KEY_VAL,
+                    }
+                }
+            }
+        },
+    )
+
+    credentials, credentials_source = (
+        aws_credentials.get_aws_security_credentials_from_webidentity(
+            config,
+            WEB_IDENTITY_ROLE_ARN,
+            WEB_IDENTITY_TOKEN_FILE,
+            "us-east-1",
+            is_fatal=False,
+        )
+    )
+
+    assert credentials is None
+    assert credentials_source is None
+
+
+def test_get_aws_security_credentials_webidentity_from_env_vars(mocker):
+    # Exercises the WEB_IDENTITY_ROLE_ARN_ENV / WEB_IDENTITY_TOKEN_FILE_ENV entry
+    # branch in get_aws_security_credentials, which resolves via the real
+    # get_aws_security_credentials_from_webidentity path.
+    config = get_fake_config_with_dns_suffix("amazonaws.com")
+    token_content = "FAKE_WEB_IDENTITY_JWT"
+
+    mocker.patch.dict(
+        os.environ,
+        {
+            "AWS_ROLE_ARN": WEB_IDENTITY_ROLE_ARN,
+            "AWS_WEB_IDENTITY_TOKEN_FILE": WEB_IDENTITY_TOKEN_FILE,
+        },
+    )
+    mocker.patch("os.path.exists", return_value=False)
+    mocker.patch("builtins.open", mocker.mock_open(read_data=token_content))
+    mocker.patch(
+        "efs_utils_common.aws_credentials.url_request_helper",
+        return_value=_well_formed_webidentity_response(),
+    )
+
+    credentials, credentials_source = aws_credentials.get_aws_security_credentials(
+        config, True, "us-east-1"
+    )
+
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] == SESSION_TOKEN_VAL
+    assert credentials_source == "webidentity:" + ",".join(
+        [WEB_IDENTITY_ROLE_ARN, WEB_IDENTITY_TOKEN_FILE]
+    )
+
+
+def test_get_sts_endpoint_url_standard_region(mocker):
+    config = get_fake_config_with_dns_suffix("amazonaws.com")
+    assert (
+        aws_credentials.get_sts_endpoint_url(config, "us-east-1")
+        == "https://sts.us-east-1.amazonaws.com/"
+    )
+
+
+def test_get_sts_endpoint_url_remaps_on_aws(mocker):
+    # An S3 Files "on.aws" dns_name_suffix must map to the STS "amazonaws.com" domain.
+    config = get_fake_config_with_dns_suffix("on.aws")
+    assert (
+        aws_credentials.get_sts_endpoint_url(config, "us-east-1")
+        == "https://sts.us-east-1.amazonaws.com/"
+    )
+
+
+def test_get_sts_endpoint_url_remaps_on_amazonwebservices_cn(mocker):
+    # The China "on.amazonwebservices.com.cn" suffix must map to "amazonaws.com.cn".
+    config = get_fake_config_with_dns_suffix("on.amazonwebservices.com.cn")
+    assert (
+        aws_credentials.get_sts_endpoint_url(config, "cn-north-1")
+        == "https://sts.cn-north-1.amazonaws.com.cn/"
+    )
+
+
 def test_get_aws_security_credentials_pod_identity(mocker):
     config = get_fake_config()
     token_content = "fake-token"
@@ -568,7 +761,7 @@ def test_get_aws_security_credentials_pod_identity(mocker):
         },
     )
 
-    mock_open = mocker.patch("builtins.open", mocker.mock_open(read_data=token_content))
+    mocker.patch("builtins.open", mocker.mock_open(read_data=token_content))
 
     mocker.patch(
         "efs_utils_common.aws_credentials.url_request_helper",
@@ -611,3 +804,110 @@ def test_get_aws_security_credentials_pod_identity_invalid_token_file(mocker):
         aws_credentials.get_aws_security_credentials_from_pod_identity(config, True)
 
     assert ex.value.code == 1
+
+
+def test_get_aws_security_credentials_pod_identity_token_invalid_characters_fatal(
+    mocker, capsys
+):
+    # A token containing \r/\n is rejected; with is_fatal=True it must fatal (SystemExit)
+    # and must NOT reach url_request_helper.
+    config = get_fake_config()
+
+    mocker.patch.dict(
+        os.environ,
+        {
+            AWS_CONTAINER_CREDS_FULL_URI_ENV: POD_IDENTITY_CREDS_URI,
+            AWS_CONTAINER_AUTH_TOKEN_FILE_ENV: POD_IDENTITY_TOKEN_FILE,
+        },
+    )
+    # .strip() removes leading/trailing whitespace, so embed the newline internally.
+    mocker.patch("builtins.open", mocker.mock_open(read_data="bad\ntoken"))
+    url_request_mock = mocker.patch(
+        "efs_utils_common.aws_credentials.url_request_helper"
+    )
+
+    with pytest.raises(SystemExit) as ex:
+        aws_credentials.get_aws_security_credentials_from_pod_identity(config, True)
+
+    assert ex.value.code != 0
+    _, err = capsys.readouterr()
+    assert "AWS Container Auth Token contains invalid characters" in err
+    url_request_mock.assert_not_called()
+
+
+def test_get_aws_security_credentials_pod_identity_token_invalid_characters_not_fatal(
+    mocker,
+):
+    # Same invalid-character token, is_fatal=False -> returns (None, None), no I/O.
+    config = get_fake_config()
+
+    mocker.patch.dict(
+        os.environ,
+        {
+            AWS_CONTAINER_CREDS_FULL_URI_ENV: POD_IDENTITY_CREDS_URI,
+            AWS_CONTAINER_AUTH_TOKEN_FILE_ENV: POD_IDENTITY_TOKEN_FILE,
+        },
+    )
+    mocker.patch("builtins.open", mocker.mock_open(read_data="bad\rtoken"))
+    url_request_mock = mocker.patch(
+        "efs_utils_common.aws_credentials.url_request_helper"
+    )
+
+    credentials, credentials_source = (
+        aws_credentials.get_aws_security_credentials_from_pod_identity(config, False)
+    )
+
+    assert credentials is None
+    assert credentials_source is None
+    url_request_mock.assert_not_called()
+
+
+def test_get_aws_security_credentials_pod_identity_incomplete_response_fatal(
+    mocker, capsys
+):
+    # A response missing required credential keys with is_fatal=True must fatal.
+    config = get_fake_config()
+
+    mocker.patch.dict(
+        os.environ,
+        {
+            AWS_CONTAINER_CREDS_FULL_URI_ENV: POD_IDENTITY_CREDS_URI,
+            AWS_CONTAINER_AUTH_TOKEN_FILE_ENV: POD_IDENTITY_TOKEN_FILE,
+        },
+    )
+    mocker.patch("builtins.open", mocker.mock_open(read_data="fake-token"))
+    mocker.patch(
+        "efs_utils_common.aws_credentials.url_request_helper",
+        return_value={"AccessKeyId": ACCESS_KEY_ID_VAL},
+    )
+
+    with pytest.raises(SystemExit) as ex:
+        aws_credentials.get_aws_security_credentials_from_pod_identity(config, True)
+
+    assert ex.value.code != 0
+    _, err = capsys.readouterr()
+    assert "Unsuccessful retrieval of AWS security credentials" in err
+
+
+def test_get_aws_security_credentials_pod_identity_empty_response_not_fatal(mocker):
+    # Empty response (None) with is_fatal=False returns (None, None).
+    config = get_fake_config()
+
+    mocker.patch.dict(
+        os.environ,
+        {
+            AWS_CONTAINER_CREDS_FULL_URI_ENV: POD_IDENTITY_CREDS_URI,
+            AWS_CONTAINER_AUTH_TOKEN_FILE_ENV: POD_IDENTITY_TOKEN_FILE,
+        },
+    )
+    mocker.patch("builtins.open", mocker.mock_open(read_data="fake-token"))
+    mocker.patch(
+        "efs_utils_common.aws_credentials.url_request_helper", return_value=None
+    )
+
+    credentials, credentials_source = (
+        aws_credentials.get_aws_security_credentials_from_pod_identity(config, False)
+    )
+
+    assert credentials is None
+    assert credentials_source is None
