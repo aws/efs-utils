@@ -218,7 +218,7 @@ def test_get_fall_back_ip_address_success(mocker):
     )
 
     ip_address = dns_resolver.get_fallback_mount_target_ip_address(
-        config, FS_ID, DEFAULT_NFS_OPTIONS, DNS_NAME
+        config, DEFAULT_NFS_OPTIONS, FS_ID, DNS_NAME
     )
 
     assert FALLBACK_IP_ADDRESS == ip_address
@@ -247,7 +247,7 @@ def test_get_fall_back_ip_address_feature_not_enabled(mocker):
 
     with pytest.raises(efs_utils_common.exceptions.FallbackException) as excinfo:
         dns_resolver.get_fallback_mount_target_ip_address(
-            config, FS_ID, DEFAULT_NFS_OPTIONS, DNS_NAME
+            config, DEFAULT_NFS_OPTIONS, FS_ID, DNS_NAME
         )
 
     assert "not enabled" in str(excinfo)
@@ -301,7 +301,7 @@ def test_get_dns_name_and_fall_back_ip_address_is_none_botocore_not_present(mock
 
     with pytest.raises(efs_utils_common.exceptions.FallbackException) as excinfo:
         dns_resolver.get_fallback_mount_target_ip_address(
-            config, FS_ID, DEFAULT_NFS_OPTIONS, DNS_NAME
+            config, DEFAULT_NFS_OPTIONS, FS_ID, DNS_NAME
         )
 
     assert "necessary dependency botocore" in str(excinfo)
@@ -331,14 +331,19 @@ def test_get_dns_name_and_fall_back_ip_address_cannot_be_resolved(mocker, capsys
 
     with pytest.raises(SystemExit) as ex:
         dns_resolver.get_fallback_mount_target_ip_address(
-            config, FS_ID, DEFAULT_NFS_OPTIONS, DNS_NAME
+            config, DEFAULT_NFS_OPTIONS, FS_ID, DNS_NAME
         )
 
-        assert 0 != ex.value.code
+    # Assertions must live outside the `with pytest.raises(SystemExit)` block:
+    # once get_fallback_mount_target_ip_address raises SystemExit, control leaves
+    # the block, so any assertions indented inside it would never execute.
+    assert 0 != ex.value.code
 
-        out, err = capsys.readouterr()
-        assert "Failed to resolve" in err
-        assert "cannot be found" in err
+    out, err = capsys.readouterr()
+    assert "Failed to resolve" in err
+    # A fallback IP was resolved but is unreachable, so the fatal error reports the
+    # connect failure (not the "cannot be found" branch, which is for a missing IP).
+    assert "Cannot connect to file system mount target ip address" in err
 
     utils.assert_called(check_fallback_enabled_mock)
     utils.assert_called(get_fallback_mount_target_ip_mock)

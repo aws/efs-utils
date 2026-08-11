@@ -336,3 +336,61 @@ def test_get_az_id_from_instance_metadata_uses_azid_option():
     result = metadata.get_az_id_from_instance_metadata(config, options)
 
     assert result == "use1-az2"
+
+
+def _get_fargate_config_without_az_id():
+    """Fargate config that is missing the 'az_id' option (triggers NoOptionError)."""
+    try:
+        config = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        config = ConfigParser()
+    config.add_section(efs_utils_common.constants.CONFIG_SECTION)
+    config.add_section(efs_utils_common.constants.CLIENT_INFO_SECTION)
+    config.set(efs_utils_common.constants.CLIENT_INFO_SECTION, "source", "ecs.fargate")
+    config.set(
+        efs_utils_common.constants.CONFIG_SECTION,
+        "dns_name_format",
+        "{az}.{fs_id}.efs.{region}.amazonaws.com",
+    )
+    return config
+
+
+def test_get_az_id_from_instance_metadata_raises_when_metadata_missing(mocker):
+    """
+    When the metadata service returns no az-id, get_az_id_from_instance_metadata
+    must raise RuntimeError (crossaccount relies on this to fatal out).
+    """
+    mocker.patch(
+        "efs_utils_common.metadata.get_az_id_info_from_instance_metadata",
+        return_value=None,
+    )
+    with pytest.raises(
+        RuntimeError, match="Cannot retrieve az-id from instance_metadata"
+    ):
+        metadata.get_az_id_from_instance_metadata(_get_config(), OPTIONS)
+
+
+def test_get_instance_az_id_fargate_missing_az_id_config_fatal_errors(capsys):
+    """
+    Fargate client with no 'az_id' in the config file must fatal_error (SystemExit),
+    since Fargate cannot retrieve az-id from IMDS.
+    """
+    config = _get_fargate_config_without_az_id()
+
+    with pytest.raises(SystemExit) as ex:
+        metadata.get_az_id_info_from_instance_metadata(config, OPTIONS)
+
+    assert ex.value.code != 0
+    _, err = capsys.readouterr()
+    assert "Error retrieving AZ ID" in err
+
+
+def test_get_instance_az_id_fargate_metadata_url_env_missing(mocker):
+    """
+    Fargate client whose ECS metadata endpoint env var is unset must degrade
+    gracefully to a None az-id URL (guards against a str + None concat crash).
+    """
+    mocker.patch("os.getenv", return_value=None)
+    assert (
+        metadata.get_instance_az_id_metadata_url(_get_config(is_fargate=True)) is None
+    )

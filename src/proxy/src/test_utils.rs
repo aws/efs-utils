@@ -5,26 +5,33 @@
 #![allow(dead_code)]
 
 use crate::{
+    aws::cw_publisher::{CloudWatchClient, LogLevel},
     awsfile_prot::{
         self, AwsFileChannelInitArgs, AwsFileChannelInitRes, BindClientResponse, BindResponse,
         ScaleUpConfig,
     },
     awsfile_rpc::{parse_rpc_response, AWSFILE_PROGRAM_NUMBER, AWSFILE_PROGRAM_VERSION},
     config_parser::ProxyConfig,
+    connections::PartitionFinder,
+    controller::{Controller, DEFAULT_SCALE_UP_CONFIG},
     error::RpcError,
     nfs::{
         nfs4_1_xdr,
         nfs_compound::{NfsMetadata, RefNfsCompoundInfo},
     },
     proxy_identifier::ProxyIdentifier,
+    status_reporter::create_status_channel,
     tls::{create_config_builder, InsecureAcceptAllCertificatesHandler, TlsConfig},
 };
 use anyhow::Result;
 use bytes::BytesMut;
 use rand::{Rng, RngCore};
 use s2n_tls::config::Config;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 use std::{io::Cursor, path::Path};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 
 // Proxy Configuration testing utils
 //
@@ -231,87 +238,82 @@ pub fn create_channel_init_response(
         .map_err(|e| e.into())
 }
 
-/// Mock S3DataReader that returns position-encoded data and tracks call count.
-/// Used by readahead cache and file readahead state tests.
-#[derive(Clone)]
-pub struct CountingS3DataReader {
-    pub call_count: std::sync::Arc<std::sync::atomic::AtomicU64>,
+// Controller testing utils
+//
+
+/// CloudWatchClient mock that counts nfs-reachability metric and log emissions.
+pub struct MockCloudWatchClient {
+    nfs_reachability_calls: AtomicU64,
+    emit_log_calls: AtomicU64,
 }
 
-impl CountingS3DataReader {
+impl MockCloudWatchClient {
     pub fn new() -> Self {
         Self {
-            call_count: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            nfs_reachability_calls: AtomicU64::new(0),
+            emit_log_calls: AtomicU64::new(0),
         }
     }
 
-    pub fn calls(&self) -> u64 {
-        self.call_count.load(std::sync::atomic::Ordering::SeqCst)
+    pub fn nfs_reachability_call_count(&self) -> u64 {
+        self.nfs_reachability_calls.load(Ordering::SeqCst)
+    }
+
+    pub fn emit_log_call_count(&self) -> u64 {
+        self.emit_log_calls.load(Ordering::SeqCst)
     }
 }
+
+impl Default for MockCloudWatchClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CloudWatchClient for MockCloudWatchClient {
+    fn emit_log(&self, _level: LogLevel, _message: &str) {
+        self.emit_log_calls.fetch_add(1, Ordering::SeqCst);
+    }
+    fn publish_s3_reachable(&self, _bucket: &str, _is_reachable: bool) {}
+    fn publish_s3_permitted(&self, _bucket: &str, _is_permitted: bool) {}
+    fn publish_nfs_reachability(&self, _is_reachable: bool, _fs_id: &str) {
+        self.nfs_reachability_calls.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+pub struct MockPartitionFinder;
 
 #[async_trait::async_trait]
-impl crate::util::s3_data_reader::S3DataReader for CountingS3DataReader {
-    async fn spawn_read_task(
+impl PartitionFinder<TcpStream> for MockPartitionFinder {
+    async fn create_connect_future(
         &self,
-        s3_data_locator: crate::nfs::nfs4_1_xdr::awsfile_bypass_data_locator,
-        _read_bypass_context: std::sync::Arc<crate::util::read_bypass_context::ReadBypassContext>,
-    ) -> tokio::task::JoinHandle<Result<bytes::Bytes, crate::aws::s3_client::S3ClientError>> {
-        self.call_count
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let count = s3_data_locator.count as usize;
-        let offset = s3_data_locator.offset;
-        tokio::spawn(async move {
-            let data: Vec<u8> = (0..count)
-                .map(|i| ((offset as usize + i) % 256) as u8)
-                .collect();
-            Ok(bytes::Bytes::from(data))
-        })
+    ) -> futures::future::BoxFuture<'static, Result<TcpStream, crate::error::ConnectError>> {
+        unimplemented!()
     }
 }
 
-pub fn create_test_s3_data_locator(
-    offset: u64,
-    count: u32,
-) -> crate::nfs::nfs4_1_xdr::awsfile_bypass_data_locator {
-    crate::nfs::nfs4_1_xdr::awsfile_bypass_data_locator {
-        bucket_name: b"test-bucket".to_vec(),
-        s3_key: b"test-key".to_vec(),
-        etag: b"test-etag".to_vec(),
-        version_id: b"test-version-id".to_vec(),
-        offset,
-        count,
+/// Minimal Controller for exercising emit_nfs_reachability directly.
+pub async fn make_test_controller(
+    publisher: Arc<MockCloudWatchClient>,
+    emit_period: Duration,
+) -> Controller<TcpStream> {
+    let (_status_requester, status_reporter) = create_status_channel();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut proxy_config = ProxyConfig::default();
+    proxy_config.nested_config.fs_id = "fs-test123".to_string();
+    Controller::<TcpStream> {
+        listener,
+        partition_finder: Arc::new(MockPartitionFinder),
+        proxy_id: ProxyIdentifier::new(),
+        scale_up_attempt_count: 0,
+        restart_count: 0,
+        scale_up_config: DEFAULT_SCALE_UP_CONFIG,
+        status_reporter,
+        proxy_config,
+        cw_publisher: Some(publisher),
+        last_reachability_emitted: None,
+        last_reachability_emit_at: None,
+        reachability_emit_period: emit_period,
+        consecutive_connect_failures: 0,
     }
-}
-
-#[cfg(test)]
-pub async fn create_test_read_bypass_context(
-) -> std::sync::Arc<crate::util::read_bypass_context::ReadBypassContext> {
-    use aws_sdk_s3::operation::get_object::GetObjectOutput;
-    use aws_sdk_s3::primitives::ByteStream;
-    use aws_smithy_mocks::{mock, mock_client};
-
-    let get_object_rule = mock!(aws_sdk_s3::Client::get_object)
-        .match_requests(|_req| true)
-        .then_output(|| {
-            GetObjectOutput::builder()
-                .content_length(100)
-                .body(ByteStream::from(vec![0u8; 100]))
-                .e_tag("test-etag")
-                .build()
-        });
-
-    let mock_client = std::sync::Arc::new(mock_client!(aws_sdk_s3, [&get_object_rule]));
-    let s3_client =
-        crate::aws::s3_client::S3Client::new_with_client("test-bucket", "test-prefix", mock_client)
-            .await;
-
-    let proxy_config = crate::config_parser::ProxyConfig::default();
-    std::sync::Arc::new(crate::util::read_bypass_context::ReadBypassContext::new(
-        &proxy_config,
-        "test-bucket".to_string(),
-        "test-prefix".to_string(),
-        s3_client,
-        false,
-    ))
 }

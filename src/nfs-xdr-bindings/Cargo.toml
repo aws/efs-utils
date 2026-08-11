@@ -1,0 +1,20 @@
+[package]
+name = "amzn-nfs-xdr-bindings"
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+build = "build.rs"
+
+
+[dependencies]
+# Vendored XDR runtime; the generated nfs4_1_xdr module encodes/decodes against
+# it. Imported under its lib name `xdr_codec`.
+xdr_codec = { package = "amzn-xdr-codec", path = "rust-xdr/xdr-codec", version = "0.4" }
+bytes = "1"
+thiserror = "1"
+# nfsstat4 derives strum_macros::Display.
+strum_macros = "0.27.1"
+
+[build-dependencies]
+# Generates the awsfile_prot module from src/xdr/awsfile_prot.x at build time.
+xdrgen = { package = "amzn-xdrgen", path = "rust-xdr/xdrgen", version = "0.4" }

@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 3.2.0
+Version   : 3.3.0
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -51,7 +51,11 @@ URL       : https://aws.amazon.com/efs
 
 BuildArch: x86_64 aarch64
 
+%if 0%{?amzn} <= 2023
 Requires  : nfs-utils
+%else
+Requires  : nfsv4-client-utils
+%endif
 %if 0%{?amzn2}
 Requires  : stunnel5
 %else
@@ -116,11 +120,13 @@ if ! command -v rustc &> /dev/null; then
 fi
 
 %setup -n %{name}
-mkdir -p %{_builddir}/%{name}/src/proxy/.cargo
+# efs-proxy and the nfs-xdr-bindings crate share a Cargo workspace rooted at
+# src/, so the vendor dir and .cargo config live at src/ (not src/proxy/).
+mkdir -p %{_builddir}/%{name}/src/.cargo
 %if "%{include_vendor_tarball}" == "true"
-cp %{SOURCE2} %{_builddir}/%{name}/src/proxy/.cargo/
+cp %{SOURCE2} %{_builddir}/%{name}/src/.cargo/
 tar xf %{SOURCE1}
-mv vendor %{_builddir}/%{name}/src/proxy/
+mv vendor %{_builddir}/%{name}/src/
 %endif
 
 %build
@@ -128,8 +134,8 @@ mv vendor %{_builddir}/%{name}/src/proxy/
 %if 0%{?amzn2}
 export CMAKE=/usr/bin/cmake3
 %endif
-cd %{_builddir}/%{name}/src/proxy
-cargo build --release --manifest-path %{_builddir}/%{name}/src/proxy/Cargo.toml
+cd %{_builddir}/%{name}/src
+cargo build --release -p efs-proxy --manifest-path %{_builddir}/%{name}/src/Cargo.toml
 
 %install
 mkdir -p %{buildroot}%{_sysconfdir}/amazon/efs
@@ -157,7 +163,7 @@ install -p -m 755 %{_builddir}/%{name}/src/mount_s3files/__init__.py %{buildroot
 install -p -m 755 %{_builddir}/%{name}/src/watchdog/__init__.py %{buildroot}%{_bindir}/amazon-efs-mount-watchdog
 install -p -m 644 %{_builddir}/%{name}/man/mount.efs.8 %{buildroot}%{_mandir}/man8
 install -p -m 644 %{_builddir}/%{name}/man/mount.s3files.8 %{buildroot}%{_mandir}/man8
-install -p -m 755 %{_builddir}/%{name}/src/proxy/target/release/efs-proxy %{buildroot}%{efs_bindir}/efs-proxy
+install -p -m 755 %{_builddir}/%{name}/src/target/release/efs-proxy %{buildroot}%{efs_bindir}/efs-proxy
 
 cp -r %{_builddir}/%{name}/src/efs_utils_common/*.py %{buildroot}%{efs_bindir}/efs_utils_common/
 cp -r %{_builddir}/%{name}/src/mount_efs/*.py %{buildroot}%{efs_bindir}/mount_efs/
@@ -215,6 +221,10 @@ fi
 %clean
 
 %changelog
+* Wed Aug 5 2026 Zachary Maguire <maguirza@amazon.com> 3.3.0
+- Eliminate necessary data copies on the readbypass path
+- Consolidating dependencies
+
 * Wed Jul 8 2026 Samuel Hale <samuhale@amazon.com> - 3.2.0
 - Use partition-aware DNS suffix for S3 Files for aws-cn
 - Add regex for region mount option

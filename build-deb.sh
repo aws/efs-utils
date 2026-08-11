@@ -11,7 +11,7 @@ set -ex
 
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
-VERSION=3.2.0
+VERSION=3.3.0
 RELEASE=1
 ARCH=$(dpkg --print-architecture)
 DEB_SYSTEM_RELEASE_PATH=/etc/os-release
@@ -34,8 +34,10 @@ mkdir -p ${BUILD_ROOT}/sbin/mount_s3files
 mkdir -p ${BUILD_ROOT}/sbin/mount_efs
 
 echo 'Building efs-proxy'
-cd src/proxy
-cargo build --release --manifest-path ${BASE_DIR}/src/proxy/Cargo.toml
+# efs-proxy and the nfs-xdr-bindings crate share a Cargo workspace rooted at
+# src/, so build output lands in src/target/ (not src/proxy/target/).
+cd src
+cargo build --release -p efs-proxy --manifest-path ${BASE_DIR}/src/Cargo.toml
 cd ${BASE_DIR}
 
 echo 'Copying application files'
@@ -46,7 +48,7 @@ install -p -m 644 dist/efs-utils.conf ${BUILD_ROOT}/etc/amazon/efs
 install -p -m 644 dist/s3files-utils.conf ${BUILD_ROOT}/etc/amazon/efs
 install -p -m 755 src/mount_efs/__init__.py ${BUILD_ROOT}/sbin/mount.efs
 install -p -m 755 src/mount_s3files/__init__.py ${BUILD_ROOT}/sbin/mount.s3files
-install -p -m 755 src/proxy/target/release/efs-proxy ${BUILD_ROOT}/usr/bin/efs-proxy
+install -p -m 755 src/target/release/efs-proxy ${BUILD_ROOT}/usr/bin/efs-proxy
 install -p -m 755 src/watchdog/__init__.py ${BUILD_ROOT}/usr/bin/amazon-efs-mount-watchdog
 install -p -m 644 src/efs_utils_common/*.py ${BUILD_ROOT}/sbin/efs_utils_common
 install -p -m 644 src/mount_s3files/*.py ${BUILD_ROOT}/sbin/mount_s3files

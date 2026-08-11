@@ -5,6 +5,7 @@
 # the License.
 
 import socket
+from unittest.mock import call
 
 import pytest
 
@@ -332,6 +333,75 @@ def test_dns_name_can_be_resolved_dns_resolve_failure(mocker):
 def test_dns_name_can_be_resolved_dns_resolve_succeed():
     result = network_utils.dns_name_can_be_resolved(DNS_NAME)
     assert True == result
+
+
+def test_dns_name_can_be_resolved_literal_attempted_first_no_retry(mocker):
+    """When the literal name resolves, resolution is attempted exactly once, as-is,
+    and no trailing-dot retry is performed.
+
+    Guards COE-404021: the literal name MUST be the first (and, on success, only)
+    resolution attempt. If the attempt order is reversed to try the dotted name
+    first, the recorded call arg will be the dotted name and this test fails.
+    """
+    dns_mock = mocker.patch(
+        "socket.getaddrinfo", return_value=TEST_SOCKET_GET_ADDR_INFO_RETURN
+    )
+
+    result = network_utils.dns_name_can_be_resolved(DNS_NAME)
+
+    assert result is True
+    assert dns_mock.call_count == 1
+    assert dns_mock.call_args_list[0] == call(DNS_NAME, None, socket.AF_UNSPEC)
+
+
+def test_dns_name_can_be_resolved_attempts_literal_before_dotted(mocker):
+    """When only the trailing-dot (FQDN) form resolves, the function must attempt
+    the literal name FIRST and then retry with the trailing dot, in that order.
+
+    Guards COE-404021: this is the exact ordering that broke. Only the dotted form
+    resolves here, so if the attempt order is reversed the function would succeed on
+    its first (dotted) attempt and never touch the literal form, making call_count 1
+    instead of 2 and failing this test.
+    """
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        # Only the trailing-dot form resolves; the literal form raises NXDOMAIN.
+        if host == DNS_NAME + ".":
+            return TEST_SOCKET_GET_ADDR_INFO_RETURN
+        raise socket.gaierror
+
+    dns_mock = mocker.patch("socket.getaddrinfo", side_effect=fake_getaddrinfo)
+
+    result = network_utils.dns_name_can_be_resolved(DNS_NAME)
+
+    assert result is True
+    # Exactly two attempts, in order: literal first, then trailing-dot retry.
+    assert dns_mock.call_count == 2
+    assert dns_mock.call_args_list == [
+        call(DNS_NAME, None, socket.AF_UNSPEC),
+        call(DNS_NAME + ".", None, socket.AF_UNSPEC),
+    ]
+    # And the has_calls form (ordered) as an explicit ordering guard.
+    dns_mock.assert_has_calls(
+        [
+            call(DNS_NAME, None, socket.AF_UNSPEC),
+            call(DNS_NAME + ".", None, socket.AF_UNSPEC),
+        ]
+    )
+
+
+def test_dns_name_can_be_resolved_already_dotted_input_no_retry(mocker):
+    """An input that is already an absolute FQDN (trailing dot) is attempted once,
+    exactly as given, and is never retried with an extra dot appended.
+    """
+    dotted_name = DNS_NAME + "."
+    dns_mock = mocker.patch("socket.getaddrinfo", side_effect=socket.gaierror)
+
+    result = network_utils.dns_name_can_be_resolved(dotted_name)
+
+    assert result is False
+    assert dns_mock.call_count == 1
+    assert dns_mock.call_args_list[0] == call(dotted_name, None, socket.AF_UNSPEC)
 
 
 def test_get_dns_name_and_fall_back_ip_address_success(mocker):

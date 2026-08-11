@@ -8,9 +8,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import efs_utils_common.context as efs_context
 import mount_efs
+from efs_utils_common.constants import CONFIG_SECTION, PROXY_MODE_STUNNEL
 
 from .. import utils
+
+try:
+    import ConfigParser
+except ImportError:
+    from configparser import ConfigParser
 
 AP_ID = "fsap-0123456789abcdef0"
 BAD_AP_ID_INCORRECT_START = "bad-fsap-0123456789abc"
@@ -280,7 +287,7 @@ def test_main_tls_noocsp_option(mocker):
     _test_main(mocker, tls=True, noocsp=True, tlsport=TLS_PORT)
 
 
-def test_main_tls_ocsp_and_noocsp_option(mocker, capsys):
+def test_main_ocsp_and_noocsp_mutually_exclusive(mocker, capsys):
     expected_err = 'The "ocsp" and "noocsp" options are mutually exclusive'
     _test_main_assert_error(
         mocker, capsys, expected_err, tls=True, ocsp=True, noocsp=True, tlsport=TLS_PORT
@@ -365,7 +372,7 @@ def test_main_tls_notls_option_macos(mocker):
     _test_main_macos(mocker, is_supported_macos_version=True, notls=True)
 
 
-def test_main_tls_ocsp_and_noocsp_option(mocker, capsys):
+def test_main_tls_and_notls_mutually_exclusive(mocker, capsys):
     expected_err = 'The "tls" and "notls" options are mutually exclusive'
     _test_main_assert_error(
         mocker, capsys, expected_err, tls=True, tlsport=TLS_PORT, notls=True
@@ -397,3 +404,89 @@ def test_main_fake_mount_with_tls(mocker):
 def test_main_fake_mount_with_stunnel(mocker):
     """Test that -f/--fake skips the actual mount (stunnel path)."""
     _test_main(mocker, stunnel=True, fake=True)
+
+
+def _real_proxy_mode_config(stunnel_check_cert_validity=False):
+    """Build a real ConfigParser to drive the actual proxy-mode selection logic."""
+    try:
+        config = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        config = ConfigParser()
+    config.add_section(CONFIG_SECTION)
+    config.set(
+        CONFIG_SECTION,
+        "stunnel_check_cert_validity",
+        str(stunnel_check_cert_validity),
+    )
+    return config
+
+
+def _run_main_for_real_proxy_mode(mocker, options, config, is_mac=False):
+    """
+    Drive mount_efs.main() through the REAL proxy-mode selection block
+    (mount_efs/__init__.py, "if LEGACY_STUNNEL_MOUNT_OPTION in options or ...").
+
+    Unlike _test_main, this does NOT patch context.proxy_mode via a mock; it uses
+    the real MountContext singleton and the real is_ocsp_enabled/platform checks,
+    then returns the proxy_mode the selection logic actually chose.
+    """
+    # Use the real MountContext singleton, reset to a clean state.
+    real_context = efs_context.MountContext()
+    real_context.reset()
+
+    mocker.patch("os.geteuid", return_value=0)
+    mocker.patch("mount_efs.read_config", return_value=config)
+    mocker.patch("mount_efs.bootstrap_logging")
+    mocker.patch("mount_efs.check_if_platform_is_mac", return_value=is_mac)
+    mocker.patch("mount_efs.check_if_mac_version_is_supported", return_value=True)
+    mocker.patch("mount_efs.bootstrap_cloudwatch_logging", return_value=None)
+    mocker.patch("mount_efs.check_network_status")
+    mocker.patch(
+        "mount_efs.get_dns_name_and_fallback_mount_target_ip_address",
+        return_value=("fs-deadbeef.efs.us-west-1.amazonaws.com", None),
+    )
+    mocker.patch(
+        "mount_efs.parse_arguments",
+        return_value=("fs-deadbeef", "/", "/mnt", options, False),
+    )
+    # The proxy-mode selection we assert on runs BEFORE any mount is invoked, so we
+    # stub the mount entry points directly to avoid spawning real tunnel/poll threads.
+    mocker.patch("mount_efs.mount_nfs")
+    mocker.patch("mount_efs.mount_with_proxy")
+
+    try:
+        mount_efs.main()
+        return efs_context.MountContext().proxy_mode
+    finally:
+        efs_context.MountContext().reset()
+
+
+def test_main_real_proxy_mode_stunnel_option_selects_stunnel(mocker):
+    """Real selection: the legacy 'stunnel' mount option must choose stunnel mode."""
+    proxy_mode = _run_main_for_real_proxy_mode(
+        mocker, {"stunnel": None}, _real_proxy_mode_config()
+    )
+    assert proxy_mode == PROXY_MODE_STUNNEL
+
+
+def test_main_real_proxy_mode_ocsp_config_selects_stunnel(mocker):
+    """Real selection: stunnel_check_cert_validity=true in config must choose stunnel."""
+    proxy_mode = _run_main_for_real_proxy_mode(
+        mocker, {}, _real_proxy_mode_config(stunnel_check_cert_validity=True)
+    )
+    assert proxy_mode == PROXY_MODE_STUNNEL
+
+
+def test_main_real_proxy_mode_macos_selects_stunnel(mocker):
+    """Real selection: macOS must choose stunnel mode."""
+    proxy_mode = _run_main_for_real_proxy_mode(
+        mocker, {}, _real_proxy_mode_config(), is_mac=True
+    )
+    assert proxy_mode == PROXY_MODE_STUNNEL
+
+
+def test_main_real_proxy_mode_default_stays_efs_proxy(mocker):
+    """Real selection: plain Linux mount with no stunnel/ocsp must NOT choose stunnel."""
+    proxy_mode = _run_main_for_real_proxy_mode(mocker, {}, _real_proxy_mode_config())
+    assert proxy_mode != PROXY_MODE_STUNNEL
+    assert proxy_mode is None

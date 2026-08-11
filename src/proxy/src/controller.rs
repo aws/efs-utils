@@ -30,6 +30,22 @@ pub const AWSFILE_CHANNEL_INIT_MINOR_VERSION: u32 = 2;
 
 pub const DEFAULT_SCALE_UP_BACKOFF: Duration = Duration::from_secs(300);
 
+// Reconnect backoff: bounds the failed-reconnect loop so an unreachable EFS can't spin
+// it at hundreds of iterations/sec. First failure waits the base only.
+pub const DEFAULT_RECONNECT_BACKOFF_BASE: Duration = Duration::from_secs(1);
+pub const DEFAULT_RECONNECT_BACKOFF_CAP: Duration = Duration::from_secs(60);
+
+/// `base * 2^failures`, capped. `failures` is the count before the current attempt.
+fn reconnect_backoff(failures: u32) -> Duration {
+    let base = DEFAULT_RECONNECT_BACKOFF_BASE;
+    let cap = DEFAULT_RECONNECT_BACKOFF_CAP;
+    // Saturating shift so a large count can't overflow.
+    match base.checked_mul(1u32.checked_shl(failures).unwrap_or(u32::MAX)) {
+        Some(d) if d < cap => d,
+        _ => cap,
+    }
+}
+
 pub const DEFAULT_SCALE_UP_CONFIG: ScaleUpConfig = ScaleUpConfig {
     max_multiplexed_connections: 5,
     scale_up_bytes_per_sec_threshold: 300 * 1024 * 1024,
@@ -101,6 +117,13 @@ pub struct Controller<S: ProxyStream> {
     pub status_reporter: StatusReporter,
     pub proxy_config: ProxyConfig,
     pub cw_publisher: Option<Arc<dyn CloudWatchClient>>,
+    // Reachability emission rate limiting: emit only on a value change or once per
+    // period, instead of once per reconnect attempt.
+    pub last_reachability_emitted: Option<bool>,
+    pub last_reachability_emit_at: Option<Instant>,
+    pub reachability_emit_period: Duration,
+    // Consecutive failed connects, driving reconnect_backoff.
+    pub consecutive_connect_failures: u32,
 }
 
 impl<S: ProxyStream> Controller<S> {
@@ -125,6 +148,10 @@ impl<S: ProxyStream> Controller<S> {
             status_reporter,
             proxy_config,
             cw_publisher,
+            last_reachability_emitted: None,
+            last_reachability_emit_at: None,
+            reachability_emit_period: METRICS_EMISSION_PERIOD,
+            consecutive_connect_failures: 0,
         }
     }
 
@@ -194,19 +221,30 @@ impl<S: ProxyStream> Controller<S> {
                         .establish_connection(init_deadline, self.proxy_id)
                         .await;
 
-                    self.emit_nfs_reachability(
-                        result.is_ok(),
-                        self.proxy_config.nested_config.fs_id.as_str(),
-                    )
-                    .await;
+                    // Cloned: emit_nfs_reachability borrows self mutably.
+                    let fs_id = self.proxy_config.nested_config.fs_id.clone();
+                    self.emit_nfs_reachability(result.is_ok(), &fs_id).await;
 
                     match result {
                         Ok((s, partition_id, scale_up_config)) => {
+                            self.consecutive_connect_failures = 0;
                             (partition_id, vec![s], scale_up_config)
                         }
                         Err(e) => {
-                            warn!("Failed to establish an initial connection to EFS. Error: {e}");
-                            continue;
+                            // Back off before retrying, else an unreachable EFS spins the loop.
+                            let backoff = reconnect_backoff(self.consecutive_connect_failures);
+                            self.consecutive_connect_failures =
+                                self.consecutive_connect_failures.saturating_add(1);
+                            warn!(
+                                "Failed to establish an initial connection to EFS. Error: {e}. \
+                                 Backing off {backoff:?} (consecutive failures: {})",
+                                self.consecutive_connect_failures
+                            );
+                            // Race the backoff against shutdown so a cancel isn't blocked by it.
+                            tokio::select! {
+                                _ = tokio::time::sleep(backoff) => continue,
+                                _ = token.cancelled() => return None,
+                            }
                         }
                     }
                 }
@@ -218,7 +256,12 @@ impl<S: ProxyStream> Controller<S> {
             }
 
             // Skip channel init if read bypass is not requested
-            let channel_init_config = if !self.proxy_config.nested_config.read_bypass_config.requested {
+            let channel_init_config = if !self
+                .proxy_config
+                .nested_config
+                .read_bypass_config
+                .requested
+            {
                 ChannelInitConfig::default()
             } else {
                 let configs = vec![ChannelConfigArgs::AWSFILE_READ_BYPASS_V2(
@@ -354,8 +397,9 @@ impl<S: ProxyStream> Controller<S> {
             let mut err = Ok(());
             tokio::select! {
                 _ = metrics_interval.tick() => {
-                    let fs_id = self.proxy_config.nested_config.fs_id.as_str();
-                    self.emit_nfs_reachability(true, fs_id).await;
+                    // Cloned: emit_nfs_reachability borrows self mutably.
+                    let fs_id = self.proxy_config.nested_config.fs_id.clone();
+                    self.emit_nfs_reachability(true, &fs_id).await;
                 }
                 _ = self.status_reporter.await_report_request() => {
                     let report = status_reporter::Report {
@@ -475,7 +519,21 @@ impl<S: ProxyStream> Controller<S> {
         Ok(EventResult::Ok)
     }
 
-    async fn emit_nfs_reachability(&self, is_reachable: bool, fs_id: &str) {
+    async fn emit_nfs_reachability(&mut self, is_reachable: bool, fs_id: &str) {
+        // Emit only on a value change (transition) or once per period (heartbeat), not on
+        // every reconnect attempt, to avoid exhausting the account's CloudWatch quota.
+        let now = Instant::now();
+        let changed = self.last_reachability_emitted != Some(is_reachable);
+        let heartbeat_due = self
+            .last_reachability_emit_at
+            .map(|last| now.duration_since(last) >= self.reachability_emit_period)
+            .unwrap_or(true);
+        if !changed && !heartbeat_due {
+            return;
+        }
+        self.last_reachability_emitted = Some(is_reachable);
+        self.last_reachability_emit_at = Some(now);
+
         if let Some(publisher) = &self.cw_publisher {
             let (level, message) = if is_reachable {
                 (
@@ -503,53 +561,13 @@ impl<S: ProxyStream> Controller<S> {
 mod tests {
     use super::*;
     use crate::{
-        aws::cw_publisher::LogLevel,
         config::channel_init_config::ChannelInitConfig,
         proxy_builder::ProxyBuilder,
         status_reporter::create_status_channel,
+        test_utils::{make_test_controller, MockCloudWatchClient, MockPartitionFinder},
     };
-    use std::sync::atomic::AtomicU64;
     use tokio::net::TcpStream;
     use tokio_util::sync::CancellationToken;
-
-    struct MockCloudWatchClient {
-        nfs_reachability_calls: AtomicU64,
-    }
-
-    impl MockCloudWatchClient {
-        fn new() -> Self {
-            Self {
-                nfs_reachability_calls: AtomicU64::new(0),
-            }
-        }
-
-        fn nfs_reachability_call_count(&self) -> u64 {
-            self.nfs_reachability_calls
-                .load(std::sync::atomic::Ordering::SeqCst)
-        }
-    }
-
-    impl CloudWatchClient for MockCloudWatchClient {
-        fn emit_log(&self, _level: LogLevel, _message: &str) {}
-        fn publish_s3_reachable(&self, _bucket: &str, _is_reachable: bool) {}
-        fn publish_s3_permitted(&self, _bucket: &str, _is_permitted: bool) {}
-        fn publish_nfs_reachability(&self, _is_reachable: bool, _fs_id: &str) {
-            self.nfs_reachability_calls
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        }
-    }
-
-    struct MockPartitionFinder;
-
-    #[async_trait::async_trait]
-    impl PartitionFinder<TcpStream> for MockPartitionFinder {
-        async fn create_connect_future(
-            &self,
-        ) -> futures::future::BoxFuture<'static, Result<TcpStream, crate::error::ConnectError>>
-        {
-            unimplemented!()
-        }
-    }
 
     async fn create_tcp_pair() -> (TcpStream, TcpStream) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -579,6 +597,11 @@ mod tests {
             status_reporter,
             proxy_config: proxy_config.clone(),
             cw_publisher: Some(mock_publisher.clone()),
+            last_reachability_emitted: None,
+            last_reachability_emit_at: None,
+            // Smaller than the 10s status-loop tick so every tick clears the dedupe window.
+            reachability_emit_period: Duration::from_secs(1),
+            consecutive_connect_failures: 0,
         };
 
         // Build a minimal proxy
@@ -599,12 +622,7 @@ mod tests {
         )
         .await;
 
-        let mut state = IncarnationState::new(
-            ProxyIdentifier::new(),
-            None,
-            events_tx,
-            1,
-        );
+        let mut state = IncarnationState::new(ProxyIdentifier::new(), None, events_tx, 1);
 
         let period_secs = 10;
         let publisher_clone = mock_publisher.clone();
@@ -657,5 +675,69 @@ mod tests {
 
         let proxy = handle.await.unwrap();
         let _ = proxy.shutdown().await;
+    }
+
+    // Repeated failures within one period collapse to a single metric + log emit.
+    #[tokio::test]
+    async fn test_emit_nfs_reachability_dedupes_repeated_failures() {
+        tokio::time::pause();
+        let publisher = Arc::new(MockCloudWatchClient::new());
+        let mut controller = make_test_controller(publisher.clone(), METRICS_EMISSION_PERIOD).await;
+
+        for _ in 0..500 {
+            controller.emit_nfs_reachability(false, "fs-test123").await;
+        }
+
+        assert_eq!(publisher.nfs_reachability_call_count(), 1);
+        assert_eq!(publisher.emit_log_call_count(), 1);
+    }
+
+    // A value change emits immediately, regardless of the dedupe timer.
+    #[tokio::test]
+    async fn test_emit_nfs_reachability_emits_on_transition() {
+        tokio::time::pause();
+        let publisher = Arc::new(MockCloudWatchClient::new());
+        let mut controller = make_test_controller(publisher.clone(), METRICS_EMISSION_PERIOD).await;
+
+        controller.emit_nfs_reachability(true, "fs-test123").await; // first emit
+        controller.emit_nfs_reachability(true, "fs-test123").await; // deduped
+        controller.emit_nfs_reachability(false, "fs-test123").await; // transition -> emit
+        controller.emit_nfs_reachability(false, "fs-test123").await; // deduped
+        controller.emit_nfs_reachability(true, "fs-test123").await; // transition -> emit
+
+        assert_eq!(publisher.nfs_reachability_call_count(), 3);
+        assert_eq!(publisher.emit_log_call_count(), 3);
+    }
+
+    // For an unchanged value, one heartbeat emit is allowed per period.
+    #[tokio::test]
+    async fn test_emit_nfs_reachability_heartbeat_after_period() {
+        tokio::time::pause();
+        let publisher = Arc::new(MockCloudWatchClient::new());
+        let mut controller = make_test_controller(publisher.clone(), METRICS_EMISSION_PERIOD).await;
+
+        controller.emit_nfs_reachability(false, "fs-test123").await; // emit 1 (transition)
+        controller.emit_nfs_reachability(false, "fs-test123").await; // deduped
+        assert_eq!(publisher.nfs_reachability_call_count(), 1);
+
+        tokio::time::advance(METRICS_EMISSION_PERIOD).await;
+        controller.emit_nfs_reachability(false, "fs-test123").await; // emit 2 (heartbeat)
+        assert_eq!(publisher.nfs_reachability_call_count(), 2);
+        assert_eq!(publisher.emit_log_call_count(), 2);
+    }
+
+    // Backoff grows exponentially with consecutive failures and is capped; the first failure
+    // waits only the base so transient reconnects recover quickly.
+    #[test]
+    fn test_reconnect_backoff_grows_and_caps() {
+        assert_eq!(reconnect_backoff(0), DEFAULT_RECONNECT_BACKOFF_BASE); // 1s
+        assert_eq!(reconnect_backoff(1), Duration::from_secs(2));
+        assert_eq!(reconnect_backoff(2), Duration::from_secs(4));
+        assert_eq!(reconnect_backoff(4), Duration::from_secs(16));
+        assert_eq!(reconnect_backoff(5), Duration::from_secs(32));
+        // 2^6 * 1s = 64s > 60s cap
+        assert_eq!(reconnect_backoff(6), DEFAULT_RECONNECT_BACKOFF_CAP);
+        // Very large counts must saturate to the cap, not overflow/panic.
+        assert_eq!(reconnect_backoff(1000), DEFAULT_RECONNECT_BACKOFF_CAP);
     }
 }

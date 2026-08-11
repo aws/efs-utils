@@ -792,12 +792,6 @@ def test_write_stunnel_config_foreground_quiet_supported_debug_enabled(mocker, t
     )
 
 
-def test_write_stunnel_config_foreground_quiet_supported_debug_enabled(mocker, tmpdir):
-    _test_stunnel_config_foreground_quiet_helper(
-        mocker, tmpdir, foreground_quiet_supported=True, stunnel_debug_enabled=True
-    )
-
-
 def _test_stunnel_config_foreground_quiet_helper(
     mocker, tmpdir, foreground_quiet_supported, stunnel_debug_enabled
 ):
