@@ -221,7 +221,7 @@ fi
 %clean
 
 %changelog
-* Sat Aug 23 2026 Yue Wang <wangnyue@amazon.com> - 3.3.1
+* Sun Aug 23 2026 Yue Wang <wangnyue@amazon.com> - 3.3.1
 - Schedule TLS cert refresh from credential expiration
 - Don't denylist file handles for transient S3 errors on readbypass path
 
