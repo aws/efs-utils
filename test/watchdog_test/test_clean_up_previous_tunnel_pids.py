@@ -32,9 +32,12 @@ PROCESS_NAME_OUTPUT_LWP = "/foo/bar/baz"
 PROCESS_NAME_OUTPUT_ERR = ""
 
 
-def setup_mocks(mocker, state_files, process_name_output):
+def setup_mocks(mocker, state_files, process_name_output, process_state=b"S"):
     mocker.patch("watchdog.get_state_files", return_value=state_files)
-    mocker.patch("watchdog.check_process_name", return_value=process_name_output)
+    mocker.patch(
+        "watchdog.check_process_name_and_state",
+        return_value=(process_name_output, process_state),
+    )
 
     return mocker.patch("watchdog.rewrite_state_file")
 
@@ -69,6 +72,23 @@ def test_clean_up_active_stunnel_from_previous_watchdog(mocker, tmpdir):
     watchdog.clean_up_previous_tunnel_pids(state_file_dir)
 
     utils.assert_not_called(rewrite_state_file_mock)
+
+
+def test_clean_up_zombie_stunnel_from_previous_watchdog(mocker, tmpdir):
+    """A zombie keeps a matching name, so without the state its pid would stay in
+    the state file forever."""
+    state_file_dir, state_file = create_state_file(tmpdir)
+
+    rewrite_state_file_mock = setup_mocks(
+        mocker,
+        state_files={"mnt": state_file},
+        process_name_output=PROCESS_NAME_OUTPUT,
+        process_state=b"Z",
+    )
+
+    watchdog.clean_up_previous_tunnel_pids(state_file_dir)
+
+    utils.assert_called_once(rewrite_state_file_mock)
 
 
 def test_clean_up_active_LWP_from_driver(mocker, tmpdir):

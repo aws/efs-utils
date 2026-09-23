@@ -198,13 +198,13 @@ impl CloudWatchPublisher {
                 };
 
                 let metrics_client = Self::init_metrics_client(
-                    &aws_sdk_config,
+                    aws_sdk_config,
                     &proxy_config.nested_config.telemetry_config,
                 );
 
                 let (logs_client, logs_ready, log_group_name, log_stream_name) =
                     Self::init_logs_client(
-                        &aws_sdk_config,
+                        aws_sdk_config,
                         &proxy_config.nested_config.telemetry_config,
                         &proxy_config.nested_config.fs_id,
                         instance_id.as_deref(),
@@ -240,7 +240,7 @@ impl CloudWatchPublisher {
         let aws_config_loader = get_aws_config_loader(proxy_config).await;
         let aws_sdk_config = aws_config_loader.load().await;
 
-        return Self::new_from_aws_config(&aws_sdk_config, bucket, &proxy_config, namespace).await;
+        return Self::new_from_aws_config(&aws_sdk_config, bucket, proxy_config, namespace).await;
     }
 
     fn init_metrics_client(

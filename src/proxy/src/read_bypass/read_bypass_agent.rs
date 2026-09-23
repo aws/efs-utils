@@ -353,7 +353,7 @@ impl ReadBypassAgent {
             error!("Unsupported compound type!");
             return false;
         }
-        return true;
+        true
     }
 
     /// Asynchronously process message received from Dispatcher and respond to NFS Client
@@ -372,7 +372,7 @@ impl ReadBypassAgent {
         if let RefNfsCompound::Compound4res(compound_info) = &mut envelope.body {
             match Self::process_compound(
                 read_bypass_request_context.clone(),
-                &compound_info,
+                compound_info,
                 s3_reader.clone(),
             )
             .await
@@ -661,13 +661,13 @@ impl ReadBypassAgent {
         }
         let rpc_params = original_message.envelopes[0].header.params.clone();
 
-        return Self::send_rpc_to_client(
+        Self::send_rpc_to_client(
             read_bypass_request_context.clone(),
             rpc_params,
             nfs_client_sender,
             response_compound,
         )
-        .await;
+        .await
     }
 
     /// Random delay to wait before returning NFS4ERR_DELAY for a transient failure.
@@ -699,13 +699,13 @@ impl ReadBypassAgent {
         };
         let rpc_params = message.envelopes[0].header.params.clone();
 
-        return Self::send_rpc_to_client(
+        Self::send_rpc_to_client(
             read_bypass_request_context.clone(),
             rpc_params,
             nfs_client_sender,
             out_compound,
         )
-        .await;
+        .await
     }
 
     async fn send_rpc_to_client(
@@ -730,7 +730,7 @@ impl ReadBypassAgent {
         )
         .map_err(|_| ReadBypassAgentError::NfsResponseEncodingError)?;
         let rpc_batch: RpcBatch = RpcBatch {
-            rpcs: vec![BytesMut::from(encoded_rpc)],
+            rpcs: vec![encoded_rpc],
         };
         ctx_trace!(
             read_bypass_request_context,
@@ -792,8 +792,8 @@ mod tests {
     use xdr_codec::Pack;
 
     /////////////////////////////////////////////////////////////////////////////////////
-    /// Auxiliary test functions
-    ///
+    // Auxiliary test functions
+    /////////////////////////////////////////////////////////////////////////////////////
 
     fn create_compound_res_without_readbypass() -> COMPOUND4res {
         COMPOUND4res {
@@ -916,8 +916,8 @@ mod tests {
     }
 
     /////////////////////////////////////////////////////////////////////////////////////
-    /// Mocks
-    ///
+    // Mocks
+    /////////////////////////////////////////////////////////////////////////////////////
 
     impl MockS3DataReader {
         fn new(should_succeed: bool, data: Bytes) -> Self {
@@ -1208,7 +1208,7 @@ mod tests {
         });
         let result = ReadBypassAgent::process_compound(
             read_bypass_request_context,
-            &mut compound_info,
+            &compound_info,
             s3_reader,
         )
         .await;

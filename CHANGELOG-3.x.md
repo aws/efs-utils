@@ -1,3 +1,8 @@
+# v3.3.2
+- Improve watchdog handling of zombie proxy threads
+- Fix read_ahead_kb being overwritten on certain distros
+- Reject empty cafiles on mount
+
 # v3.3.1
 - Schedule TLS cert refresh from credential expiration
 - Don't denylist file handles for transient S3 errors on readbypass path

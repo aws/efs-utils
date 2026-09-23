@@ -449,10 +449,8 @@ mod tests {
     #[test]
     fn test_parse_from_rpc_payload() {
         let payload = create_compound_args_raw_bytes();
-        let result = NfsMessageParser::parse_from_rpc_payload(
-            NfsCompoundType::Compound4args,
-            BytesMut::from(payload),
-        );
+        let result =
+            NfsMessageParser::parse_from_rpc_payload(NfsCompoundType::Compound4args, payload);
         assert!(result.is_ok());
         let nfs_info = result.unwrap();
         match nfs_info {

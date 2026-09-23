@@ -8,6 +8,7 @@
 import os
 import subprocess
 import time
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -207,13 +208,7 @@ def test_optimize_readahead_should_apply_failed_with_exception(mocker, tmpdir):
     )
 
 
-def test_optimize_readahead_ubuntu_24(mocker, tmpdir):
-    mock_config = _get_new_mock_config(enable_optimize_readahead=True)
-    _mock_should_revise_readahead(mocker, True)
-    mocker.patch(
-        "efs_utils_common.platform_utils.get_system_release_version",
-        return_value="Ubuntu 24.04 LTS",
-    )
+def _setup_readahead_tmpdir(mocker, tmpdir):
     mocker.patch(
         "efs_utils_common.mount_utils.NFS_READAHEAD_CONFIG_PATH_FORMAT",
         str(tmpdir) + "/%s:%s/read_ahead_kb",
@@ -222,26 +217,65 @@ def test_optimize_readahead_ubuntu_24(mocker, tmpdir):
         "os.stat",
         return_value=generate_os_stat_result(st_dev=DEFAULT_MOUNT_DEVICE_NUMBER),
     )
-
     expected_major, expected_minor = platform_utils.decode_device_number(
         DEFAULT_MOUNT_DEVICE_NUMBER
     )
     os.mkdir(str(tmpdir) + "/%s:%s" % (expected_major, expected_minor))
+    return str(tmpdir) + "/%s:%s/read_ahead_kb" % (expected_major, expected_minor)
 
-    mount_utils.optimize_readahead_window(MOUNT_POINT, DEFAULT_OPTIONS, mock_config)
 
-    expected_readahead_kb_value = int(
+def _expected_readahead_kb():
+    return int(
         constants.DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER
         * int(DEFAULT_OPTIONS["rsize"])
         / 1024
     )
 
-    # Check if the value was set correctly after the delay
-    time.sleep(3)
-    with open(
-        str(tmpdir) + "/%s:%s/read_ahead_kb" % (expected_major, expected_minor)
-    ) as file:
-        assert expected_readahead_kb_value == int(file.read().strip())
+
+def _wait_for_readahead_value(path, expected, timeout=10, interval=0.1):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with open(path) as f:
+            if int(f.read().strip()) == expected:
+                return
+        time.sleep(interval)
+    raise AssertionError(
+        "read_ahead_kb was not restored to %s within %ss" % (expected, timeout)
+    )
+
+
+def test_delayed_reapply_is_scheduled_for_every_platform(mocker, tmpdir):
+    """No release allowlist: the delayed re-apply is scheduled regardless of distro."""
+    mock_config = _get_new_mock_config(enable_optimize_readahead=True)
+    _mock_should_revise_readahead(mocker, True)
+    _setup_readahead_tmpdir(mocker, tmpdir)
+    mock_process = MagicMock()
+    mock_process.communicate.return_value = (b"", b"")
+    mock_process.returncode = 0
+    popen_mock = mocker.patch("subprocess.Popen", return_value=mock_process)
+
+    mount_utils.optimize_readahead_window(MOUNT_POINT, DEFAULT_OPTIONS, mock_config)
+
+    commands = [c[0][0] for c in popen_mock.call_args_list]
+    assert len(commands) == 2, commands
+    assert commands[0].startswith("echo %s > " % _expected_readahead_kb())
+    assert commands[1].startswith("sleep 2 && echo %s > " % _expected_readahead_kb())
+
+
+def test_delayed_reapply_restores_a_clobbered_value(mocker, tmpdir):
+    mock_config = _get_new_mock_config(enable_optimize_readahead=True)
+    _mock_should_revise_readahead(mocker, True)
+    read_ahead_file = _setup_readahead_tmpdir(mocker, tmpdir)
+
+    mount_utils.optimize_readahead_window(MOUNT_POINT, DEFAULT_OPTIONS, mock_config)
+    with open(read_ahead_file) as f:
+        assert _expected_readahead_kb() == int(f.read().strip())
+
+    # simulate the platform resetting the value right after mount
+    with open(read_ahead_file, "w") as f:
+        f.write("128")
+
+    _wait_for_readahead_value(read_ahead_file, _expected_readahead_kb())
 
 
 def generate_os_stat_result(

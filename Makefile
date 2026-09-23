@@ -48,6 +48,14 @@ tarball: clean
 		cp -p src/Cargo.lock $(PACKAGE_NAME)/src; \
 	fi
 
+	# Preserve vendored dependencies for air-gapped (ADC) builds.
+	if [ -d src/vendor ]; then \
+		cp -rp src/vendor $(PACKAGE_NAME)/src/; \
+	fi
+	if [ -d src/.cargo ]; then \
+		cp -rp src/.cargo $(PACKAGE_NAME)/src/; \
+	fi
+
 	mkdir -p ${PACKAGE_NAME}/man
 	cp -rp man/mount.efs.8 ${PACKAGE_NAME}/man
 	cp -rp man/mount.s3files.8 ${PACKAGE_NAME}/man

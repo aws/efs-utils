@@ -50,12 +50,8 @@ impl PerformanceStats {
     // Return total throughput in bytes per second
     pub fn get_total_throughput_per_second(&self) -> u64 {
         let time_delta_seconds = self.time_delta.as_secs();
-        if time_delta_seconds == 0 {
-            0
-        } else {
-            let total_bytes = self.read_bytes + self.write_bytes;
-            total_bytes / time_delta_seconds
-        }
+        let total_bytes = self.read_bytes + self.write_bytes;
+        total_bytes.checked_div(time_delta_seconds).unwrap_or(0)
     }
 }
 

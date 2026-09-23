@@ -71,8 +71,8 @@ impl<S: ProxyStream> DomainBuilder<S> for ReadBypassDomainBuilder<S> {
             let readahead_cache_max_window_size =
                 read_bypass_config.readahead_max_window_size_bytes;
             let readahead_cache = Arc::new(FileReadAheadCache::new(
-                readahead_cache_max_window_size as u64,
-                readahead_cache_initial_window_size as u64,
+                readahead_cache_max_window_size,
+                readahead_cache_initial_window_size,
                 Arc::new(s3_reader_impl),
                 read_bypass_config,
             ));

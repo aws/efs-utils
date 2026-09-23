@@ -22,7 +22,6 @@ from efs_utils_common.config_utils import (
     get_int_value_from_config_file,
 )
 from efs_utils_common.constants import (
-    AL2027_RELEASE,
     CONFIG_SECTION,
     DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER,
     DEFAULT_NFS_MOUNT_COMMAND_RETRY_COUNT,
@@ -31,9 +30,6 @@ from efs_utils_common.constants import (
     NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION,
     OPTIMIZE_READAHEAD_ITEM,
     RETRYABLE_ERRORS,
-    RHEL_9_RELEASE,
-    RHEL_10_RELEASE,
-    UBUNTU_24_RELEASE,
 )
 from efs_utils_common.context import MountContext
 from efs_utils_common.error_reporting import fatal_error
@@ -43,7 +39,6 @@ from efs_utils_common.platform_utils import (
     check_if_platform_is_mac,
     decode_device_number,
     get_linux_kernel_version,
-    get_system_release_version,
     is_ipv6_address,
 )
 from efs_utils_common.proxy import bootstrap_proxy, poll_tunnel_process
@@ -321,7 +316,6 @@ def optimize_readahead_window(mountpoint, options, config):
         DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER * int(options["rsize"]) / 1024
     )
 
-    system_release_version = get_system_release_version()
     try:
         major, minor = decode_device_number(os.stat(mountpoint).st_dev)
         # modify read_ahead_kb in /sys/class/bdi/<bdi>/read_ahead_kb
@@ -334,24 +328,6 @@ def optimize_readahead_window(mountpoint, options, config):
             read_ahead_kb_config_file,
             str(fixed_readahead_kb),
         )
-        if (
-            UBUNTU_24_RELEASE in system_release_version
-            or RHEL_10_RELEASE in system_release_version
-            or RHEL_9_RELEASE in system_release_version
-            or AL2027_RELEASE in system_release_version
-        ):
-            # We use a delayed approach to setting the readahead value.
-            # This is necessary because on Ubuntu 24, there's a race condition with udev
-            # rules that can reset our readahead value immediately after we set it.
-            p = subprocess.Popen(
-                "sleep 2 && echo %s > %s"
-                % (fixed_readahead_kb, read_ahead_kb_config_file),
-                shell=True,
-                stderr=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-            )
-            logging.debug("Started background thread for delayed readahead setting")
-            return
 
         p = subprocess.Popen(
             "echo %s > %s" % (fixed_readahead_kb, read_ahead_kb_config_file),
@@ -365,6 +341,19 @@ def optimize_readahead_window(mountpoint, options, config):
                 'Failed to modify read_ahead_kb: %s with returncode: %d, error: "%s".'
                 % (fixed_readahead_kb, p.returncode, error.strip())
             )
+
+        # Some platforms reset the value shortly after mount, and the watchdog may
+        # not be running yet or may not have picked up the mount. Re-apply once
+        # after a short delay, detached so the mount does not wait on it.
+        subprocess.Popen(
+            "sleep 2 && echo %s > %s" % (fixed_readahead_kb, read_ahead_kb_config_file),
+            shell=True,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+        )
+        logging.debug(
+            "Started delayed readahead re-apply for %s", read_ahead_kb_config_file
+        )
     except Exception as e:
         logging.warning(
             'Failed to modify read_ahead_kb: %s with error: "%s".'

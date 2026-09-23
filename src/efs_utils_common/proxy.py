@@ -192,6 +192,12 @@ def serialize_stunnel_config(config, header=None):
 def add_tunnel_ca_options(efs_config, config, options, region):
     if "cafile" in options:
         stunnel_cafile = options["cafile"]
+        if not stunnel_cafile:
+            fatal_error(
+                "The cafile mount option requires a path to a CA certificate file",
+                "cafile= was passed with an empty value. Specify a valid path, "
+                "e.g. -o tls,cafile=/path/to/ca.pem, or omit cafile to use the default EFS CA.",
+            )
     else:
         try:
             config_section = get_config_section(config, region)

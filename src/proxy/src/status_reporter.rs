@@ -3,6 +3,7 @@ use crate::controller::ConnectionSearchState;
 use crate::{proxy_identifier::ProxyIdentifier, proxy_task::PerformanceStats};
 use anyhow::{Error, Result};
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::watch;
 use tokio::time::Instant;
 
 #[allow(dead_code)]
@@ -22,6 +23,9 @@ type Response = Report;
 pub struct StatusReporter {
     pub sender: Sender<Response>,
     pub receiver: Receiver<Request>,
+    // Latest incarnation restart count, published by the controller on every
+    // restart. Lets a waiter synchronize on a restart without polling.
+    restart_tx: watch::Sender<u64>,
 }
 
 impl StatusReporter {
@@ -40,11 +44,22 @@ impl StatusReporter {
             Err(e) => panic!("StatusReporter could not send report {}", e),
         }
     }
+
+    /// Publish the current incarnation restart count. The watch retains the
+    /// latest value, so a waiter observes the restart even if it published
+    /// before the waiter started listening.
+    pub fn publish_restart(&self, restart_count: u64) {
+        // send() fails only once every receiver has been dropped (shutdown is
+        // underway); nothing is waiting on the restart signal then, so
+        // discarding the result is correct.
+        let _ = self.restart_tx.send(restart_count);
+    }
 }
 
 pub struct StatusRequester {
     _sender: Sender<Request>,
     _receiver: Receiver<Response>,
+    restart_rx: watch::Receiver<u64>,
 }
 
 impl StatusRequester {
@@ -55,20 +70,36 @@ impl StatusRequester {
             .await
             .ok_or_else(|| Error::msg("Response channel closed"))
     }
+
+    /// Await until the controller's restart count rises above `previous` — i.e.
+    /// the incarnation has been torn down and a fresh one is coming up.
+    /// Event-driven (the watch retains the latest count), so there is no poll
+    /// loop and no lost-wakeup race. Returns the observed restart count.
+    pub async fn wait_for_restart_above(&mut self, previous: u64) -> Result<u64> {
+        let count = *self
+            .restart_rx
+            .wait_for(|&c| c > previous)
+            .await
+            .map_err(|_| Error::msg("Restart watch channel closed"))?;
+        Ok(count)
+    }
 }
 
 pub fn create_status_channel() -> (StatusRequester, StatusReporter) {
     let (call_sender, call_receiver) = mpsc::channel::<Request>(1);
     let (reply_sender, reply_receiver) = mpsc::channel::<Response>(1);
+    let (restart_tx, restart_rx) = watch::channel(0u64);
 
     let status_requester = StatusRequester {
         _sender: call_sender,
         _receiver: reply_receiver,
+        restart_rx,
     };
 
     let status_reporter = StatusReporter {
         sender: reply_sender,
         receiver: call_receiver,
+        restart_tx,
     };
 
     (status_requester, status_reporter)

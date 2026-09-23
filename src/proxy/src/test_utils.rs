@@ -147,7 +147,7 @@ pub fn parse_bind_client_to_partition_request(
 
     let mut payload = Cursor::new(call_body.payload());
     let raw_proxy_id = xdr_codec::unpack::<_, awsfile_prot::ProxyIdentifier>(&mut payload)?;
-    Ok(raw_proxy_id.try_into()?)
+    raw_proxy_id.try_into()
 }
 
 pub fn create_bind_client_to_partition_response(

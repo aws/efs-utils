@@ -7,7 +7,7 @@ use crate::rpc::rpc_envelope::Envelope;
 use crate::rpc::rpc_envelope::EnvelopeHeader;
 use crate::rpc::rpc_envelope::RpcMessageType;
 use crate::{error::RpcError, rpc::rpc_envelope::RpcMessageParams};
-/// RPC encoder for creating RPC call and reply messages
+// RPC encoder for creating RPC call and reply messages
 
 // RPC header program number field offset (in bytes)
 // RFC5531 RPC Call header: [record_marker(4)] - [xid(4)] [msg_type(4)] [rpcvers(4)] [program(4)] [version(4)]
@@ -115,7 +115,7 @@ impl RpcEncoder {
                 onc_rpc::RejectedReply::RpcVersionMismatch { low, high }
             }
             onc_rpc::RejectedReply::AuthError(auth_error) => {
-                onc_rpc::RejectedReply::AuthError(auth_error.into())
+                onc_rpc::RejectedReply::AuthError(auth_error)
             }
         };
 
@@ -205,7 +205,7 @@ mod tests {
         let xid = 12345;
         let payload = BytesMut::from(&[5, 6, 7, 8][..]);
         let params = RpcMessageParams::ReplyParams(RpcReplyParams {
-            xid: xid,
+            xid,
             auth_verifier: onc_rpc::auth::AuthFlavor::AuthNone(None),
         });
 

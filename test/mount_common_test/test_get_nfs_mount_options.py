@@ -149,6 +149,15 @@ def test_tlsport():
     assert "tls" not in nfs_opts
 
 
+def test_nfs_option_is_dropped():
+    options = dict(DEFAULT_OPTIONS)
+    options["nfs"] = None
+    nfs_opts = mount_options.get_nfs_mount_options(options, _get_config())
+
+    assert "nfs" not in nfs_opts.split(",")
+    assert "nfsvers=4.1" in nfs_opts
+
+
 def test_get_default_nfs_mount_options_macos(mocker):
     mocker.patch(
         "efs_utils_common.mount_options.check_if_platform_is_mac", return_value=True

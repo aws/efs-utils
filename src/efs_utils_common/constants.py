@@ -11,7 +11,7 @@ import os
 import pwd
 import re
 
-VERSION = "3.3.1"
+VERSION = "3.3.2"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
 AMAZON_LINUX_2_PRETTY_NAME = "Amazon Linux 2"
@@ -111,6 +111,8 @@ DEFAULT_STUNNEL_CAFILE = "/etc/amazon/efs/efs-utils.crt"
 
 LEGACY_STUNNEL_MOUNT_OPTION = "stunnel"
 
+NFS_MOUNT_OPTION = "nfs"
+
 NOT_BEFORE_MINS = 15
 NOT_AFTER_HOURS = 3
 
@@ -138,6 +140,7 @@ NON_NFS_OPTIONS = [
     "jwtpath",
     "crossaccount",
     LEGACY_STUNNEL_MOUNT_OPTION,
+    NFS_MOUNT_OPTION,
     "nodirects3read",
     "nos3readcache",
 ]
@@ -188,11 +191,6 @@ ECS_FARGATE_CLIENT_IDENTIFIER = "ecs.fargate"
 
 AWS_CONTAINER_CREDS_FULL_URI_ENV = "AWS_CONTAINER_CREDENTIALS_FULL_URI"
 AWS_CONTAINER_AUTH_TOKEN_FILE_ENV = "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"
-
-UBUNTU_24_RELEASE = "Ubuntu 24"
-RHEL_10_RELEASE = "Red Hat Enterprise Linux release 10"
-RHEL_9_RELEASE = "Red Hat Enterprise Linux release 9"
-AL2027_RELEASE = "Amazon Linux release 2027"
 
 MOUNT_TYPE_EFS = "EFS"
 MOUNT_TYPE_S3FILES = "S3Files"

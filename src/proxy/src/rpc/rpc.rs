@@ -626,7 +626,7 @@ pub mod test {
     #[test]
     fn test_check_rpc_message_error_cases() {
         // Test incomplete header
-        let buffer = vec![0x80, 0x00, 0x00];
+        let buffer = [0x80, 0x00, 0x00];
         let cursor = std::io::Cursor::new(&buffer[..]);
         assert!(matches!(
             super::check_rpc_message(cursor),

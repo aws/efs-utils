@@ -76,7 +76,7 @@ pub trait PartitionFinder<S: ProxyStream> {
         self.spawn_establish_connection_task(deadline, proxy_id)
             .await
             .await
-            .map_err(|join_error| ConnectError::from(join_error))?
+            .map_err(ConnectError::from)?
     }
 
     async fn spawn_establish_connection_task(
@@ -384,6 +384,7 @@ mod tests {
     use tokio::sync::Mutex;
     use tokio_util::sync::CancellationToken;
     use uuid::Uuid;
+    use zeroize::Zeroizing;
 
     const PROXY_ID: ProxyIdentifier = ProxyIdentifier {
         uuid: Uuid::from_u128(1_u128),
@@ -547,7 +548,7 @@ mod tests {
         let config_contents = std::fs::read_to_string(config_file_path).unwrap();
         let proxy_config = ProxyConfig::from_str(&config_contents).unwrap();
         let mut tls_config = TlsConfig::new_from_config(&proxy_config).await.unwrap();
-        tls_config.client_cert = vec![1, 2];
+        tls_config.client_cert = Zeroizing::new(vec![1, 2]);
         let old_cert = tls_config.client_cert.clone();
         let tls_config_ptr = Arc::new(Mutex::new(tls_config));
         let cloned_tls_config_ptr = Arc::clone(&tls_config_ptr);

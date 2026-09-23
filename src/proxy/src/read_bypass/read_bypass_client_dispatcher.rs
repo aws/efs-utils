@@ -63,7 +63,7 @@ impl ReadBypassClientDispatcher {
                 .replace_all_target_ops_with_new_ops::<READ4args, AWSFILE_READ_BYPASS4args>()
                 .is_err()
             {
-                return Err(SendError((RpcBatch { rpcs: Vec::new() })));
+                return Err(SendError(RpcBatch { rpcs: Vec::new() }));
             }
 
             if let Err(e) = RpcEncoder::update_rpc_program_number_in_place(
@@ -72,7 +72,7 @@ impl ReadBypassClientDispatcher {
                 AWSFILE_PROGRAM_VERSION,
             ) {
                 error!("Failed to update program number: {:?}", e);
-                return Err(SendError((RpcBatch { rpcs: Vec::new() })));
+                return Err(SendError(RpcBatch { rpcs: Vec::new() }));
             }
         }
 
@@ -182,7 +182,7 @@ mod tests {
             minorversion: 0,
             argarray: vec![],
         };
-        return create_nfs_rpc_envelope_batch_from_compound(RpcMessageType::Call, compound_res);
+        create_nfs_rpc_envelope_batch_from_compound(RpcMessageType::Call, compound_res)
     }
 
     #[tokio::test]
@@ -248,7 +248,7 @@ mod tests {
             crate::nfs::nfs_compound::RefNfsCompound::Compound4args(ref info) => info,
             _ => panic!("Received compound is not a Compound4args"),
         };
-        let expected_ops = vec![
+        let expected_ops = [
             nfs_opnum4::OP_SEQUENCE,
             nfs_opnum4::OP_PUTFH,
             nfs_opnum4::OP_AWSFILE_READ_BYPASS,
@@ -311,7 +311,7 @@ mod tests {
             crate::nfs::nfs_compound::RefNfsCompound::Compound4args(ref info) => info,
             _ => panic!("Received compound is not a Compound4args"),
         };
-        let expected_ops = vec![
+        let expected_ops = [
             nfs_opnum4::OP_SEQUENCE,
             nfs_opnum4::OP_GETATTR,
             nfs_opnum4::OP_READ,
@@ -376,7 +376,7 @@ mod tests {
             crate::nfs::nfs_compound::RefNfsCompound::Compound4args(ref info) => info,
             _ => panic!("Received compound is not a Compound4args"),
         };
-        let expected_ops = vec![
+        let expected_ops = [
             nfs_opnum4::OP_SEQUENCE,
             nfs_opnum4::OP_PUTFH,
             nfs_opnum4::OP_READ,
@@ -441,7 +441,7 @@ mod tests {
         };
 
         // All READ operations should remain as READ (not converted to read-bypass)
-        let expected_ops = vec![
+        let expected_ops = [
             nfs_opnum4::OP_SEQUENCE,
             nfs_opnum4::OP_PUTFH,
             nfs_opnum4::OP_READ,
@@ -507,7 +507,7 @@ mod tests {
             _ => panic!("Received compound is not a Compound4args"),
         };
 
-        let expected_ops = vec![
+        let expected_ops = [
             nfs_opnum4::OP_SEQUENCE,
             nfs_opnum4::OP_PUTFH,
             nfs_opnum4::OP_AWSFILE_READ_BYPASS,
@@ -566,7 +566,7 @@ mod tests {
             _ => panic!("Received compound is not a Compound4args"),
         };
 
-        let expected_ops = vec![
+        let expected_ops = [
             nfs_opnum4::OP_SEQUENCE,
             nfs_opnum4::OP_PUTFH,
             nfs_opnum4::OP_AWSFILE_READ_BYPASS, // Should be converted to read-bypass

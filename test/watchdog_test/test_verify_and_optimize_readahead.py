@@ -3,11 +3,12 @@ import subprocess
 from collections import namedtuple
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import watchdog
 
 # Constants
 MOUNT_POINT = "/mnt/efs"
-UBUNTU_24_RELEASE = "Ubuntu 24"
 DEFAULT_RSIZE = 1048576
 DEFAULT_MOUNT_DEVICE_NUMBER = 1048761
 DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER = 15
@@ -19,6 +20,12 @@ OPTIMIZE_READAHEAD_ITEM = "optimize_readahead"
 Mount = namedtuple(
     "Mount", ["server", "mountpoint", "type", "options", "freq", "passno"]
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_supported_linux(mocker):
+    mocker.patch("watchdog.platform.system", return_value="Linux")
+    mocker.patch("watchdog.platform.release", return_value="5.4.0")
 
 
 def create_mock_popen(mock_stat_process, mock_cat_process, mock_echo_process):
@@ -34,13 +41,13 @@ def create_mock_popen(mock_stat_process, mock_cat_process, mock_echo_process):
     return mock_popen
 
 
-def test_verify_and_update_readahead_ubuntu_24(mocker, tmpdir):
+def test_verify_and_update_readahead_corrects_mismatch(mocker, tmpdir):
     # Mock necessary functions and objects
     mock_config = MagicMock()
     mock_mount_info = Mount("server", MOUNT_POINT, "nfs4", "rsize=1048576", "0", "0")
 
     mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
-    mocker.patch("watchdog.get_system_release_version", return_value=UBUNTU_24_RELEASE)
+    mock_release = mocker.patch("watchdog.get_system_release_version")
     mocker.patch(
         "watchdog.NFS_READAHEAD_CONFIG_PATH_FORMAT",
         str(tmpdir) + "/%s:%s/read_ahead_kb",
@@ -87,36 +94,9 @@ def test_verify_and_update_readahead_ubuntu_24(mocker, tmpdir):
 
     # Assert that the value was updated
     assert read_ahead_file.read().strip() == "15360"  # Expected value for 1048576 rsize
-
-
-def test_verify_and_update_readahead_non_ubuntu_24(mocker, tmpdir):
-    # Mock necessary functions and objects
-    mock_config = MagicMock()
-    mock_mount_info = Mount("server", MOUNT_POINT, "nfs4", "rsize=1048576", "0", "0")
-
-    mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
-    mocker.patch("watchdog.get_system_release_version", return_value="Ubuntu 22.04")
-    mocker.patch(
-        "watchdog.NFS_READAHEAD_CONFIG_PATH_FORMAT",
-        str(tmpdir) + "/%s:%s/read_ahead_kb",
-    )
-
-    expected_major, expected_minor = watchdog.decode_device_number(
-        DEFAULT_MOUNT_DEVICE_NUMBER
-    )
-    os.mkdir(str(tmpdir) + "/%s:%s" % (expected_major, expected_minor))
-
-    # Set up mock file for read_ahead_kb
-    read_ahead_file = tmpdir.join(
-        "/%s:%s/read_ahead_kb" % (expected_major, expected_minor)
-    )
-    read_ahead_file.write("128")  # Initial incorrect value
-
-    # Call the function
-    watchdog.verify_and_update_readahead(MOUNT_POINT, mock_config, mock_mount_info)
-
-    # Assert that the value was not updated
-    assert read_ahead_file.read().strip() == "128"
+    # the release string must not be consulted at all: verify_and_update_readahead
+    # swallows exceptions, so a raising mock would be silently caught
+    mock_release.assert_not_called()
 
 
 def test_verify_and_update_readahead_optimization_disabled(mocker, tmpdir):
@@ -125,7 +105,6 @@ def test_verify_and_update_readahead_optimization_disabled(mocker, tmpdir):
     mock_mount_info = Mount("server", MOUNT_POINT, "nfs4", "rsize=1048576", "0", "0")
 
     mocker.patch("watchdog.get_boolean_config_item_value", return_value=False)
-    mocker.patch("watchdog.get_system_release_version", return_value=UBUNTU_24_RELEASE)
     mocker.patch(
         "watchdog.NFS_READAHEAD_CONFIG_PATH_FORMAT",
         str(tmpdir) + "/%s:%s/read_ahead_kb",
@@ -155,7 +134,6 @@ def test_verify_and_update_readahead_exception_handling(mocker, tmpdir, caplog):
     mock_mount_info = Mount("server", MOUNT_POINT, "nfs4", "rsize=1048576", "0", "0")
 
     mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
-    mocker.patch("watchdog.get_system_release_version", return_value=UBUNTU_24_RELEASE)
     mocker.patch(
         "watchdog.NFS_READAHEAD_CONFIG_PATH_FORMAT",
         str(tmpdir) + "/%s:%s/read_ahead_kb",
@@ -177,7 +155,6 @@ def test_verify_and_update_readahead_stat_timeout(mocker, caplog):
     mock_mount_info = Mount("server", MOUNT_POINT, "nfs4", "rsize=1048576", "0", "0")
 
     mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
-    mocker.patch("watchdog.get_system_release_version", return_value=UBUNTU_24_RELEASE)
 
     # Mock subprocess.Popen to raise TimeoutExpired for stat command
     mock_process = MagicMock()
@@ -201,7 +178,6 @@ def test_verify_and_update_readahead_stat_exception(mocker, caplog):
     mock_mount_info = Mount("server", MOUNT_POINT, "nfs4", "rsize=1048576", "0", "0")
 
     mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
-    mocker.patch("watchdog.get_system_release_version", return_value=UBUNTU_24_RELEASE)
 
     # Mock subprocess.Popen to raise exception for stat command
     mock_process = MagicMock()
@@ -221,7 +197,6 @@ def test_verify_and_update_readahead_cat_timeout(mocker, tmpdir, caplog):
     mock_mount_info = Mount("server", MOUNT_POINT, "nfs4", "rsize=1048576", "0", "0")
 
     mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
-    mocker.patch("watchdog.get_system_release_version", return_value=UBUNTU_24_RELEASE)
 
     # Mock stat command to succeed, cat command to timeout
     mock_stat_process = MagicMock()
@@ -253,7 +228,6 @@ def test_verify_and_update_readahead_cat_exception(mocker, tmpdir, caplog):
     mock_mount_info = Mount("server", MOUNT_POINT, "nfs4", "rsize=1048576", "0", "0")
 
     mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
-    mocker.patch("watchdog.get_system_release_version", return_value=UBUNTU_24_RELEASE)
 
     # Mock stat command to succeed, cat command to raise exception
     mock_stat_process = MagicMock()
@@ -286,7 +260,6 @@ def test_verify_and_update_readahead_custom_rsize(mocker, tmpdir):
     )  # Custom rsize
 
     mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
-    mocker.patch("watchdog.get_system_release_version", return_value=UBUNTU_24_RELEASE)
     mocker.patch(
         "watchdog.NFS_READAHEAD_CONFIG_PATH_FORMAT",
         str(tmpdir) + "/%s:%s/read_ahead_kb",
@@ -345,7 +318,6 @@ def test_verify_and_update_readahead_no_rsize_option(mocker, tmpdir):
     )  # No rsize
 
     mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
-    mocker.patch("watchdog.get_system_release_version", return_value=UBUNTU_24_RELEASE)
     mocker.patch(
         "watchdog.NFS_READAHEAD_CONFIG_PATH_FORMAT",
         str(tmpdir) + "/%s:%s/read_ahead_kb",
@@ -422,3 +394,85 @@ def generate_os_stat_result(
             st_ctime,
         )
     )
+
+
+def test_get_linux_kernel_version_parses_release(mocker):
+    mocker.patch("watchdog.platform.release", return_value="6.1.176-200.341.amzn2023")
+
+    assert watchdog.get_linux_kernel_version(2) == [6, 1]
+
+
+def test_get_linux_kernel_version_pads_short_release(mocker):
+    mocker.patch("watchdog.platform.release", return_value="6")
+
+    assert watchdog.get_linux_kernel_version(2) == [6, 0]
+
+
+def test_get_linux_kernel_version_logs_malformed_release(mocker, caplog):
+    mocker.patch("watchdog.platform.release", return_value="not-a-version")
+
+    assert watchdog.get_linux_kernel_version(2) == [0, 0]
+    assert "Failed to parse linux kernel version from not-a-version" in caplog.text
+
+
+def test_watchdog_should_revise_readahead_on_supported_linux(mocker):
+    mock_config = MagicMock()
+    mocker.patch("platform.system", return_value="Linux")
+    mocker.patch.object(watchdog, "get_linux_kernel_version", return_value=[5, 4])
+    mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
+
+    assert watchdog.should_revise_readahead(mock_config)
+
+
+def test_watchdog_should_not_revise_readahead_on_old_kernel(mocker):
+    mock_config = MagicMock()
+    mocker.patch("platform.system", return_value="Linux")
+    mocker.patch.object(watchdog, "get_linux_kernel_version", return_value=[5, 3])
+    mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
+
+    assert not watchdog.should_revise_readahead(mock_config)
+
+
+def test_watchdog_should_not_revise_readahead_on_non_linux(mocker):
+    mock_config = MagicMock()
+    mocker.patch("platform.system", return_value="Darwin")
+    get_kernel_version = mocker.patch.object(watchdog, "get_linux_kernel_version")
+
+    assert not watchdog.should_revise_readahead(mock_config)
+    get_kernel_version.assert_not_called()
+
+
+def test_verify_and_update_readahead_repairs_reset_on_next_invocation(mocker):
+    mock_config = MagicMock()
+    mock_mount_info = Mount("server", MOUNT_POINT, "nfs4", "rsize=1048576", "0", "0")
+    mocker.patch.object(watchdog, "should_revise_readahead", return_value=True)
+
+    stat_process = MagicMock()
+    stat_process.communicate.return_value = (
+        str(DEFAULT_MOUNT_DEVICE_NUMBER).encode(),
+        b"",
+    )
+    current_values = iter([b"15360", b"128"])
+    write_process = MagicMock()
+    write_process.communicate.return_value = (b"", b"")
+    write_process.returncode = 0
+    write_calls = []
+
+    def popen(args, **kwargs):
+        if args[0] == "stat":
+            return stat_process
+        if args[0] == "cat":
+            cat_process = MagicMock()
+            cat_process.communicate.return_value = (next(current_values), b"")
+            return cat_process
+        write_calls.append((args, kwargs))
+        return write_process
+
+    mocker.patch("subprocess.Popen", side_effect=popen)
+
+    watchdog.verify_and_update_readahead(MOUNT_POINT, mock_config, mock_mount_info)
+    assert not write_calls
+
+    watchdog.verify_and_update_readahead(MOUNT_POINT, mock_config, mock_mount_info)
+    assert len(write_calls) == 1
+    assert "15360" in write_calls[0][0]
