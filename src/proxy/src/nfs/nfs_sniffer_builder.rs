@@ -16,7 +16,7 @@ use crate::{
 use std::{marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, Mutex};
 
-const NFS_DOMAIN_NAME: &'static str = "NFS";
+const NFS_DOMAIN_NAME: &str = "NFS";
 
 pub struct NfsSnifferBuilder<S> {
     phantom: PhantomData<S>,
@@ -45,6 +45,12 @@ impl<S: ProxyStream> DomainBuilder<S> for NfsSnifferBuilder<S> {
             ))),
             domain_name: NFS_DOMAIN_NAME,
         }))
+    }
+}
+
+impl<S: ProxyStream> Default for NfsSnifferBuilder<S> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

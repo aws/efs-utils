@@ -114,3 +114,18 @@ def test_stunnel_cafile_configured_in_mount_region_section(mocker):
     proxy.add_tunnel_ca_options(efs_config, config, options, ISOLATED_REGION)
 
     assert ISOLATED_REGION_STUNNEL_CAFILE == efs_config.get("CAfile")
+
+
+def test_empty_cafile_value_rejected(capsys):
+    """An empty cafile= mount option must fail the mount, not silently disable
+    TLS server certificate verification."""
+    options = {"cafile": ""}
+    efs_config = {}
+
+    with pytest.raises(SystemExit) as ex:
+        proxy.add_tunnel_ca_options(efs_config, _get_config(), options, DEFAULT_REGION)
+
+    assert 0 != ex.value.code
+
+    out, err = capsys.readouterr()
+    assert "cafile mount option requires a path" in err

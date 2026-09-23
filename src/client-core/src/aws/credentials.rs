@@ -9,11 +9,11 @@
 //! Notes:
 //!
 //! 1. In efs-utils, the "get_aws_security_credentials" method is only called if
-//! use_iam is provided, a mount option that is only valid with TLS mounts to EFS. We want to get
-//! creds for s3 client here for ReadBypass even if a non-tls mounts to EFS is used.
+//!    use_iam is provided, a mount option that is only valid with TLS mounts to EFS. We want to get
+//!    creds for s3 client here for ReadBypass even if a non-tls mounts to EFS is used.
 //!
 //! 2. This credential chain now check environment variable credentials provider to support
-//! AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, and AWS_REGION only for lambda
+//!    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, and AWS_REGION only for lambda
 //!
 
 use aws_config::{
@@ -113,8 +113,26 @@ impl ProxyCredentialsChain {
             .configure(&provider_config)
             .build();
 
-        let mut chain = CredentialsProviderChain::first_try("Profile", profile_provider)
-            .or_else("EcsContainer", ecs_provider);
+        // With test-util compiled in and the SDK-standard AWS_ENDPOINT_URL_S3
+        // endpoint override active, accept credentials from the standard
+        // AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY environment variables
+        // first, since hosts using an override may have no profile, ECS, or
+        // IMDS credentials. Otherwise the chain matches efs-utils' credential
+        // resolution order.
+        #[cfg(any(test, feature = "test-util"))]
+        let chain = if std::env::var("AWS_ENDPOINT_URL_S3").is_ok() {
+            CredentialsProviderChain::first_try(
+                "Environment",
+                EnvironmentVariableCredentialsProvider::new(),
+            )
+            .or_else("Profile", profile_provider)
+        } else {
+            CredentialsProviderChain::first_try("Profile", profile_provider)
+        };
+        #[cfg(not(any(test, feature = "test-util")))]
+        let chain = CredentialsProviderChain::first_try("Profile", profile_provider);
+
+        let mut chain = chain.or_else("EcsContainer", ecs_provider);
 
         if let Some(web_identity_token_provider) = web_identity_token_provider {
             chain = chain.or_else("WebIdentityToken", web_identity_token_provider);
@@ -187,10 +205,10 @@ pub async fn get_aws_config_loader(proxy_config: &ProxyConfig) -> aws_config::Co
         aws_config_loader = aws_config_loader.profile_name(p.clone());
     }
 
-    let credentials_chain = ProxyCredentialsChain::new_from_config(&proxy_config).await;
+    let credentials_chain = ProxyCredentialsChain::new_from_config(proxy_config).await;
     aws_config_loader = aws_config_loader.credentials_provider(credentials_chain);
 
-    return aws_config_loader;
+    aws_config_loader
 }
 
 #[cfg(test)]

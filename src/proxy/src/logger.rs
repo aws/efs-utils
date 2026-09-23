@@ -232,8 +232,10 @@ mod tests {
         let log_path = temp_dir.path().join("test.log");
         let log_path_str = log_path.to_str().expect("Failed to convert path to string");
 
-        let mut nested_config = crate::config_parser::EfsConfig::default();
-        nested_config.proxy_logging_level = Some("DEBUG".to_string());
+        let nested_config = crate::config_parser::EfsConfig {
+            proxy_logging_level: Some("DEBUG".to_string()),
+            ..Default::default()
+        };
 
         let config = ProxyConfig {
             fips: false,

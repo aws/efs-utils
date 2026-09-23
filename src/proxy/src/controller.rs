@@ -383,6 +383,13 @@ impl<S: ProxyStream> Controller<S> {
             if let Some(count) = self.restart_count.checked_add(1) {
                 self.restart_count = count;
             }
+            // The old status loop has exited; publish the bumped restart count
+            // so waiters can synchronize on the restart before the next accept().
+            self.status_reporter.publish_restart(self.restart_count);
+            info!(
+                "Proxy incarnation restarted, restart_count={}",
+                self.restart_count
+            );
 
             // Ensure that connection(s) to EFS is closed. If we can't successfully stop the proxy,
             // then exit from this process and allow the watchdog to restart the efs-proxy program.
@@ -459,8 +466,8 @@ impl<S: ProxyStream> Controller<S> {
                     warn!("Unexpected connection, ignoring")
                 }
             }
-            if err.is_err() {
-                info!("Starting proxy restart due to {}", err.unwrap_err());
+            if let Err(e) = err {
+                info!("Starting proxy restart due to {}", e);
                 break;
             }
         }

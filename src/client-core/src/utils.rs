@@ -28,9 +28,8 @@ pub fn is_running_on_ecs() -> bool {
 pub const MIN_MEMORY_FOR_READAHEAD_GIB: u64 = 30;
 
 /// Returns true if system has enough memory for readahead cache.
-/// Returns false on Lambda/ECS since memory detection shows host, not container limits.
 pub fn has_sufficient_memory_for_readahead_cache() -> bool {
-    if is_running_on_lambda() || is_running_on_ecs() {
+    if platform_blocks_readahead_cache(is_running_on_lambda(), is_running_on_ecs()) {
         return false;
     }
     let total_memory = sysinfo::System::new_all().total_memory();
@@ -38,6 +37,14 @@ pub fn has_sufficient_memory_for_readahead_cache() -> bool {
         log::warn!("Unable to determine system memory, disabling readahead cache");
     }
     total_memory >= MIN_MEMORY_FOR_READAHEAD_GIB * 1024 * 1024 * 1024
+}
+
+/// The readahead cache stays off on ECS — and on Lambda without the
+/// `lambda-readahead-cache` feature — because total-memory detection sees the
+/// host rather than the container limit.
+fn platform_blocks_readahead_cache(on_lambda: bool, on_ecs: bool) -> bool {
+    let cache_permitted_on_lambda = cfg!(feature = "lambda-readahead-cache");
+    on_ecs || (on_lambda && !cache_permitted_on_lambda)
 }
 
 /// Ensures HOME environment variable is set by resolving it from /etc/passwd if missing.
@@ -130,5 +137,22 @@ mod tests {
             Some(h) => std::env::set_var("HOME", h),
             None => std::env::remove_var("HOME"),
         }
+    }
+
+    #[test]
+    fn test_readahead_cache_platform_gating() {
+        // ECS always blocks the readahead cache, in every build variant.
+        assert!(platform_blocks_readahead_cache(false, true));
+        assert!(platform_blocks_readahead_cache(true, true));
+
+        // A plain host (EC2 etc.) is never blocked by platform.
+        assert!(!platform_blocks_readahead_cache(false, false));
+
+        // Lambda blocks the cache unless the lambda-readahead-cache feature
+        // is enabled.
+        assert_eq!(
+            platform_blocks_readahead_cache(true, false),
+            !cfg!(feature = "lambda-readahead-cache")
+        );
     }
 }

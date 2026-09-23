@@ -34,11 +34,11 @@ impl ProxyIdentifier {
     }
 }
 
-impl Into<awsfile_prot::ProxyIdentifier> for ProxyIdentifier {
-    fn into(self) -> awsfile_prot::ProxyIdentifier {
+impl From<ProxyIdentifier> for awsfile_prot::ProxyIdentifier {
+    fn from(val: ProxyIdentifier) -> Self {
         awsfile_prot::ProxyIdentifier {
-            identifier: self.uuid.as_bytes().to_vec(),
-            incarnation: self.incarnation.to_be_bytes().to_vec(),
+            identifier: val.uuid.as_bytes().to_vec(),
+            incarnation: val.incarnation.to_be_bytes().to_vec(),
         }
     }
 }

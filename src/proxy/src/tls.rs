@@ -8,6 +8,8 @@ use s2n_tls_tokio::TlsStream;
 use std::path::Path;
 use tokio::net::TcpStream;
 
+use zeroize::Zeroizing;
+
 use crate::config_parser::ProxyConfig;
 use crate::connections::configure_stream;
 use crate::error::ConnectError;
@@ -20,24 +22,44 @@ impl s2n_tls::callbacks::VerifyHostNameCallback for InsecureAcceptAllCertificate
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct TlsConfig {
     pub fips_enabled: bool,
 
     /// Contents of the certificate authority file. E.g. /etc/amazon/efs/efs-utils.crt
     pub ca_file_contents: Vec<u8>,
 
-    /// The client-side certificate and public key
-    pub client_cert: Vec<u8>,
+    /// The client-side certificate. Credential-bearing: it embeds the SigV4
+    /// Connect token (incl. the IAM session token) in its OID_EFS_AUTH
+    /// extension, so it is zeroized on drop. Not `client_cert.len()`-logged.
+    pub client_cert: Zeroizing<Vec<u8>>,
 
-    /// The client private key
-    pub client_private_key: Vec<u8>,
+    /// The client private key. Zeroized on drop.
+    pub client_private_key: Zeroizing<Vec<u8>>,
 
     /// The remote address to establish the TLS connection with
     pub remote_addr: String,
 
     /// The hostname that is expected to be on the remote server's TLS certificate
     pub server_domain: String,
+}
+
+impl std::fmt::Debug for TlsConfig {
+    /// Redacts credential-bearing material (the private key and the cert, which
+    /// embeds the IAM Connect token); reports only a size for the public CA.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TlsConfig")
+            .field("fips_enabled", &self.fips_enabled)
+            .field(
+                "ca_file_contents",
+                &format_args!("{} bytes", self.ca_file_contents.len()),
+            )
+            .field("client_cert", &"[redacted]")
+            .field("client_private_key", &"[redacted]")
+            .field("remote_addr", &self.remote_addr)
+            .field("server_domain", &self.server_domain)
+            .finish()
+    }
 }
 
 pub async fn get_tls_config(proxy_config: &ProxyConfig) -> Result<TlsConfig, anyhow::Error> {
@@ -74,6 +96,37 @@ async fn read_file_with_comments_removed(path: &Path) -> Result<Vec<u8>> {
     Ok(output)
 }
 
+/// Read a credential-bearing PEM file (the client private key or certificate)
+/// with comment lines removed, keeping every copy of the bytes in memory that
+/// zeroes on drop.
+///
+/// Reads the whole file into a `Zeroizing` buffer and splits it on newlines in
+/// place, so the plaintext key/cert never lands in a transient `String` or
+/// reader buffer that would be freed without being wiped. The output is sized
+/// to the input up front and only ever shrinks, so it never reallocates.
+async fn read_secret_file_with_comments_removed(path: &Path) -> Result<Zeroizing<Vec<u8>>> {
+    let raw = Zeroizing::new(tokio::fs::read(path).await?);
+    let mut out = Zeroizing::new(Vec::with_capacity(raw.len()));
+    let mut lines = raw.split(|&b| b == b'\n').peekable();
+    while let Some(line) = lines.next() {
+        // A trailing '\n' produces a final empty segment; `AsyncBufReadExt::lines()`
+        // would not yield it, so drop it to stay byte-identical with that reader.
+        if line.is_empty() && lines.peek().is_none() {
+            break;
+        }
+        // `lines()` strips a trailing '\r'; a byte split does not.
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if line.starts_with(b"# ") {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(b'\n');
+        }
+        out.extend_from_slice(line);
+    }
+    Ok(out)
+}
+
 impl TlsConfig {
     /// Create an instance of TlsConfig.
     ///
@@ -99,16 +152,17 @@ impl TlsConfig {
             ca_file_contents = read_file_with_comments_removed(ca_file).await.context(
                 String::from("Error in TlsConfig::new. Unable to the CA File. Make sure it does not have any comments (lines that start with #)."))?;
         }
-        let client_cert = read_file_with_comments_removed(client_cert_pem_file)
+        let client_cert = read_secret_file_with_comments_removed(client_cert_pem_file)
             .await
             .context(String::from(
                 "Error in TlsConfig::new. Unable to read the client certificate file.",
             ))?;
-        let client_private_key = read_file_with_comments_removed(client_private_key_pem_file)
-            .await
-            .context(String::from(
-                "Error in TlsConfig::new. Unable to read private key file.",
-            ))?;
+        let client_private_key =
+            read_secret_file_with_comments_removed(client_private_key_pem_file)
+                .await
+                .context(String::from(
+                    "Error in TlsConfig::new. Unable to read private key file.",
+                ))?;
         let server_domain = server_domain.to_string();
         let remote_addr = remote_addr.to_string();
 
@@ -218,5 +272,37 @@ pub mod tests {
             .await
             .expect("Could not read certificate file");
         assert_eq!(expected.len(), decommented_output.unwrap().len());
+    }
+
+    #[tokio::test]
+    async fn test_secret_reader_matches_plain_reader() {
+        let comment_file = Path::new("tests/certs/cert_with_comments.pem");
+        let plain = read_file_with_comments_removed(comment_file)
+            .await
+            .expect("plain reader failed");
+        let secret = read_secret_file_with_comments_removed(comment_file)
+            .await
+            .expect("secret reader failed");
+        assert_eq!(plain, *secret);
+    }
+
+    // PEM key/cert files typically end with a newline; the two readers must
+    // still agree there (a byte split would otherwise emit a trailing '\n').
+    #[tokio::test]
+    async fn test_secret_reader_matches_plain_reader_trailing_newline() {
+        let path =
+            std::env::temp_dir().join(format!("efs_proxy_reader_nl_{}.pem", std::process::id()));
+        tokio::fs::write(&path, b"# comment\r\nline1\r\nline2\n")
+            .await
+            .expect("write fixture");
+        let plain = read_file_with_comments_removed(&path)
+            .await
+            .expect("plain reader failed");
+        let secret = read_secret_file_with_comments_removed(&path)
+            .await
+            .expect("secret reader failed");
+        let _ = tokio::fs::remove_file(&path).await;
+        assert_eq!(plain, *secret);
+        assert_eq!(&*secret, b"line1\nline2");
     }
 }

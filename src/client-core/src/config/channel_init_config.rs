@@ -8,23 +8,12 @@ use crate::{
     error::RpcError,
 };
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Default)]
 pub struct ReadBypassConfig {
     pub enabled: bool,
     pub bucket_name: String,
     pub prefix: String,
     pub readahead_cache_enabled: bool,
-}
-
-impl Default for ReadBypassConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            bucket_name: String::new(),
-            prefix: String::new(),
-            readahead_cache_enabled: false,
-        }
-    }
 }
 
 impl TryFrom<AwsFileReadBypassConfigResV2> for ReadBypassConfig {

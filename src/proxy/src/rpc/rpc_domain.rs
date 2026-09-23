@@ -256,6 +256,12 @@ impl<S: ProxyStream> DomainBuilder<S> for RpcDomainBuilder<S> {
     }
 }
 
+impl<S: ProxyStream> Default for RpcDomainBuilder<S> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<S: ProxyStream> RpcDomainBuilder<S> {
     pub fn new() -> Self {
         Self {

@@ -9,8 +9,26 @@ name = "efs_client_core"
 
 [features]
 # Enables the in-crate test-only constructors (e.g. ReadBypassContext::default,
-# create_test_read_bypass_context) so that efs-proxy's tests can reuse them.
+# create_test_read_bypass_context) so that efs-proxy's tests can reuse them,
+# and the test-build-only S3 endpoint-override behavior (path-style addressing
+# and environment credentials when AWS_ENDPOINT_URL_S3 is set). Never enabled
+# for release binaries.
 test-util = []
+# Permits the readahead cache on Lambda; the default build keeps it off there
+# because total-memory detection sees the host rather than the container
+# limit. See `utils::platform_blocks_readahead_cache`.
+lambda-readahead-cache = []
+# Shuttle concurrency testing: swaps std/tokio/dashmap primitives for
+# Shuttle-instrumented equivalents via the wrapper crates and the crate::sync
+# module. Enabled by downstream test crates; never enabled for release binaries.
+# See the "Shuttle concurrency testing" block in [dependencies] below.
+shuttle = [
+    "dep:shuttle",
+    "shuttle-sync/shuttle",
+    "tokio/shuttle",
+    "tokio-util/shuttle",
+    "dashmap/shuttle",
+]
 
 [dependencies]
 anyhow = "1.0.72"
@@ -31,12 +49,11 @@ aws-smithy-http-client = { version = "1.1.9", features = ["default-client", "rus
 aws-smithy-types = "1.3"
 atomic_enum = "0.2"
 bytes = { version = "1.11.1" }
-dashmap = "6.0.1"
 dyn-clone = "1.0"
 futures = "0.3"
 log = "0.4"
 libc = "0.2"
-lru = "0.16"
+lru = "0.18"
 moka = { version = "0.12.10", features = ["sync"] }
 onc-rpc = "0.3.3"
 # regex-lite: same API and pattern syntax as `regex` for the bucket-name check,
@@ -48,22 +65,64 @@ serde = { version = "1.0.175", features = ["derive"] }
 serde_ini = "0.2.0"
 sysinfo = "0.33"
 thiserror = "1.0.44"
-tokio = { version = "^1.40.0", features = ["full"] }
-tokio-util = "0.7.8"
 uuid = { version = "1.4.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
 # XDR runtime + shared NFSv4.1 wire bindings. xdr_codec keeps its lib name so
 # `use xdr_codec` is unchanged; the nfs bindings are re-exported under crate::nfs.
 xdr_codec = { package = "amzn-xdr-codec", path = "../nfs-xdr-bindings/rust-xdr/xdr-codec" }
 amzn-nfs-xdr-bindings = { path = "../nfs-xdr-bindings" }
 
+# --- Shuttle concurrency testing -------------------------------------------
+#
+# efs-client-core is onboarded to Shuttle (https://github.com/awslabs/shuttle),
+# a randomized concurrency checker. Under the crate's `shuttle` feature the
+# primitives below are swapped for Shuttle-instrumented equivalents whose
+# scheduler explores thread/task interleavings to find races, deadlocks and
+# lost wakeups. With the feature off (all normal and release builds) the
+# wrappers transparently re-export the real crates, so there is zero
+# production impact.
+#
+# This block has two parts. If you only need to change the version of tokio /
+# tokio-util / dashmap, do NOT edit these alias lines — change the "version
+# constraints" block below instead.
+#
+# Wrapper aliases (public crates.io `shuttle-*` crates): tokio, tokio-util and
+# dashmap are aliased to their wrappers so code keeps using `tokio::...` /
+# `dashmap::...` unchanged. The `version` here is the *wrapper's* own version,
+# not the wrapped crate's; you rarely touch it — only when a wrapper publishes a
+# new (major) version, e.g. to follow a breaking change in the crate it wraps.
+# std::sync/std::thread primitives are routed through `crate::sync` (src/sync.rs),
+# backed by `shuttle-sync`. `shuttle` itself is the test framework — optional,
+# only compiled under the `shuttle` feature.
+tokio = { package = "shuttle-tokio", version = "1", features = ["full"] }
+tokio-util = { package = "shuttle-tokio-util", version = "0.7" }
+dashmap = { package = "shuttle-dashmap", version = "6" }
+shuttle-sync = { version = "0.1" }
+shuttle = { version = "0.9", optional = true }
+
+# Version constraints for the real crates wrapped above — THIS is where their
+# version requirements live, so change them here. Each `shuttle-*` wrapper only
+# sets a minimal constraint on the crate it wraps (e.g. shuttle-tokio depends on
+# `tokio = "1"`), which would otherwise let Cargo float it to the latest
+# release; these entries pin it to what this package requires. They exist ONLY
+# to constrain resolution and must NEVER be imported or used in code — always
+# use the aliases above. See
+# https://github.com/awslabs/shuttle/blob/main/wrappers/README.md
+tokio-version-constraint = { package = "tokio", version = "^1.40.0" }
+tokio-util-version-constraint = { package = "tokio-util", version = "0.7.8" }
+dashmap-version-constraint = { package = "dashmap", version = "6.0.1" }
 
 [dev-dependencies]
 test-case = "*"
-tokio = { version = "1.29.0", features = ["test-util"] }
+tokio = { package = "shuttle-tokio", version = "1", features = ["test-util"] }
 tempfile = "3.10.1"
 aws-smithy-mocks = "0.1.1"
 aws-sdk-s3 = { version = "1.87.0", features = ["test-util"] }
 aws-smithy-runtime-api = "1.8.0"
-rand = "0.8.5"
+# Test-only randomness, deliberately the real crate (not the shuttle-rand
+# wrapper): dev-dependencies cannot be feature-switched, so it stays
+# uninstrumented (shuttle tests should use shuttle::rand instead). If rand is
+# ever used by library code and thus promoted to a regular dependency, alias it
+# to shuttle-rand and add "rand/shuttle" to the shuttle feature.
+rand = "0.8"
 serial_test = "3.0"
 

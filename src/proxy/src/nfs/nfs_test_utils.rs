@@ -618,7 +618,7 @@ pub fn build_read_nfs_compound_args(
     // Build compound: SEQUENCE, PUTFH, READ
     let sequence_op = create_test_op_sequence_arg();
     let putfh_op = nfs_argop4::OP_PUTFH(PUTFH4args {
-        object: file_handle.clone().into(),
+        object: file_handle.clone(),
     });
     let read_op = nfs_argop4::OP_READ(READ4args {
         stateid: stateid4 {
@@ -628,12 +628,12 @@ pub fn build_read_nfs_compound_args(
         offset: read_offset,
         count: read_len,
     });
-    let compound = COMPOUND4args {
+
+    COMPOUND4args {
         tag: utf8string(b"test".to_vec()),
         minorversion: 1,
         argarray: vec![sequence_op, putfh_op, read_op],
-    };
-    compound
+    }
 }
 
 pub fn create_raw_bytes_for_rpc_nfs_message_from_compound<
@@ -665,17 +665,13 @@ pub fn create_raw_bytes_for_rpc_nfs_message_from_compound<
     let payload = BytesMut::from(&buffer[..]);
 
     match rpc_message_type {
-        RpcMessageType::Call => {
-            return RpcEncoder::encode_rpc_call_with_payload(params, payload)
-                .unwrap()
-                .into();
-        }
+        RpcMessageType::Call => RpcEncoder::encode_rpc_call_with_payload(params, payload)
+            .unwrap()
+            .into(),
         RpcMessageType::Reply => {
-            return RpcEncoder::encode_rpc_accepted_reply_with_payload(xid, params, payload)
-                .unwrap()
-                .into();
+            RpcEncoder::encode_rpc_accepted_reply_with_payload(xid, params, payload).unwrap()
         }
-    };
+    }
 }
 
 pub fn create_nfs_rpc_envelope_from_compound<

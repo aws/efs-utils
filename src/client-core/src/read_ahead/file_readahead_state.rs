@@ -720,6 +720,11 @@ impl FileReadAheadState {
                         "Error getting data from cached range: {}",
                         err
                     );
+                    // An entry still Loading here timed out rather than failed, and would keep
+                    // costing every later reader the full timeout until the stuck sweep runs.
+                    if cached_data.is_loading() {
+                        self.fail_timed_out_entry(cached_start, &cached_data).await;
+                    }
                     return Err(err);
                 }
             }
@@ -1027,6 +1032,27 @@ impl FileReadAheadState {
 
         // Always return the S3 data so caller can combine with cached data
         Ok((all_required_data, any_required_cache_failed))
+    }
+
+    /// Fail and drop an entry a reader timed out on. Removal is conditional on the offset
+    /// still holding `expected`, because two paths remove an entry while leaving it Loading
+    /// (placeholder cleanup, and evict_entry, which removes before it calls clear). Without
+    /// the identity check a timed-out reader could drop a placeholder another task had since
+    /// inserted at the same offset, killing a load that was making progress.
+    async fn fail_timed_out_entry(&self, offset: u64, expected: &Arc<CachedData>) {
+        // Identity-safe regardless of the map: wakes waiters on the entry we waited on.
+        expected.set_state(CacheEntryState::Failed);
+
+        if let Ok(mut cache) = self.acquire_write_lock().await {
+            let still_ours = match cache.get(&offset) {
+                Some((_, cached_data)) => Arc::ptr_eq(cached_data, expected),
+                None => false,
+            };
+            if still_ours {
+                cache.remove(&offset);
+                self.lru_remove(offset);
+            }
+        }
     }
 
     async fn remove_failed_entry(&self, offset: u64, state: CacheEntryState) {
@@ -2952,6 +2978,129 @@ mod tests {
         assert!(
             cache.is_empty(),
             "Cache should be empty since caching failed"
+        );
+    }
+
+    /// A reader that times out on an entry whose load never completes must drop that entry,
+    /// otherwise the range stays poisoned and every later reader pays the full timeout again.
+    /// Entry age uses the wall clock while the timeout uses the tokio clock, so pausing time
+    /// trips the 15s wait while the entry is still far too young for is_stuck_loading() to
+    /// make it evictable, which is the production timing asymmetry.
+    #[tokio::test(start_paused = true)]
+    async fn test_timed_out_loading_entry_is_dropped_not_left_poisoning_the_range() {
+        let state = create_test_state();
+        let file_size = 1024 * 1024;
+        let s3_data_reader = create_test_s3_data_reader();
+        let read_bypass_context = create_test_read_bypass_context().await;
+
+        // Insert the range without ever loading it: this is the state an abandoned
+        // readahead leaves behind, since nothing transitions the entry out of Loading.
+        let range = 0..65536;
+        state.insert_range(range.clone()).await.unwrap();
+
+        // Keep a handle so the entry's final state is still observable after removal.
+        let cached_data_handle = {
+            let cache = state.data_cache.read().await;
+            let (_, cached_data) = cache.get(&range.start).expect("entry should be present");
+            assert_eq!(
+                cached_data.get_state(),
+                CacheEntryState::Loading,
+                "a freshly inserted entry starts in Loading"
+            );
+            assert!(
+                !cached_data.is_stuck_loading(),
+                "entry is far too young to be evictable as stuck"
+            );
+            Arc::clone(cached_data)
+        };
+
+        let locator = create_test_s3_data_locator(range.start, 65536);
+
+        let first = state
+            .clone()
+            .get_data(
+                Arc::new(ReadBypassRequestContext::new(
+                    read_bypass_context.clone(),
+                    0,
+                )),
+                &locator,
+                file_size,
+                s3_data_reader.clone(),
+                false,
+            )
+            .await;
+
+        assert!(
+            first.is_err(),
+            "reader should fail once the 15s cache-entry wait elapses"
+        );
+
+        // The timed-out entry must be gone, so the next reader re-fetches instead of
+        // waiting out the timeout again.
+        {
+            let cache = state.data_cache.read().await;
+            assert!(
+                !cache.contains_key(&range.start),
+                "a timed-out Loading entry must be removed, not left poisoning the range"
+            );
+        }
+
+        // Waiters woken by the removal see Failed rather than an indefinite Loading.
+        assert_eq!(
+            cached_data_handle.get_state(),
+            CacheEntryState::Failed,
+            "the entry is taken out of Loading so any other waiter fails immediately"
+        );
+    }
+
+    /// A reader that timed out must not drop a placeholder another task inserted at the same
+    /// offset in the meantime. Two paths remove an entry while leaving it Loading, so the
+    /// timed-out reader can hold a stale Arc whose offset now belongs to someone else.
+    #[tokio::test]
+    async fn test_timed_out_entry_removal_does_not_clobber_a_different_entry() {
+        let state = create_test_state();
+        let range = 0..65536;
+
+        state.insert_range(range.clone()).await.unwrap();
+        let stale = {
+            let cache = state.data_cache.read().await;
+            Arc::clone(&cache.get(&range.start).expect("entry present").1)
+        };
+
+        // Stand in for placeholder cleanup or evict_entry: drop the entry from the map while
+        // it is still Loading, then let another task insert a fresh placeholder at the offset.
+        {
+            let mut cache = state.data_cache.write().await;
+            cache.remove(&range.start);
+        }
+        assert!(stale.is_loading(), "the stale handle is still Loading");
+
+        state.insert_range(range.clone()).await.unwrap();
+        let fresh = {
+            let cache = state.data_cache.read().await;
+            Arc::clone(&cache.get(&range.start).expect("fresh entry present").1)
+        };
+        assert!(!Arc::ptr_eq(&stale, &fresh), "the two entries are distinct");
+
+        state.fail_timed_out_entry(range.start, &stale).await;
+
+        {
+            let cache = state.data_cache.read().await;
+            let current = cache.get(&range.start).expect("fresh entry must survive");
+            assert!(
+                Arc::ptr_eq(&current.1, &fresh),
+                "removal keyed only on offset would have dropped the fresh placeholder"
+            );
+        }
+        assert_eq!(
+            fresh.get_state(),
+            CacheEntryState::Loading,
+            "the fresh entry keeps loading and its waiters are untouched"
+        );
+        assert_eq!(
+            stale.get_state(),
+            CacheEntryState::Failed,
+            "the stale entry is still failed so its own waiters are woken"
         );
     }
 }

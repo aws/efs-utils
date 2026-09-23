@@ -110,23 +110,23 @@ fn convert_auth_flavor_to_bytes(
 
     match auth {
         AuthFlavor::AuthNone(opt_data) => {
-            AuthFlavor::AuthNone(opt_data.map(|data| Bytes::copy_from_slice(data)))
+            AuthFlavor::AuthNone(opt_data.map(Bytes::copy_from_slice))
         }
         AuthFlavor::AuthUnix(unix_params) => {
             // Convert AuthUnixParams<&[u8]> to AuthUnixParams<Bytes>
             let converted_params = AuthUnixParams::new(
                 unix_params.stamp(),
-                Bytes::copy_from_slice(unix_params.machine_name().as_ref()),
+                Bytes::copy_from_slice(unix_params.machine_name()),
                 unix_params.uid(),
                 unix_params.gid(),
                 unix_params.gids().map_or(Vec::new(), |gids| gids.to_vec()),
             );
             AuthFlavor::AuthUnix(converted_params)
         }
-        AuthFlavor::AuthShort(data) => AuthFlavor::AuthShort(Bytes::copy_from_slice(data.as_ref())),
+        AuthFlavor::AuthShort(data) => AuthFlavor::AuthShort(Bytes::copy_from_slice(data)),
         AuthFlavor::Unknown { id, data } => AuthFlavor::Unknown {
             id: *id,
-            data: Bytes::copy_from_slice(data.as_ref()),
+            data: Bytes::copy_from_slice(data),
         },
         _ => AuthFlavor::AuthNone(None),
     }
@@ -358,9 +358,9 @@ impl From<&onc_rpc::AuthError> for AuthError {
     }
 }
 
-impl Into<onc_rpc::AuthError> for AuthError {
-    fn into(self) -> onc_rpc::AuthError {
-        match self {
+impl From<AuthError> for onc_rpc::AuthError {
+    fn from(val: AuthError) -> Self {
+        match val {
             AuthError::Success => onc_rpc::AuthError::Success,
             AuthError::BadCredentials => onc_rpc::AuthError::BadCredentials,
             AuthError::RejectedCredentials => onc_rpc::AuthError::RejectedCredentials,
@@ -518,10 +518,10 @@ mod tests {
         // Parse once just to find the payload start for length calculation
         let view: RpcMessage<&[u8], &[u8]> = RpcMessage::try_from(buf.as_ref()).unwrap();
         let payload_slice: &[u8] = match view.message() {
-            onc_rpc::MessageType::Call(c) => c.payload().as_ref(),
+            onc_rpc::MessageType::Call(c) => c.payload(),
             onc_rpc::MessageType::Reply(r) => match r {
                 onc_rpc::ReplyBody::Accepted(a) => match a.status() {
-                    onc_rpc::AcceptedStatus::Success(res) => res.as_ref(),
+                    onc_rpc::AcceptedStatus::Success(res) => res,
                     _ => &[],
                 },
                 onc_rpc::ReplyBody::Denied(_) => &[],

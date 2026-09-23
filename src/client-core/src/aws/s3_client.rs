@@ -180,6 +180,21 @@ pub struct GetObjectTarget<'a> {
 
 impl S3Client {
     pub async fn new(bucket: &str, prefix: &str, proxy_config: &ProxyConfig) -> Result<Self> {
+        // Validate the server-supplied bucket name before any other work: the
+        // CloudWatch publisher derives a log stream name and metric dimension
+        // from it and creates those resources in the customer's account, so an
+        // unvalidated name must not reach it — not even on the reject path.
+        if !Self::is_bucket_name_valid(bucket) {
+            // An invalid name silently disables read-bypass (the caller degrades
+            // to NFS), so log at error so the misconfiguration is diagnosable.
+            // Escape the value so a control character cannot garble the line.
+            error!(
+                "Rejecting invalid S3 bucket name, read-bypass disabled: {}",
+                bucket.escape_default()
+            );
+            return Err(Error::msg("Invalid bucket name"));
+        }
+
         let mut aws_config_loader = get_aws_config_loader(proxy_config).await;
 
         let read_bypass_config = proxy_config.nested_config.read_bypass_config.clone();
@@ -198,16 +213,30 @@ impl S3Client {
         } else {
             aws_smithy_http_client::tls::rustls_provider::CryptoMode::AwsLc
         };
-        let http_client = aws_smithy_http_client::Builder::new()
-            .pool_idle_timeout(Duration::from_secs(
-                read_bypass_config.s3_idle_timeout_seconds,
-            ))
+        let http_client_builder = aws_smithy_http_client::Builder::new().pool_idle_timeout(
+            Duration::from_secs(read_bypass_config.s3_idle_timeout_seconds),
+        );
+        let http_client = http_client_builder
             .tls_provider(aws_smithy_http_client::tls::Provider::Rustls(crypto_mode))
             .build_https();
         aws_config_loader = aws_config_loader.http_client(http_client);
 
         let aws_sdk_config: aws_config::SdkConfig = aws_config_loader.load().await;
-        let s3_config = aws_sdk_s3::config::Builder::from(&aws_sdk_config).build();
+        #[cfg_attr(not(any(test, feature = "test-util")), allow(unused_mut))]
+        let mut s3_config_builder = aws_sdk_s3::config::Builder::from(&aws_sdk_config);
+        // The SDK resolves the standard AWS_ENDPOINT_URL_S3 endpoint override
+        // natively. Overrides typically point at IP or localhost endpoints,
+        // which virtual-host (`bucket.host`) addressing cannot resolve, so
+        // force path-style addressing whenever one is set.
+        #[cfg(any(test, feature = "test-util"))]
+        if let Ok(url) = std::env::var("AWS_ENDPOINT_URL_S3") {
+            info!(
+                "S3 endpoint override in effect: {} (path-style addressing forced)",
+                url
+            );
+            s3_config_builder = s3_config_builder.force_path_style(true);
+        }
+        let s3_config = s3_config_builder.build();
         let inner_client = Client::from_conf(s3_config);
 
         let cw_publisher: Arc<dyn CloudWatchClient> = Arc::new(
@@ -220,14 +249,6 @@ impl S3Client {
             .await,
         );
 
-        if (!Self::is_bucket_name_valid(bucket)) {
-            let err_message = format!("Invalid bucket name '{}'", bucket);
-            warn!("{}", err_message);
-            cw_publisher.publish_s3_reachable(bucket, false);
-            cw_publisher.emit_log(LogLevel::Error, &err_message);
-            return Err(Error::msg(err_message));
-        }
-
         let s3_client = Self {
             bucket: bucket.to_string(),
             prefix: prefix.to_string(),
@@ -235,7 +256,7 @@ impl S3Client {
             cw_publisher: Some(cw_publisher),
             enabled: Arc::new(AtomicBool::new(true)),
             validator_task: Mutex::new(None),
-            read_bypass_config: read_bypass_config,
+            read_bypass_config,
             cancellation_token: CancellationToken::new(),
         };
 
@@ -397,8 +418,8 @@ impl S3Client {
         is_first_check: bool,
     ) {
         if let Some(publisher) = cw_publisher {
-            publisher.publish_s3_reachable(&bucket, result.is_reachable);
-            publisher.publish_s3_permitted(&bucket, !result.is_permission_denied);
+            publisher.publish_s3_reachable(bucket, result.is_reachable);
+            publisher.publish_s3_permitted(bucket, !result.is_permission_denied);
 
             // We emit logs when bucket accessibility changes or on the very first check
             let became_enabled = !was_enabled && result.should_enable;
@@ -696,10 +717,7 @@ impl S3ClientBuilder for S3ClientStandardBuilder {
         prefix: &str,
         proxy_config: &ProxyConfig,
     ) -> Option<S3Client> {
-        match S3Client::new(bucket, prefix, proxy_config).await {
-            Ok(client) => Some(client),
-            Err(e) => None,
-        }
+        S3Client::new(bucket, prefix, proxy_config).await.ok()
     }
 }
 

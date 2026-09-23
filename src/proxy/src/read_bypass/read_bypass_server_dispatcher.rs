@@ -107,9 +107,9 @@ impl Dispatcher<NfsRpcInfo, ReadBypassServerDispatcherError> for ReadBypassServe
 }
 
 enum CompoundResponsePreprocessStatus {
-    BypassNotDetected,
-    BypassAccepted(AWSFILE_READ_BYPASS4resok),
-    BypassRejected,
+    NotDetected,
+    Accepted(AWSFILE_READ_BYPASS4resok),
+    Rejected,
 }
 
 impl ReadBypassServerDispatcher {
@@ -140,7 +140,7 @@ impl ReadBypassServerDispatcher {
             match self.preprocess_envelope(&mut message.envelopes[i]).await {
                 Ok(res) => {
                     match res {
-                        CompoundResponsePreprocessStatus::BypassAccepted(_) => {
+                        CompoundResponsePreprocessStatus::Accepted(_) => {
                             // Compound was sent to ReadBypassAgent, we can remove it from the batch
                             message.envelopes.remove(i);
                         }
@@ -172,7 +172,7 @@ impl ReadBypassServerDispatcher {
                 match read_bypass_res {
                     // Read operation can be bypassed
                     AWSFILE_READ_BYPASS4res::NFS4ERR_AWSFILE_BYPASS(bypass_info) => {
-                        return Ok(CompoundResponsePreprocessStatus::BypassAccepted(
+                        return Ok(CompoundResponsePreprocessStatus::Accepted(
                             bypass_info.clone(),
                         ));
                     }
@@ -196,9 +196,9 @@ impl ReadBypassServerDispatcher {
         if (compound_has_readbypass) {
             // If compound has READ_BYPASS operations, but none of it was accepted,
             // it means all of the READ_BYPASS operations in compound were rejected
-            return Ok(CompoundResponsePreprocessStatus::BypassRejected);
+            return Ok(CompoundResponsePreprocessStatus::Rejected);
         }
-        Ok(CompoundResponsePreprocessStatus::BypassNotDetected)
+        Ok(CompoundResponsePreprocessStatus::NotDetected)
     }
 
     // Handle a single compound (wrapped into RPC Envelope).
@@ -212,7 +212,7 @@ impl ReadBypassServerDispatcher {
             match Self::get_compound_read_bypass_status(nfs_res_compound) {
                 Ok(value) => {
                     match value {
-                        CompoundResponsePreprocessStatus::BypassAccepted(ref bypass_info) => {
+                        CompoundResponsePreprocessStatus::Accepted(ref bypass_info) => {
                             let xid = match &envelope.header.params {
                                 RpcMessageParams::ReplyParams(p) => p.xid,
                                 RpcMessageParams::CallParams(p) => p.xid,
@@ -235,7 +235,7 @@ impl ReadBypassServerDispatcher {
                                 return Err(ReadBypassServerDispatcherError::ReadBypassAgentDispatchingFailure);
                             }
                         }
-                        CompoundResponsePreprocessStatus::BypassRejected => {
+                        CompoundResponsePreprocessStatus::Rejected => {
                             debug!(
                                 "Detected NFS response with rejected READBYPASS, converting response to READ..."
                             );
@@ -246,7 +246,7 @@ impl ReadBypassServerDispatcher {
                                 return Err(ReadBypassServerDispatcherError::OperationConversionFailure);
                             }
                         }
-                        CompoundResponsePreprocessStatus::BypassNotDetected => {
+                        CompoundResponsePreprocessStatus::NotDetected => {
                             trace!("READ_BYPASS is not detected, keeping compound as is...");
                         }
                     }
@@ -255,7 +255,7 @@ impl ReadBypassServerDispatcher {
                 Err(value) => return Err(value),
             }
         }
-        Ok(CompoundResponsePreprocessStatus::BypassNotDetected)
+        Ok(CompoundResponsePreprocessStatus::NotDetected)
     }
 }
 
@@ -293,7 +293,7 @@ mod tests {
             resarray: vec![sequence_op_res, getattr_op_res],
         };
 
-        return create_nfs_rpc_envelope_from_compound(RpcMessageType::Reply, compound_res);
+        create_nfs_rpc_envelope_from_compound(RpcMessageType::Reply, compound_res)
     }
 
     fn create_readbypass_envelope(bypass_res: AWSFILE_READ_BYPASS4res) -> NfsRpcEnvelope {
@@ -345,7 +345,7 @@ mod tests {
                 }
             }
         }
-        return false;
+        false
     }
 
     fn compound_contains_read(compound: &RefNfsCompound) -> bool {
@@ -359,7 +359,7 @@ mod tests {
                 }
             }
         }
-        return false;
+        false
     }
 
     async fn create_dispatcher() -> (
@@ -420,7 +420,7 @@ mod tests {
         assert!(result.is_ok());
         assert!(matches!(
             result.unwrap(),
-            CompoundResponsePreprocessStatus::BypassNotDetected
+            CompoundResponsePreprocessStatus::NotDetected
         ));
     }
 
@@ -441,7 +441,7 @@ mod tests {
         assert!(result.is_ok());
         assert!(matches!(
             result.unwrap(),
-            CompoundResponsePreprocessStatus::BypassRejected
+            CompoundResponsePreprocessStatus::Rejected
         ));
         // check that ReadBypass was converted to Read
         assert!(!compound_contains_readbypass(&envelope.body));
@@ -465,7 +465,7 @@ mod tests {
         );
         assert!(matches!(
             result.unwrap(),
-            CompoundResponsePreprocessStatus::BypassAccepted(_)
+            CompoundResponsePreprocessStatus::Accepted(_)
         ));
         // Check that ReadBypassAgent has received the message
         let res = rba_rx.try_recv();
@@ -580,7 +580,7 @@ mod tests {
 
     /// When the server returns an NFS error (e.g. NFS4ERR_STALE)
     /// for a READ_BYPASS operation, get_compound_read_bypass_status
-    /// should return BypassRejected instead of an error.
+    /// should return Rejected instead of an error.
     #[tokio::test]
     async fn test_nfs_error_in_readbypass_returns_bypass_rejected() {
         use crate::nfs::nfs_compound::{NfsMetadata, RefNfsCompoundInfo};
@@ -607,10 +607,7 @@ mod tests {
             result.err()
         );
         assert!(
-            matches!(
-                result.unwrap(),
-                CompoundResponsePreprocessStatus::BypassRejected
-            ),
+            matches!(result.unwrap(), CompoundResponsePreprocessStatus::Rejected),
             "NFS error in READ_BYPASS should be treated as bypass rejection"
         );
     }

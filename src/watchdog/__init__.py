@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "3.3.1"
+VERSION = "3.3.2"
 SERVICE = "elasticfilesystem"
 FS_PREFIX = "fs-"
 
@@ -178,6 +178,15 @@ Mount = namedtuple(
 
 NFSSTAT_TIMEOUT = 5
 
+# Bounds the `ps` call used to look up a process name on macOS, which has no procfs.
+PROCESS_NAME_TIMEOUT_SEC = 5
+
+PROC_STAT_PATH_FORMAT = "/proc/%s/stat"
+
+# Run states from /proc/<pid>/stat field 3 that mean the process has exited but is
+# still listed. Z is the one that occurs: a zombie keeps its name until reaped.
+DEAD_RUN_STATES = (b"Z", b"X", b"x")
+
 # Unmount difference time in seconds
 UNMOUNT_DIFF_TIME = 30
 
@@ -195,11 +204,8 @@ EFS_PROXY_BIN = "efs-proxy"
 OPTIMIZE_READAHEAD_ITEM = "optimize_readahead"
 DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER = 15
 NFS_READAHEAD_CONFIG_PATH_FORMAT = "/sys/class/bdi/%s:%s/read_ahead_kb"
+NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION = [5, 4]
 DEFAULT_RSIZE = 1048576
-UBUNTU_24_RELEASE = "Ubuntu 24"
-RHEL_10_RELEASE = "Red Hat Enterprise Linux release 10"
-RHEL_9_RELEASE = "Red Hat Enterprise Linux release 9"
-AL2027_RELEASE = "Amazon Linux release 2027"
 
 
 def fatal_error(user_message, log_message=None):
@@ -983,14 +989,24 @@ def is_mount_stunnel_proc_running(state_pid, state_file, state_file_dir):
         logging.debug("State pid is None for %s", state_file)
         return False
 
-    process_name = check_process_name(state_pid)
+    process_name, process_state = check_process_name_and_state(state_pid)
     if not process_name or (
         "efs-proxy" not in str(process_name) and "stunnel" not in str(process_name)
     ):
         logging.debug(
-            "Process running on %s is not an efs-proxy or stunnel process, full command: %s.",
+            "Process running on %s is not an efs-proxy or stunnel process, process name: %s.",
             state_pid,
             str(process_name) if process_name else "",
+        )
+        return False
+
+    # A zombie keeps its name until reaped, so the name alone is not enough.
+    if process_state in DEAD_RUN_STATES:
+        logging.debug(
+            "Process running on %s has exited, run state %s, for %s.",
+            state_pid,
+            str(process_state),
+            state_file,
         )
         return False
 
@@ -1062,6 +1078,22 @@ def get_system_release_version():
         logging.debug("Unable to read %s", OS_RELEASE_PATH)
 
     return DEFAULT_UNKNOWN_VALUE
+
+
+# The installed watchdog is standalone and cannot import efs_utils_common.
+# Keep this parser aligned with platform_utils.get_linux_kernel_version.
+# Parse Linux kernel version from platform.release(), padding invalid or short
+# versions with zeroes so comparisons remain deterministic.
+def get_linux_kernel_version(desired_length):
+    release = platform.release()
+    version = []
+    try:
+        version = [int(v) for v in release.split("-", 1)[0].split(".")[:desired_length]]
+    except ValueError:
+        logging.warning("Failed to parse linux kernel version from %s", release)
+    for _ in range(len(version), desired_length):
+        version.append(0)
+    return version
 
 
 def find_command_path(command, install_method):
@@ -1380,25 +1412,30 @@ def check_efs_mounts(
             )
 
 
-# This function serves as a safeguard mechanism where the initial readahead setting
-# might be overwritten due to system processes.
-# It checks the current readahead value and updates it if necessary.
+# Only modify read_ahead_kb on Linux kernels affected by the 5.4+ NFS
+# readahead default change when optimization is explicitly enabled.
+def should_revise_readahead(config):
+    if platform.system() != "Linux":
+        return False
+
+    if (
+        get_linux_kernel_version(len(NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION))
+        < NFS_READAHEAD_OPTIMIZE_LINUX_KERNEL_MIN_VERSION
+    ):
+        return False
+
+    return get_boolean_config_item_value(
+        config,
+        MOUNT_CONFIG_SECTION,
+        OPTIMIZE_READAHEAD_ITEM,
+        default_value=False,
+    )
+
+
+# Periodically correct readahead drift after the mount-time write.
 def verify_and_update_readahead(mount, config, mount_info):
     try:
-        system_release_version = get_system_release_version()
-        if (
-            UBUNTU_24_RELEASE not in system_release_version
-            and RHEL_10_RELEASE not in system_release_version
-            and RHEL_9_RELEASE not in system_release_version
-            and AL2027_RELEASE not in system_release_version
-        ):
-
-            return
-
-        should_optimize_readahead = get_boolean_config_item_value(
-            config, MOUNT_CONFIG_SECTION, OPTIMIZE_READAHEAD_ITEM, default_value=False
-        )
-        if not should_optimize_readahead:
+        if not should_revise_readahead(config):
             return
 
         # Use subprocess with timeout to get device number to avoid hanging on os.stat()
@@ -2457,16 +2494,60 @@ def get_utc_now():
     return datetime.now(timezone.utc)
 
 
-def check_process_name(pid):
-    if not check_if_running_on_macos():
-        cmd = ["cat", "/proc/{pid}/cmdline".format(pid=pid)]
-    else:
-        cmd = ["ps", "-p", str(pid), "-o", "command="]
+def check_process_name_and_state(pid):
+    """Return `(name, state)` for `pid`, or `(None, None)` if it cannot be read.
 
+    Reads /proc/<pid>/stat, never /proc/<pid>/cmdline: a cmdline read enters the
+    target's address space and can block forever on a wedged process. `state` is
+    the run state, and is None on macOS, which has no procfs.
+    """
+    if check_if_running_on_macos():
+        return _check_process_name_and_state_macos(pid)
+
+    try:
+        with open(PROC_STAT_PATH_FORMAT % pid, "rb") as f:
+            stat_line = f.read()
+    except OSError as e:
+        # The process exited, or the pid was never valid.
+        logging.debug("Could not read the stat file of pid %s: %s", pid, e)
+        return None, None
+
+    # Field 2 is the name in parentheses and may contain parentheses itself, so it
+    # ends at the LAST ')'. Splitting on the first is spoofable via prctl.
+    name_start = stat_line.find(b"(")
+    name_end = stat_line.rfind(b")")
+    if name_start == -1 or name_end < name_start:
+        logging.debug(
+            "Unexpected content in the stat file of pid %s: %s", pid, stat_line
+        )
+        return None, None
+
+    # Field 3 is the run state: the first token after the name, taken by splitting
+    # rather than a fixed offset so it does not depend on the kernel's spacing.
+    fields_after_name = stat_line[name_end + 1 :].split()
+    state = fields_after_name[0] if fields_after_name else None
+
+    return stat_line[name_start + 1 : name_end], state
+
+
+def _check_process_name_and_state_macos(pid):
     p = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True
+        ["ps", "-p", str(pid), "-o", "command="],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        close_fds=True,
     )
-    return p.communicate()[0]
+    try:
+        return p.communicate(timeout=PROCESS_NAME_TIMEOUT_SEC)[0], None
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        logging.warning(
+            "Timed out after %ss looking up the name of process %s",
+            PROCESS_NAME_TIMEOUT_SEC,
+            pid,
+        )
+        return None, None
 
 
 def check_if_running_on_macos():
@@ -2539,9 +2620,14 @@ def clean_up_previous_tunnel_pids(state_file_dir=STATE_FILE_DIR):
                 logging.debug("No PID found in state file %s", state_file)
                 continue
 
-            out = check_process_name(pid)
+            process_name, process_state = check_process_name_and_state(pid)
 
-            if out and ("stunnel" in str(out) or "efs-proxy" in str(out)):
+            # A zombie's name still matches, so it must not count as active.
+            if (
+                process_name
+                and ("stunnel" in str(process_name) or "efs-proxy" in str(process_name))
+                and process_state not in DEAD_RUN_STATES
+            ):
                 logging.debug(
                     "PID %s in state file %s is active. Skipping clean up",
                     pid,

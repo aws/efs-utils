@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 3.3.1
+Version   : 3.3.2
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -135,7 +135,7 @@ mv vendor %{_builddir}/%{name}/src/
 export CMAKE=/usr/bin/cmake3
 %endif
 cd %{_builddir}/%{name}/src
-cargo build --release -p efs-proxy --manifest-path %{_builddir}/%{name}/src/Cargo.toml
+cargo build --release --locked -p efs-proxy --manifest-path %{_builddir}/%{name}/src/Cargo.toml
 
 %install
 mkdir -p %{buildroot}%{_sysconfdir}/amazon/efs
@@ -221,6 +221,11 @@ fi
 %clean
 
 %changelog
+* Fri Sep 18 2026 Samuel Hale <samuhale@amazon.com> - 3.3.2
+- Improve watchdog handling of zombie proxy threads
+- Fix read_ahead_kb being overwritten on certain distros
+- Reject empty cafiles on mount
+
 * Sun Aug 23 2026 Yue Wang <wangnyue@amazon.com> - 3.3.1
 - Schedule TLS cert refresh from credential expiration
 - Don't denylist file handles for transient S3 errors on readbypass path

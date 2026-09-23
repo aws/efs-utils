@@ -69,7 +69,7 @@ fn extract_metadata_from_args(argarray: &[nfs_argop4]) -> NfsMetadata {
             | nfs_argop4::OP_DESTROY_CLIENTID(_),
         ) => NfsMetadata::default(),
         _ => {
-            debug!("Failed to extract_metadata from COMPOUND4args: first operation {:?} is not eligible for default metadata", argarray.first().map(|op| opnum_from_argop(op)));
+            debug!("Failed to extract_metadata from COMPOUND4args: first operation {:?} is not eligible for default metadata", argarray.first().map(opnum_from_argop));
             NfsMetadata::default()
         }
     }
@@ -108,7 +108,7 @@ fn extract_metadata_from_res(resarray: &[nfs_resop4]) -> NfsMetadata {
             | nfs_resop4::OP_DESTROY_CLIENTID(_),
         ) => NfsMetadata::default(),
         _ => {
-            debug!("Failed to extract_metadata from COMPOUND4res: first operation {:?} is not eligible for default metadata", resarray.first().map(|op| opnum_from_resop(op)));
+            debug!("Failed to extract_metadata from COMPOUND4res: first operation {:?} is not eligible for default metadata", resarray.first().map(opnum_from_resop));
             NfsMetadata::default()
         }
     }
@@ -209,7 +209,7 @@ where
         new_op: &T::OpCodeType,
     ) -> Result<(), NfsError> {
         // We only allow certain operations to be replaced.
-        if !Self::is_replacement_valid(&original_op, &new_op) {
+        if !Self::is_replacement_valid(original_op, new_op) {
             return Err(NfsError::InvalidOperationReplacement);
         }
 
@@ -235,8 +235,7 @@ where
         }
 
         // use a pre-allocated buffer to dummy pack the operation.
-        let mut buf = Vec::<u8>::with_capacity(self.nfs_body.len());
-        buf.resize(self.nfs_body.len(), 0);
+        let mut buf = vec![0; self.nfs_body.len()];
 
         let mut offset_vec = vec![];
         offset_vec.push(offset_before_target_ops);
@@ -411,7 +410,7 @@ impl NfsCompoundMessage for COMPOUND4args {
                     if data_ref
                         .offset
                         .checked_add(data_ref.len)
-                        .map_or(true, |end| end > nfs_body.len())
+                        .is_none_or(|end| end > nfs_body.len())
                     {
                         return Err(NfsError::ParseError);
                     }
@@ -431,17 +430,14 @@ impl NfsCompoundMessage for COMPOUND4args {
         // nfs body prefix for Compound4args:
         // length of 4 bytes tag length + tag + 4 bytes minorversion + 4 bytes ops array length
         let padded_tag_len = get_padded_size(self.tag.0.len());
-        return size_of::<uint32_t>()
-            + padded_tag_len
-            + size_of::<uint32_t>()
-            + size_of::<uint32_t>();
+        size_of::<uint32_t>() + padded_tag_len + size_of::<uint32_t>() + size_of::<uint32_t>()
     }
 
     fn is_op_replacement_valid(original_op: &Self::OpCodeType, new_op: &Self::OpCodeType) -> bool {
-        match (original_op, new_op) {
-            (nfs_opnum4::OP_READ, nfs_opnum4::OP_AWSFILE_READ_BYPASS) => true,
-            _ => false,
-        }
+        matches!(
+            (original_op, new_op),
+            (nfs_opnum4::OP_READ, nfs_opnum4::OP_AWSFILE_READ_BYPASS)
+        )
     }
 }
 
@@ -481,7 +477,7 @@ impl NfsCompoundMessage for COMPOUND4res {
                     if data_ref
                         .offset
                         .checked_add(data_ref.len)
-                        .map_or(true, |end| end > nfs_body.len())
+                        .is_none_or(|end| end > nfs_body.len())
                     {
                         return Err(NfsError::ParseError);
                     }
@@ -503,10 +499,7 @@ impl NfsCompoundMessage for COMPOUND4res {
         // nfs body prefix for Compound4res:
         // 4 bytes length of status + 4 bytes tag length + tag + 4 bytes ops array length
         let padded_tag_len = get_padded_size(self.tag.0.len());
-        return size_of::<uint32_t>()
-            + size_of::<uint32_t>()
-            + padded_tag_len
-            + size_of::<uint32_t>();
+        size_of::<uint32_t>() + size_of::<uint32_t>() + padded_tag_len + size_of::<uint32_t>()
     }
 
     fn is_op_replacement_valid(original_op: &Self::OpCodeType, new_op: &Self::OpCodeType) -> bool {
@@ -556,11 +549,11 @@ impl NfsCompoundMessage for CB_COMPOUND4args {
         // nfs body prefix for CB_COMPOUND4args:
         // length of 4 bytes tag length + tag + 4 bytes minorversion + 4 bytes callback_ident + 4 bytes ops array length
         let padded_tag_len = get_padded_size(self.tag.0.len());
-        return size_of::<uint32_t>()
+        size_of::<uint32_t>()
             + padded_tag_len
             + size_of::<uint32_t>()
             + size_of::<uint32_t>()
-            + size_of::<uint32_t>();
+            + size_of::<uint32_t>()
     }
 
     fn is_op_replacement_valid(original_op: &Self::OpCodeType, new_op: &Self::OpCodeType) -> bool {
@@ -607,10 +600,7 @@ impl NfsCompoundMessage for CB_COMPOUND4res {
         // nfs body prefix for CB_COMPOUND4res:
         // length of status + 4 bytes tag length + tag + 4 bytes ops array length
         let padded_tag_len = get_padded_size(self.tag.0.len());
-        return size_of::<nfsstat4>()
-            + size_of::<uint32_t>()
-            + padded_tag_len
-            + size_of::<uint32_t>();
+        size_of::<nfsstat4>() + size_of::<uint32_t>() + padded_tag_len + size_of::<uint32_t>()
     }
 
     fn is_op_replacement_valid(original_op: &Self::OpCodeType, new_op: &Self::OpCodeType) -> bool {
@@ -965,7 +955,7 @@ mod tests {
             .expect("Failed to parse modified compoundres_for_test");
 
         // verify other unchanged ops:
-        let expected_ops = vec![
+        let expected_ops = [
             nfs_opnum4::OP_SEQUENCE,
             nfs_opnum4::OP_GETATTR,
             nfs_opnum4::OP_READ, // was OP_AWSFILE_READ_BYPASS
@@ -1201,7 +1191,7 @@ mod tests {
 
         // verify the result
         // verify the op_vec is correct
-        let expected_ops = vec![
+        let expected_ops = [
             nfs_opnum4::OP_SEQUENCE,
             nfs_opnum4::OP_GETATTR,
             nfs_opnum4::OP_AWSFILE_READ_BYPASS,
@@ -1260,7 +1250,7 @@ mod tests {
 
         // verify the result
         // verify the op_vec is correct
-        let expected_ops = vec![
+        let expected_ops = [
             nfs_opnum4::OP_SEQUENCE,
             nfs_opnum4::OP_GETATTR,
             nfs_opnum4::OP_READ,
