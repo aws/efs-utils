@@ -37,6 +37,9 @@ from efs_utils_common.constants import (
     AWS_CONTAINER_AUTH_TOKEN_FILE_ENV,
     AWS_CONTAINER_CREDS_FULL_URI_ENV,
     AWS_CREDENTIALS_FILE,
+    AWS_ACCESS_KEY_ID_ENV,
+    AWS_SECRET_ACCESS_KEY_ENV,
+    AWS_SESSION_TOKEN_ENV,
     CONFIG_FILE_SETTINGS_HELP_URL,
     CREDENTIALS_KEYS,
     ECS_TASK_METADATA_API,
@@ -105,6 +108,10 @@ def get_aws_security_credentials(
     if awsprofile:
         return get_aws_security_credentials_from_awsprofile(awsprofile, True)
 
+    credentials, credentials_source = get_aws_security_credentials_from_env_vars()
+    if credentials and credentials_source:
+        return credentials, credentials_source
+
     # attempt to lookup AWS security credentials through AWS_CONTAINER_CREDENTIALS_RELATIVE_URI environment variable
     if ECS_URI_ENV in os.environ:
         credentials, credentials_source = get_aws_security_credentials_from_ecs(
@@ -160,7 +167,7 @@ def get_aws_security_credentials(
 
     error_msg = (
         "AWS Access Key ID and Secret Access Key are not found in AWS credentials file (%s), config file (%s), "
-        "from ECS credentials relative uri, or from the instance security credentials service"
+        "environment variables, from ECS credentials relative uri, or from the instance security credentials service"
         % (AWS_CREDENTIALS_FILE, AWS_CONFIG_FILE)
     )
     fatal_error(error_msg, error_msg)
@@ -324,6 +331,24 @@ def get_aws_security_credentials_from_pod_identity(config, is_fatal=False):
 
     if is_fatal:
         fatal_error(unsuccessful_resp, unsuccessful_resp)
+    return None, None
+
+
+def get_aws_security_credentials_from_env_vars():
+    # Trailing colon in "environment:" (not a bare "environment"): the watchdog
+    # splits credentials_source on ":" to refresh the cert ahead of expiry.
+    access_key = os.environ.get(AWS_ACCESS_KEY_ID_ENV)
+    secret_key = os.environ.get(AWS_SECRET_ACCESS_KEY_ENV)
+    session_token = os.environ.get(AWS_SESSION_TOKEN_ENV)
+
+    if access_key and secret_key:
+        logging.debug("Retrieved credentials from environment variables")
+        return {
+            "AccessKeyId": access_key,
+            "SecretAccessKey": secret_key,
+            "Token": session_token,
+        }, "environment:"
+
     return None, None
 
 

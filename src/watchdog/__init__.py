@@ -172,6 +172,10 @@ CONFIG_FILE_SETTINGS_HELP_URL = (
     "#cli-configure-files-settings"
 )
 
+AWS_ACCESS_KEY_ID_ENV = "AWS_ACCESS_KEY_ID"
+AWS_SECRET_ACCESS_KEY_ENV = "AWS_SECRET_ACCESS_KEY"
+AWS_SESSION_TOKEN_ENV = "AWS_SESSION_TOKEN"
+
 Mount = namedtuple(
     "Mount", ["server", "mountpoint", "type", "options", "freq", "passno"]
 )
@@ -241,6 +245,8 @@ def get_aws_security_credentials(config, credentials_source, region):
         )
     elif method == "metadata":
         return get_aws_security_credentials_from_instance_metadata(config)
+    elif method == "environment":
+        return get_aws_security_credentials_from_env_vars()
     else:
         logging.error(
             'Improper credentials source string "%s" found from mount state file',
@@ -612,6 +618,21 @@ def get_aws_security_credentials_from_instance_metadata(config):
 
         if iam_security_dict and all(k in iam_security_dict for k in dict_keys):
             return iam_security_dict
+
+    return None
+
+
+def get_aws_security_credentials_from_env_vars():
+    access_key = os.environ.get(AWS_ACCESS_KEY_ID_ENV)
+    secret_key = os.environ.get(AWS_SECRET_ACCESS_KEY_ENV)
+    session_token = os.environ.get(AWS_SESSION_TOKEN_ENV)
+
+    if access_key and secret_key:
+        return {
+            "AccessKeyId": access_key,
+            "SecretAccessKey": secret_key,
+            "Token": session_token,
+        }
 
     return None
 

@@ -78,8 +78,11 @@ class MockUrlLibResponse(object):
 
 
 @pytest.fixture(autouse=True)
-def setup(mocker):
+def setup(mocker, monkeypatch):
     mocker.patch("os.path.expanduser")
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+    monkeypatch.delenv("AWS_SESSION_TOKEN", raising=False)
 
 
 def get_fake_aws_config_file(tmpdir):
@@ -336,6 +339,7 @@ def test_get_aws_security_credentials_no_credentials_found(mocker, capsys):
         "AWS Access Key ID and Secret Access Key are not found in AWS credentials file"
         in err
     )
+    assert "environment variables" in err
     assert (
         "from ECS credentials relative uri, or from the instance security credentials service"
         in err
@@ -1025,3 +1029,89 @@ def test_get_aws_security_credentials_pod_identity_empty_response_not_fatal(mock
 
     assert credentials is None
     assert credentials_source is None
+
+
+def test_get_aws_security_credentials_from_env_vars_with_session_token(mocker):
+    mocker.patch.dict(
+        os.environ,
+        {
+            "AWS_ACCESS_KEY_ID": ACCESS_KEY_ID_VAL,
+            "AWS_SECRET_ACCESS_KEY": SECRET_ACCESS_KEY_VAL,
+            "AWS_SESSION_TOKEN": SESSION_TOKEN_VAL,
+        },
+    )
+
+    credentials, credentials_source = (
+        aws_credentials.get_aws_security_credentials_from_env_vars()
+    )
+
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] == SESSION_TOKEN_VAL
+    assert credentials_source == "environment:"
+
+
+def test_get_aws_security_credentials_from_env_vars_without_session_token(mocker):
+    # AWS_SESSION_TOKEN is optional - long-term IAM user credentials have none.
+    mocker.patch.dict(
+        os.environ,
+        {
+            "AWS_ACCESS_KEY_ID": ACCESS_KEY_ID_VAL,
+            "AWS_SECRET_ACCESS_KEY": SECRET_ACCESS_KEY_VAL,
+        },
+    )
+
+    credentials, credentials_source = (
+        aws_credentials.get_aws_security_credentials_from_env_vars()
+    )
+
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] is None
+    assert credentials_source == "environment:"
+
+
+def test_get_aws_security_credentials_from_env_vars_missing_secret_key(mocker):
+    # AWS_ACCESS_KEY_ID alone is not enough.
+    mocker.patch.dict(os.environ, {"AWS_ACCESS_KEY_ID": ACCESS_KEY_ID_VAL})
+
+    credentials, credentials_source = (
+        aws_credentials.get_aws_security_credentials_from_env_vars()
+    )
+
+    assert credentials is None
+    assert credentials_source is None
+
+
+def test_get_aws_security_credentials_from_env_vars_not_set():
+    credentials, credentials_source = (
+        aws_credentials.get_aws_security_credentials_from_env_vars()
+    )
+
+    assert credentials is None
+    assert credentials_source is None
+
+
+def test_get_aws_security_credentials_routes_through_env_vars(mocker):
+    # End-to-end: the main chain reaches and returns the environment-variable
+    # credentials when nothing earlier in the chain (profile, ECS, Pod Identity,
+    # WebIdentity) is configured.
+    config = get_fake_config()
+    mocker.patch.dict(
+        os.environ,
+        {
+            "AWS_ACCESS_KEY_ID": ACCESS_KEY_ID_VAL,
+            "AWS_SECRET_ACCESS_KEY": SECRET_ACCESS_KEY_VAL,
+            "AWS_SESSION_TOKEN": SESSION_TOKEN_VAL,
+        },
+    )
+    mocker.patch("os.path.exists", return_value=False)
+
+    credentials, credentials_source = aws_credentials.get_aws_security_credentials(
+        config, True, "us-east-1", None
+    )
+
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] == SESSION_TOKEN_VAL
+    assert credentials_source == "environment:"
