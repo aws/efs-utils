@@ -340,6 +340,62 @@ def test_get_aws_security_credentials_instance_metadata_no_response(mocker):
     assert not credentials
 
 
+def test_get_aws_security_credentials_environment(mocker):
+    # A mount that started out using environment-variable credentials persists
+    # "environment:" as its credentials_source - the watchdog must be able to
+    # refresh from it ahead of the cert's expiry the same way it does for every
+    # other source.
+    config = get_fake_config()
+    mocker.patch.dict(
+        os.environ,
+        {
+            "AWS_ACCESS_KEY_ID": ACCESS_KEY_ID_VAL,
+            "AWS_SECRET_ACCESS_KEY": SECRET_ACCESS_KEY_VAL,
+            "AWS_SESSION_TOKEN": SESSION_TOKEN_VAL,
+        },
+        clear=True,
+    )
+
+    credentials = watchdog.get_aws_security_credentials(
+        config, "environment:", "us-east-1"
+    )
+
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] == SESSION_TOKEN_VAL
+
+
+def test_get_aws_security_credentials_environment_without_session_token(mocker):
+    config = get_fake_config()
+    mocker.patch.dict(
+        os.environ,
+        {
+            "AWS_ACCESS_KEY_ID": ACCESS_KEY_ID_VAL,
+            "AWS_SECRET_ACCESS_KEY": SECRET_ACCESS_KEY_VAL,
+        },
+        clear=True,
+    )
+
+    credentials = watchdog.get_aws_security_credentials(
+        config, "environment:", "us-east-1"
+    )
+
+    assert credentials["AccessKeyId"] == ACCESS_KEY_ID_VAL
+    assert credentials["SecretAccessKey"] == SECRET_ACCESS_KEY_VAL
+    assert credentials["Token"] is None
+
+
+def test_get_aws_security_credentials_environment_not_set(mocker):
+    config = get_fake_config()
+    mocker.patch.dict(os.environ, {}, clear=True)
+
+    credentials = watchdog.get_aws_security_credentials(
+        config, "environment:", "us-east-1"
+    )
+
+    assert not credentials
+
+
 def test_credentials_file_helper_found_with_token(tmpdir):
     fake_file = get_fake_aws_config_file(tmpdir)
     config = get_fake_config(add_test_profile=True)

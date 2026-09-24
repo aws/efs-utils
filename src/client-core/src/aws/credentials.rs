@@ -13,8 +13,7 @@
 //!    creds for s3 client here for ReadBypass even if a non-tls mounts to EFS is used.
 //!
 //! 2. This credential chain now check environment variable credentials provider to support
-//!    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, and AWS_REGION only for lambda
-//!
+//!    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, and AWS_REGION
 
 use aws_config::{
     environment::EnvironmentVariableCredentialsProvider,
@@ -129,8 +128,13 @@ impl ProxyCredentialsChain {
         } else {
             CredentialsProviderChain::first_try("Profile", profile_provider)
         };
+        
         #[cfg(not(any(test, feature = "test-util")))]
-        let chain = CredentialsProviderChain::first_try("Profile", profile_provider);
+        let chain = CredentialsProviderChain::first_try(
+            "Environment",
+            EnvironmentVariableCredentialsProvider::new(),
+        )
+        .or_else("Profile", profile_provider);
 
         let mut chain = chain.or_else("EcsContainer", ecs_provider);
 
@@ -298,7 +302,7 @@ mod tests {
         let config = ProxyConfig::default();
         let _chain = ProxyCredentialsChain::new_from_config(&config).await;
         // Reaching here without panicking is the assertion; the chain is
-        // Profile -> EcsContainer -> WebIdentityTokenFromEnv -> Ec2InstanceMetadata
+        // Environment -> Profile -> EcsContainer -> WebIdentityTokenFromEnv -> Ec2InstanceMetadata
         // when neither jwt_path nor role_arn are set.
     }
 
@@ -335,6 +339,32 @@ mod tests {
         let mut config2 = ProxyConfig::default();
         config2.nested_config.read_bypass_config.jwt_path = Some("/tmp/token.jwt".to_string());
         let _chain2 = ProxyCredentialsChain::new_from_config(&config2).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_environment_provider_resolves_when_present() {
+        let _ecs_guard = EnvGuard::new(AWS_CONTAINER_CREDENTIALS_RELATIVE_URI);
+        let _lambda_guard = EnvGuard::new("AWS_LAMBDA_FUNCTION_NAME");
+        let _access_key_guard = EnvGuard::new("AWS_ACCESS_KEY_ID");
+        let _secret_key_guard = EnvGuard::new("AWS_SECRET_ACCESS_KEY");
+        let _session_token_guard = EnvGuard::new("AWS_SESSION_TOKEN");
+        let _endpoint_guard = EnvGuard::new("AWS_ENDPOINT_URL_S3");
+
+        std::env::set_var("AWS_ACCESS_KEY_ID", "test-access-key-id");
+        std::env::set_var("AWS_SECRET_ACCESS_KEY", "test-secret-access-key");
+        std::env::set_var("AWS_ENDPOINT_URL_S3", "http://127.0.0.1:0");
+
+        let config = ProxyConfig::default();
+        let chain = ProxyCredentialsChain::new_from_config(&config).await;
+
+        let credentials = chain
+            .provide_credentials()
+            .await
+            .expect("Environment provider should resolve when no earlier provider is available");
+
+        assert_eq!(credentials.access_key_id(), "test-access-key-id");
+        assert_eq!(credentials.secret_access_key(), "test-secret-access-key");
     }
 
     // resolve_region precedence: an explicit read_bypass_config.region is
