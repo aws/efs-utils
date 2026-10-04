@@ -13,6 +13,20 @@ import watchdog
 
 PID = 1234
 
+LINUX_ONLY = pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="reads Linux procfs"
+)
+FREEBSD_ONLY = pytest.mark.skipif(
+    not sys.platform.startswith("freebsd"), reason="runs FreeBSD ps(1)"
+)
+
+
+@pytest.fixture(autouse=True)
+def _pin_linux_platform(monkeypatch):
+    # Most tests exercise the procfs path. Pin the platform so they run
+    # identically on a FreeBSD host; FreeBSD tests override it.
+    monkeypatch.setattr(watchdog.sys, "platform", "linux")
+
 
 def write_stat_file(tmpdir, pid, content):
     """Point the lookup at a stat file we control, so the parser can be tested
@@ -22,6 +36,7 @@ def write_stat_file(tmpdir, pid, content):
     return str(tmpdir) + "/%s.stat"
 
 
+@LINUX_ONLY
 def test_returns_name_and_state_of_a_live_process():
     proc = subprocess.Popen(["sleep", "30"])
     try:
@@ -35,6 +50,7 @@ def test_returns_name_and_state_of_a_live_process():
         proc.wait()
 
 
+@LINUX_ONLY
 def test_does_not_spawn_a_subprocess_on_linux(mocker):
     """Reading a process name must not fork a reader that can block in the kernel.
     If this fails, the watchdog can again deadlock its poll loop on a wedged pid."""
@@ -52,6 +68,7 @@ def test_does_not_spawn_a_subprocess_on_linux(mocker):
         proc.wait()
 
 
+@LINUX_ONLY
 def test_reports_the_zombie_run_state():
     """A zombie's name is still readable, so only the state distinguishes it from a
     healthy process."""
@@ -72,6 +89,7 @@ def test_reports_the_zombie_run_state():
         proc.wait()
 
 
+@LINUX_ONLY
 def test_name_that_impersonates_the_state_field(tmpdir):
     """Field 2 is attacker-controlled via prctl(PR_SET_NAME). A name like
     "x) Z 1 2 3" makes a parse that splits on the FIRST ')' read the state as "Z",
@@ -113,6 +131,7 @@ def test_name_that_impersonates_the_state_field(tmpdir):
         proc.wait()
 
 
+@LINUX_ONLY
 def test_returns_no_name_or_state_when_the_process_does_not_exist():
     with open("/proc/sys/kernel/pid_max") as f:
         pid_max = int(f.read().strip())
@@ -207,3 +226,85 @@ def test_macos_reaps_the_killed_ps_child_on_timeout(mocker):
     # The reap carries no timeout: the child is already SIGKILLed so the wait is
     # bounded, and a second TimeoutExpired here would escape the handler.
     assert {} == communicate.call_args_list[1][1]
+
+
+def test_freebsd_uses_ps_comm_and_state(mocker):
+    """FreeBSD procfs has no stat file, so the name and state come from ps."""
+    mocker.patch("watchdog.sys.platform", "freebsd16")
+    popen = mocker.patch("watchdog.subprocess.Popen")
+    popen.return_value.communicate.return_value = (b"efs-proxy Ss\n", b"")
+
+    assert (b"efs-proxy", b"S") == watchdog.check_process_name_and_state(PID)
+
+    assert [
+        "ps",
+        "-p",
+        str(PID),
+        "-o",
+        "comm=",
+        "-o",
+        "state=",
+    ] == popen.call_args[0][0]
+    assert (
+        watchdog.PROCESS_NAME_TIMEOUT_SEC
+        == popen.return_value.communicate.call_args[1]["timeout"]
+    )
+
+
+def test_freebsd_reports_the_zombie_run_state(mocker):
+    mocker.patch("watchdog.sys.platform", "freebsd16")
+    popen = mocker.patch("watchdog.subprocess.Popen")
+    popen.return_value.communicate.return_value = (b"efs-proxy Z\n", b"")
+
+    name, state = watchdog.check_process_name_and_state(PID)
+
+    assert b"efs-proxy" == name
+    assert state in watchdog.DEAD_RUN_STATES
+
+
+def test_freebsd_returns_nothing_when_ps_finds_no_process(mocker):
+    mocker.patch("watchdog.sys.platform", "freebsd16")
+    popen = mocker.patch("watchdog.subprocess.Popen")
+    popen.return_value.communicate.return_value = (b"", b"")
+
+    assert (None, None) == watchdog.check_process_name_and_state(PID)
+
+
+def test_freebsd_kills_and_reaps_ps_on_timeout(mocker):
+    mocker.patch("watchdog.sys.platform", "freebsd16")
+    popen = mocker.patch("watchdog.subprocess.Popen")
+    communicate = popen.return_value.communicate
+    communicate.side_effect = [
+        subprocess.TimeoutExpired(cmd="ps", timeout=watchdog.PROCESS_NAME_TIMEOUT_SEC),
+        (b"", b""),
+    ]
+
+    assert (None, None) == watchdog.check_process_name_and_state(PID)
+
+    assert popen.return_value.kill.called
+    assert 2 == communicate.call_count
+
+
+@FREEBSD_ONLY
+def test_freebsd_live_and_zombie_process(mocker):
+    mocker.patch("watchdog.sys.platform", "freebsd16")
+    proc = subprocess.Popen(["sleep", "30"])
+    zombie = subprocess.Popen(["true"])
+    try:
+        name, state = watchdog.check_process_name_and_state(proc.pid)
+        assert b"sleep" == name
+        assert state not in watchdog.DEAD_RUN_STATES
+
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            name, state = watchdog.check_process_name_and_state(zombie.pid)
+            if state == b"Z":
+                break
+            time.sleep(0.05)
+        else:
+            pytest.skip("could not observe the child in the zombie state")
+        assert b"true" == name
+    finally:
+        proc.kill()
+        proc.wait()
+        zombie.wait()
