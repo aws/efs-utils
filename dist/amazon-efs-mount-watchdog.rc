@@ -4,15 +4,11 @@
 # REQUIRE: DAEMON
 # KEYWORD: shutdown
 #
-# This service does NOT need to be enabled in /etc/rc.conf: mount_efs(8)
-# starts it on demand via `service amazon_efs_mount_watchdog onestart`
-# whenever an EFS filesystem is mounted with TLS or IAM. It is installed
-# disabled by design.
+# Add these lines to /etc/rc.conf.local or /etc/rc.conf
+# to enable this service:
 #
-# You only need to enable it manually if you want the watchdog running
-# independently of any mount (rare):
-#
-# amazon_efs_mount_watchdog_enable="YES"
+# amazon_efs_mount_watchdog_enable (bool):	Set to NO by default.
+#						Set it to YES to enable the watchdog.
 
 . /etc/rc.subr
 
