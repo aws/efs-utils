@@ -35,9 +35,9 @@ BAD_AP_ID_INCORRECT_START = "bad-fsap-0123456789abc"
 BAD_AP_ID_TOO_SHORT = "fsap-0123456789abcdef"
 BAD_AP_ID_BAD_CHAR = "fsap-0123456789abcdefg"
 CREDENTIALS_SOURCE = "credentials:default"
-ACCESS_KEY_ID_VAL = "FAKE_AWS_ACCESS_KEY_ID"
+ACCESS_KEY_ID_VAL = "AKIAIOSFODNN7EXAMPLE"
 SECRET_ACCESS_KEY_VAL = "FAKE_AWS_SECRET_ACCESS_KEY"
-SESSION_TOKEN_VAL = "FAKE_SESSION_TOKEN"
+SESSION_TOKEN_VAL = "FAKEwJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY"
 FIXED_DT = datetime(2000, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 CLIENT_INFO = {"source": "test", "efs_utils_version": watchdog.VERSION}
 CREDENTIALS = {
@@ -539,7 +539,7 @@ def test_create_canonical_request_without_token(mocker):
 
     assert (
         "GET\n/\nAction=Connect&PublicKeyHash=fake_public_key_hash&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential="
-        "FAKE_AWS_ACCESS_KEY_ID%2F20000101%2Fus-east-1%2Felasticfilesystem%2Faws4_request&X-Amz-Date=20000101T120000Z&"
+        "AKIAIOSFODNN7EXAMPLE%2F20000101%2Fus-east-1%2Felasticfilesystem%2Faws4_request&X-Amz-Date=20000101T120000Z&"
         "X-Amz-Expires=86400&X-Amz-SignedHeaders=host\nhost:fs-deadbeef\nhost\n"
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         == canonical_request_out
@@ -561,8 +561,9 @@ def test_create_canonical_request_with_token(mocker):
 
     assert (
         "GET\n/\nAction=Connect&PublicKeyHash=fake_public_key_hash&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential="
-        "FAKE_AWS_ACCESS_KEY_ID%2F20000101%2Fus-east-1%2Felasticfilesystem%2Faws4_request&X-Amz-Date=20000101T120000Z&"
-        "X-Amz-Expires=86400&X-Amz-Security-Token=FAKE_SESSION_TOKEN&X-Amz-SignedHeaders=host\nhost:fs-deadbeef\nhost"
+        "AKIAIOSFODNN7EXAMPLE%2F20000101%2Fus-east-1%2Felasticfilesystem%2Faws4_request&X-Amz-Date=20000101T120000Z&"
+        "X-Amz-Expires=86400&X-Amz-Security-Token=FAKEwJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY&X-Amz-SignedHeaders=host"
+        "\nhost:fs-deadbeef\nhost"
         "\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         == canonical_request_out
     )

@@ -3,7 +3,7 @@
 name = "efs-proxy"
 edition = "2021"
 # The version of efs-proxy is tied to efs-utils.
-version = "3.3.2"
+version = "3.3.3"
 publish = false
 license = "MIT"
 
@@ -81,3 +81,10 @@ aws-smithy-mocks = "0.1.1"
 aws-sdk-s3 = { version = "1.87.0", features = ["test-util"] }
 aws-smithy-runtime-api = "1.8.0"
 serial_test = "3.0"
+
+# The Shuttle bans in the workspace's clippy.toml apply to efs-client-core, which is
+# onboarded to Shuttle. This crate reaches std's primitives directly, so the lints
+# that enforce that convention are off here.
+[lints.clippy]
+disallowed_types = "allow"
+disallowed_methods = "allow"

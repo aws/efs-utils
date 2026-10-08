@@ -248,7 +248,7 @@ getconf PAGESIZE
 ```
 
 RHEL 8 on arm64 reports 65536, and SUSE ships a `kernel-64kb` package alongside its 4 KiB default.
-Amazon Linux 2, Amazon Linux 2023, RHEL 9, RHEL 10, Debian 12, Ubuntu 22.04, Ubuntu 24.04 and the
+Amazon Linux 2, Amazon Linux 2023, RHEL 9, RHEL 10, Debian 12, Ubuntu 22.04, Ubuntu 24.04, Ubuntu 26.04 and the
 SLES 15 SP6 default kernel report 4096.
 
 4096 needs no extra step. For 16384 or 65536, build from source and set the page size explicitly:

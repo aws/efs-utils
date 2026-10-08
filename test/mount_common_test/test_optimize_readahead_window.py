@@ -236,8 +236,9 @@ def _wait_for_readahead_value(path, expected, timeout=10, interval=0.1):
     deadline = time.time() + timeout
     while time.time() < deadline:
         with open(path) as f:
-            if int(f.read().strip()) == expected:
-                return
+            content = f.read().strip()
+        if content and int(content) == expected:
+            return
         time.sleep(interval)
     raise AssertionError(
         "read_ahead_kb was not restored to %s within %ss" % (expected, timeout)

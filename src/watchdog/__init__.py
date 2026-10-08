@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "3.3.2"
+VERSION = "3.3.3"
 SERVICE = "elasticfilesystem"
 FS_PREFIX = "fs-"
 
@@ -153,6 +153,14 @@ REQUEST_PAYLOAD = ""
 
 AP_ID_RE = re.compile("^(?:fsap)-[0-9a-f]{17}$")
 
+# Credential-provider values must match the STS credential grammar exactly: one
+# line, no whitespace or control characters.
+# accessKeyId follows the STS Credentials.AccessKeyId grammar: length 16-128,
+# pattern [\w] = [A-Za-z0-9_]. sessionToken is base64/base64url with no fixed
+# size (STS: "make no assumptions about the maximum size").
+ACCESS_KEY_ID_RE = re.compile(r"\A[A-Za-z0-9_]{16,128}\Z")
+SESSION_TOKEN_RE = re.compile(r"\A[A-Za-z0-9+/=_-]+\Z")
+
 ECS_TASK_METADATA_API = "http://169.254.170.2"
 STS_ENDPOINT_URL_FORMAT = "https://sts.{}.{}/"
 INSTANCE_IAM_URL = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
@@ -200,6 +208,10 @@ STUNNEL_INSTALLATION_MESSAGE = "Please install it following the instructions at:
 EFS_PROXY_INSTALLATION_MESSAGE = "Please install it by reinstalling amazon-efs-utils"
 
 EFS_PROXY_BIN = "efs-proxy"
+
+# Local copy of efs_utils_common.constants.EFS_PROXY_WORKER_THREADS_OPTION; the
+# installed watchdog is standalone and cannot import efs_utils_common.
+EFS_PROXY_WORKER_THREADS_OPTION = "--worker-threads"
 
 OPTIMIZE_READAHEAD_ITEM = "optimize_readahead"
 DEFAULT_NFS_MAX_READAHEAD_MULTIPLIER = 15
@@ -1236,6 +1248,7 @@ def start_tls_tunnel(child_procs, state, state_file_dir, state_file):
         tunnel_process_name = "efs-proxy"
 
     if tunnel is None or not is_pid_running(tunnel.pid):
+        log_worker_threads_restart_hint(command)
         fatal_error(
             "Failed to initialize %s for %s" % (tunnel_process_name, state_file),
             "Failed to start %s." % tunnel_process_name,
@@ -1671,6 +1684,39 @@ def get_int_value_from_config_file(config, config_name, default_config_value):
         )
 
     return val
+
+
+def log_worker_threads_restart_hint(command):
+    """Explain a pinned-worker-count proxy that dies the moment it is restarted.
+
+    efs-proxy refuses a --worker-threads value above the parallelism available to
+    its own process. The watchdog's cgroup need not match the one the mount was
+    issued from -- a CPUQuota on amazon-efs-mount-watchdog.service, or a live
+    `systemctl set-property`, is enough for them to differ -- so a count accepted
+    at mount time can be refused on restart. The proxy writes the reason to
+    stderr, which this path sends to DEVNULL, so without this the only trace is
+    "Failed to start efs-proxy".
+
+    Deliberately does not print an available-parallelism number: computing it
+    here would mean reading only the affinity mask, which ignores any cgroup CPU
+    quota and so can disagree with the figure efs-proxy actually used.
+    """
+    try:
+        requested = command[command.index(EFS_PROXY_WORKER_THREADS_OPTION) + 1]
+    except (ValueError, IndexError):
+        # No pinned count in this command, so this is not the failure mode.
+        return
+
+    logging.warning(
+        "efs-proxy exited immediately and its command pins %s %s. efs-proxy "
+        "refuses a worker count above the parallelism available to its own "
+        "process; on restart that is this watchdog service's cgroup, which need "
+        "not match the cgroup the mount was issued from. If they differ, lower "
+        "or remove efs_proxy_worker_threads in the mount section of "
+        "efs-utils.conf and remount.",
+        EFS_PROXY_WORKER_THREADS_OPTION,
+        requested,
+    )
 
 
 def check_child_procs(child_procs):
@@ -2207,6 +2253,17 @@ def efs_client_auth_builder(
     signature = calculate_signature(
         string_to_sign, date, secret_access_key, region, service
     )
+
+    # Reject a malformed credential before use. In the long-lived watchdog, skip
+    # just this refresh (return None; the caller logs and moves on) rather than
+    # fatal_error, which would stop cert refresh for every mount on the host.
+    if not ACCESS_KEY_ID_RE.match(access_key_id):
+        logging.error("accessKeyId is malformed; skipping SigV4 signature section")
+        return None
+    if session_token and not SESSION_TOKEN_RE.match(session_token):
+        logging.error("sessionToken is malformed; skipping SigV4 signature section")
+        return None
+
     efs_client_auth_str = "[ efs_client_auth ]"
     efs_client_auth_str += "\naccessKeyId = UTF8String:" + access_key_id
     efs_client_auth_str += "\nsignature = OCTETSTRING:" + signature

@@ -1,3 +1,11 @@
+# v3.3.3
+- Validate credential provider values before use
+- Validate rolearn and jwtpath mount options
+- Add optional efs_proxy_worker_threads config item to bound efs-proxy worker threads
+- Support macOS 27
+- Fix watchdog LaunchDaemon python3 path on macOS
+- Add Ubuntu 26.04 to supported distributions
+
 # v3.3.2
 - Improve watchdog handling of zombie proxy threads
 - Fix read_ahead_kb being overwritten on certain distros

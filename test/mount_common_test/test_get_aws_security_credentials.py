@@ -17,6 +17,8 @@ import pytest
 
 import efs_utils_common
 import efs_utils_common.aws_credentials as aws_credentials
+import efs_utils_common.constants as constants
+import efs_utils_common.context as context
 
 from .. import utils
 
@@ -80,6 +82,14 @@ class MockUrlLibResponse(object):
 @pytest.fixture(autouse=True)
 def setup(mocker):
     mocker.patch("os.path.expanduser")
+    # Initialize the shared MountContext this suite relies on (config file path /
+    # mount type), rather than depending on state leaked from an earlier test.
+    mount_context = context.MountContext()
+    mount_context.reset()
+    mount_context.mount_type = constants.MOUNT_TYPE_EFS
+    mount_context.config_file_path = constants.CONFIG_FILE
+    yield
+    mount_context.reset()
 
 
 def get_fake_aws_config_file(tmpdir):

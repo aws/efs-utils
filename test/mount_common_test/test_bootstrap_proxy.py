@@ -11,6 +11,11 @@ import efs_utils_common
 import efs_utils_common.certificate_utils as certificate_utils
 import efs_utils_common.proxy as proxy
 
+try:
+    import ConfigParser
+except ImportError:
+    from configparser import ConfigParser
+
 AP_ID = "fsap-beefdead"
 FS_ID = "fs-deadbeef"
 CLIENT_SOURCE = "test"
@@ -28,8 +33,16 @@ INIT_SYSTEM = "upstart"
 MOCK_CONFIG = MagicMock()
 
 
-def setup_mocks(mocker):
+def setup_mocks(mocker, patch_worker_threads=True):
     mocker.patch("efs_utils_common.proxy.start_watchdog")
+    # MOCK_CONFIG is a MagicMock, so any real read of it yields a MagicMock (or
+    # trips a side_effect another test installed) rather than a usable value.
+    # Default the optional worker-thread item to "not configured"; tests that
+    # exercise it either override this patch or opt out and pass a real config.
+    if patch_worker_threads:
+        mocker.patch(
+            "efs_utils_common.proxy.get_efs_proxy_worker_threads", return_value=None
+        )
     mocker.patch(
         "efs_utils_common.proxy.get_tls_port_range",
         return_value=(DEFAULT_TLS_PORT, DEFAULT_TLS_PORT + 10),
@@ -72,6 +85,10 @@ def setup_mocks(mocker):
 
 def setup_mocks_without_popen(mocker):
     mocker.patch("efs_utils_common.proxy.start_watchdog")
+    # See the note in setup_mocks: MOCK_CONFIG cannot answer a real config read.
+    mocker.patch(
+        "efs_utils_common.proxy.get_efs_proxy_worker_threads", return_value=None
+    )
     mocker.patch(
         "efs_utils_common.proxy.get_tls_port_range",
         return_value=(DEFAULT_TLS_PORT, DEFAULT_TLS_PORT + 10),
@@ -803,3 +820,110 @@ def test_bootstrap_proxy_s3files_mount_with_nodirects3read(mocker, tmpdir):
     popen_args = popen_args[0]
 
     assert "--no-direct-s3-read" in popen_args
+
+
+def test_bootstrap_proxy_omits_worker_threads_when_not_configured(mocker, tmpdir):
+    """With the config item unset, no --worker-threads argument is passed and
+    efs-proxy keeps its own one-worker-per-CPU default."""
+    popen_mock, _ = setup_mocks(mocker)
+    mocker.patch("os.rename")
+    state_file_dir = str(tmpdir)
+    mocker.patch("efs_utils_common.proxy.is_ocsp_enabled", return_value=False)
+    mocker.patch(
+        "efs_utils_common.proxy._efs_proxy_bin", return_value="/usr/bin/efs-proxy"
+    )
+
+    with proxy.bootstrap_proxy(
+        MOCK_CONFIG,
+        INIT_SYSTEM,
+        DNS_NAME,
+        FS_ID,
+        MOUNT_POINT,
+        {"tls": None},
+        state_file_dir,
+        efs_proxy_enabled=True,
+    ):
+        pass
+
+    popen_args, _ = popen_mock.call_args
+    popen_args = popen_args[0]
+
+    assert "--worker-threads" not in popen_args
+
+
+def test_bootstrap_proxy_passes_configured_worker_threads(mocker, tmpdir):
+    """A configured worker count reaches efs-proxy as `--worker-threads N`."""
+    popen_mock, _ = setup_mocks(mocker)
+    mocker.patch("os.rename")
+    state_file_dir = str(tmpdir)
+    mocker.patch("efs_utils_common.proxy.is_ocsp_enabled", return_value=False)
+    mocker.patch(
+        "efs_utils_common.proxy._efs_proxy_bin", return_value="/usr/bin/efs-proxy"
+    )
+    mocker.patch("efs_utils_common.proxy.get_efs_proxy_worker_threads", return_value=8)
+
+    with proxy.bootstrap_proxy(
+        MOCK_CONFIG,
+        INIT_SYSTEM,
+        DNS_NAME,
+        FS_ID,
+        MOUNT_POINT,
+        {"tls": None},
+        state_file_dir,
+        efs_proxy_enabled=True,
+    ):
+        pass
+
+    popen_args, _ = popen_mock.call_args
+    popen_args = popen_args[0]
+
+    assert "--worker-threads" in popen_args
+    assert popen_args[popen_args.index("--worker-threads") + 1] == "8"
+
+
+def test_bootstrap_proxy_worker_threads_read_from_real_config(mocker, tmpdir):
+    """End-to-end: the [mount] config item alone produces the CLI argument, with
+    no patching of the reader, and the value lands in the watchdog state command."""
+    popen_mock, _ = setup_mocks(mocker, patch_worker_threads=False)
+    mocker.patch("os.rename")
+    state_file_dir = str(tmpdir)
+    mocker.patch("efs_utils_common.proxy.is_ocsp_enabled", return_value=False)
+    mocker.patch(
+        "efs_utils_common.proxy._efs_proxy_bin", return_value="/usr/bin/efs-proxy"
+    )
+    state_file_mock = mocker.patch(
+        "efs_utils_common.proxy.write_tunnel_state_file", return_value="~mocktempfile"
+    )
+
+    try:
+        config = ConfigParser.SafeConfigParser()
+    except AttributeError:
+        config = ConfigParser()
+    config.add_section(efs_utils_common.constants.CONFIG_SECTION)
+    config.set(
+        efs_utils_common.constants.CONFIG_SECTION,
+        efs_utils_common.constants.EFS_PROXY_WORKER_THREADS_ITEM,
+        "4",
+    )
+
+    with proxy.bootstrap_proxy(
+        config,
+        INIT_SYSTEM,
+        DNS_NAME,
+        FS_ID,
+        MOUNT_POINT,
+        {"tls": None},
+        state_file_dir,
+        efs_proxy_enabled=True,
+    ):
+        pass
+
+    popen_args, _ = popen_mock.call_args
+    popen_args = popen_args[0]
+    assert popen_args[popen_args.index("--worker-threads") + 1] == "4"
+
+    # The watchdog restarts the exact command persisted in the state file, so an
+    # explicit worker count must survive a proxy restart.
+    state_args, _ = state_file_mock.call_args
+    persisted_command = state_args[4]
+    assert persisted_command[persisted_command.index("--worker-threads") + 1] == "4"

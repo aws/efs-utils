@@ -24,8 +24,6 @@
 //! - `OnceLock` / `LazyLock`: not provided by shuttle; re-exported from std
 //!   below. A racing initialization blocks a real thread, invisible to the
 //!   Shuttle scheduler.
-//! - `atomic_enum` (`AtomicCacheEntryState` in read_ahead/cached_data.rs):
-//!   the macro hard-codes std atomics.
 //! - `moka::sync::Cache` (util/fh_denylist.rs): no wrapper exists; its
 //!   internal locking is invisible to the scheduler. Usage is encapsulated,
 //!   so manual context-switch points can be added if a shuttle test needs to
@@ -35,9 +33,10 @@
 
 pub use shuttle_sync::sync::*;
 
-// Not modeled by shuttle; std versions work under shuttle but their blocking
-// is invisible to the scheduler (see module docs).
-pub use std::sync::{LazyLock, OnceLock};
+// Shuttle does not model these four, so under both configurations they are std's own
+// types and `crate::sync::Arc` names exactly `std::sync::Arc`. The bans in clippy.toml
+// cover the primitives Shuttle does model, where the two spellings are distinct types.
+pub use std::sync::{Arc, LazyLock, OnceLock, Weak};
 
 /// Thread primitives that swap to Shuttle's controlled threads when the
 /// `shuttle` feature is enabled.

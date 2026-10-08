@@ -6,6 +6,25 @@
 //! under their original crate paths so existing references keep compiling.
 #![warn(rust_2018_idioms)]
 
+// The Shuttle synchronization bans listed in the workspace's clippy.toml are only
+// meaningful under the `shuttle` feature: that is the build in which `crate::sync`
+// resolves to Shuttle's instrumented types, so a `std::sync::…` path is a genuinely
+// different type. In the default build `crate::sync` re-exports std, the two spellings
+// resolve to the same type, and the lint cannot tell them apart -- so it is off there.
+// `cargo clippy --features shuttle` is what enforces the convention; see DEVELOPMENT.md.
+//
+// A deliberate exception is an allow on the smallest enclosing item:
+//
+//     #[allow(clippy::disallowed_types, reason = "why a real std primitive here")]
+#![cfg_attr(
+    feature = "shuttle",
+    deny(clippy::disallowed_types, clippy::disallowed_methods)
+)]
+#![cfg_attr(
+    not(feature = "shuttle"),
+    allow(clippy::disallowed_types, clippy::disallowed_methods)
+)]
+
 pub mod aws;
 pub mod config;
 pub mod config_parser;
