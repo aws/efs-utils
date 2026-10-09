@@ -17,9 +17,9 @@ import time
 from contextlib import contextmanager
 
 try:
-    from configparser import NoOptionError
+    from configparser import NoOptionError, NoSectionError
 except ImportError:
-    from ConfigParser import NoOptionError
+    from ConfigParser import NoOptionError, NoSectionError
 
 from efs_utils_common.aws_credentials import (
     get_aws_profile,
@@ -34,6 +34,7 @@ from efs_utils_common.config_utils import (
     is_ocsp_enabled,
 )
 from efs_utils_common.constants import (
+    CONFIG_CONTROL_CHAR_PATTERN,
     CONFIG_SECTION,
     DEFAULT_NFS_MOUNT_COMMAND_TIMEOUT_SEC,
     DEFAULT_PROXY_LOGGING_FILE_COUNT,
@@ -44,6 +45,8 @@ from efs_utils_common.constants import (
     DEFAULT_UNKNOWN_VALUE,
     EFS_PROXY_NO_READ_BYPASS_OPTION,
     EFS_PROXY_TLS_OPTION,
+    EFS_PROXY_WORKER_THREADS_ITEM,
+    EFS_PROXY_WORKER_THREADS_OPTION,
     LOG_DIR,
     MOUNT_TYPE_S3FILES,
     PROXY_CONFIG_SECTION,
@@ -172,6 +175,23 @@ def get_mount_specific_filename(fs_id, mountpoint, tls_port):
     )
 
 
+def _reject_control_chars(key, value):
+    """Reject a control char in any stunnel/efs-proxy config key or value.
+
+    Lines are written unescaped as "key = value", so a key or value must not
+    contain a newline or any other control character. Central backstop for every
+    value reaching the config, whatever its source.
+    """
+    for field in (str(key), str(value)):
+        if CONFIG_CONTROL_CHAR_PATTERN.search(field):
+            fatal_error(
+                "Refusing to write malformed stunnel config: option %r contains a "
+                "disallowed control character" % key,
+                "serialize_stunnel_config rejected a control character in key/value "
+                "for option %r" % key,
+            )
+
+
 def serialize_stunnel_config(config, header=None):
     lines = []
 
@@ -181,8 +201,10 @@ def serialize_stunnel_config(config, header=None):
     for k, v in config.items():
         if type(v) is list:
             for item in v:
+                _reject_control_chars(k, item)
                 lines.append("%s = %s" % (k, item))
         else:
+            _reject_control_chars(k, v)
             lines.append("%s = %s" % (k, v))
 
     return lines
@@ -699,6 +721,62 @@ def tls_enabled(options):
     return "tls" in options
 
 
+def get_efs_proxy_worker_threads(config):
+    """Return the configured efs-proxy worker-thread count, or None when unset.
+
+    Checks only what the config file can settle: that the value is an integer,
+    and that it is at least 1. A bad value is fatal rather than defaulted,
+    because a caller who set the item to bound thread usage must not silently get
+    the unbounded default. The upper bound -- not exceeding the parallelism the
+    proxy actually has -- is efs-proxy's, in `validate_worker_threads`.
+
+    An empty value is treated as unset, so a half-uncommented line does not fail
+    a mount.
+    """
+    try:
+        raw_value = config.get(CONFIG_SECTION, EFS_PROXY_WORKER_THREADS_ITEM)
+    except (NoOptionError, NoSectionError):
+        return None
+
+    raw_value = raw_value.strip()
+    if not raw_value:
+        return None
+
+    range_help = (
+        "Expected a positive integer no greater than the number of CPUs "
+        "available to this host, or remove the item to use one worker thread per "
+        "available CPU."
+    )
+
+    try:
+        worker_threads = int(raw_value)
+    except ValueError:
+        fatal_error(
+            'Invalid value "%s" for %s in section %s of %s. %s'
+            % (
+                raw_value,
+                EFS_PROXY_WORKER_THREADS_ITEM,
+                CONFIG_SECTION,
+                get_config_file_path(),
+                range_help,
+            )
+        )
+
+    if worker_threads < 1:
+        fatal_error(
+            "Invalid value %d for %s in section %s of %s. %s"
+            % (
+                worker_threads,
+                EFS_PROXY_WORKER_THREADS_ITEM,
+                CONFIG_SECTION,
+                get_config_file_path(),
+                range_help,
+            )
+        )
+
+    return worker_threads
+
+
 @contextmanager
 def bootstrap_proxy(
     config,
@@ -724,6 +802,14 @@ def bootstrap_proxy(
 
     This function will yield a handle on the proxy process, whether it's efs-proxy or stunnel.
     """
+
+    # Read this before anything is created. It is the only fatal_error between
+    # choosing the port and writing the state file, and the watchdog's cleanup
+    # (cleanup_mount_state_if_stunnel_not_running) is keyed off state files -- so
+    # failing later would orphan the certificate directory and the proxy config
+    # in /var/run/efs on every attempt, which accumulates under a CSI retry loop.
+    # A config lookup is cheap, so failing fast here costs nothing.
+    efs_proxy_worker_threads = get_efs_proxy_worker_threads(config)
 
     proxy_listen_sock = choose_tls_port_and_get_bind_sock(
         config, options, state_file_dir
@@ -857,6 +943,10 @@ def bootstrap_proxy(
                 or MountContext().mount_type != MOUNT_TYPE_S3FILES
             ):
                 tunnel_args.append(EFS_PROXY_NO_READ_BYPASS_OPTION)
+            if efs_proxy_worker_threads is not None:
+                tunnel_args.extend(
+                    [EFS_PROXY_WORKER_THREADS_OPTION, str(efs_proxy_worker_threads)]
+                )
         else:
             tunnel_args = [_stunnel_bin(), stunnel_config_file]
 

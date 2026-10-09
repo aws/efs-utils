@@ -7,7 +7,6 @@
 
 use crate::sync::atomic::{AtomicU64, Ordering};
 use crate::sync::Arc;
-use atomic_enum::atomic_enum;
 use bytes::Bytes;
 use log::{error, warn};
 use std::ops::Range;
@@ -26,13 +25,49 @@ const MAX_LOADING_TIME_MS: u64 = 30_000; // Double the timeout value, used to ev
 /// - Loaded: Data available. Readers can access via read lock.
 /// - Failed: S3 fetch failed. Entry will be removed from index.
 /// - Evicted: Entry marked for removal. Data cleared, memory returned to pool.
-#[atomic_enum]
-#[derive(PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheEntryState {
     Loading = 0,
     Loaded = 1,
     Failed = 2,
     Evicted = 3,
+}
+
+impl CacheEntryState {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            0 => CacheEntryState::Loading,
+            1 => CacheEntryState::Loaded,
+            2 => CacheEntryState::Failed,
+            3 => CacheEntryState::Evicted,
+            // Only `store` writes this cell, and it takes a `CacheEntryState`, so no
+            // other bit pattern is reachable.
+            other => unreachable!("CacheEntryState holds {other}"),
+        }
+    }
+}
+
+/// The entry's state, held in a Shuttle-instrumented atomic.
+///
+/// Readers gate on this: `load` is an acquire and `store` a release, and a waiter is
+/// woken through `state_notify` once it changes. That makes it coordination rather
+/// than a number, so it goes through `crate::sync::atomic` and the Shuttle scheduler
+/// explores the interleavings it allows.
+#[derive(Debug)]
+pub struct AtomicCacheEntryState(crate::sync::atomic::AtomicU8);
+
+impl AtomicCacheEntryState {
+    pub fn new(state: CacheEntryState) -> Self {
+        Self(crate::sync::atomic::AtomicU8::new(state as u8))
+    }
+
+    pub fn load(&self, order: Ordering) -> CacheEntryState {
+        CacheEntryState::from_u8(self.0.load(order))
+    }
+
+    pub fn store(&self, state: CacheEntryState, order: Ordering) {
+        self.0.store(state as u8, order);
+    }
 }
 
 pub fn get_current_time_ms() -> u64 {

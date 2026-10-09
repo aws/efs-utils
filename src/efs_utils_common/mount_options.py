@@ -9,8 +9,10 @@
 
 from efs_utils_common.constants import (
     AP_REGEX_PATTERN,
+    JWTPATH_REGEX_PATTERN,
     MOUNT_TYPE_S3FILES,
     NON_NFS_OPTIONS,
+    ROLEARN_REGEX_PATTERN,
     UNSUPPORTED_OPTIONS,
 )
 from efs_utils_common.context import MountContext
@@ -183,3 +185,13 @@ def check_options_validity(options):
         # The URI must start with slash symbol as it will be appended to the ECS task metadata endpoint
         if not options["awscredsuri"].startswith("/"):
             fatal_error("awscredsuri %s is malformed" % options["awscredsuri"])
+
+    # rolearn and jwtpath reach the root-owned TLS tunnel config; reject
+    # malformed values (including embedded newlines) up front.
+    if options.get("rolearn") is not None:
+        if not ROLEARN_REGEX_PATTERN.match(options["rolearn"]):
+            fatal_error("rolearn %s is malformed" % options["rolearn"])
+
+    if options.get("jwtpath") is not None:
+        if not JWTPATH_REGEX_PATTERN.match(options["jwtpath"]):
+            fatal_error("jwtpath %s is malformed" % options["jwtpath"])

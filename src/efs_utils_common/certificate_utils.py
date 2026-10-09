@@ -23,6 +23,7 @@ except ImportError:
     from urllib import quote_plus
 
 from efs_utils_common.constants import (
+    ACCESS_KEY_ID_REGEX_PATTERN,
     ALGORITHM,
     AWS4_REQUEST,
     CANONICAL_HEADERS,
@@ -35,6 +36,7 @@ from efs_utils_common.constants import (
     NOT_BEFORE_MINS,
     PRIVATE_KEY_FILE,
     REQUEST_PAYLOAD,
+    SESSION_TOKEN_REGEX_PATTERN,
     SIGNED_HEADERS,
     SIGV4_DATETIME_FORMAT,
     STATE_FILE_DIR,
@@ -266,6 +268,14 @@ def efs_client_auth_builder(
     )
     string_to_sign = create_string_to_sign(canonical_request, date, region)
     signature = calculate_signature(string_to_sign, date, secret_access_key, region)
+
+    # Reject a malformed credential before use. signature is hex and sigv4DateTime
+    # is formatted, so neither needs validating here.
+    if not ACCESS_KEY_ID_REGEX_PATTERN.match(access_key_id):
+        fatal_error("accessKeyId is malformed")
+    if session_token and not SESSION_TOKEN_REGEX_PATTERN.match(session_token):
+        fatal_error("sessionToken is malformed")
+
     efs_client_auth_str = "[ efs_client_auth ]"
     efs_client_auth_str += "\naccessKeyId = UTF8String:" + access_key_id
     efs_client_auth_str += "\nsignature = OCTETSTRING:" + signature

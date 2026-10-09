@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 3.3.2
+Version   : 3.3.3
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -221,6 +221,14 @@ fi
 %clean
 
 %changelog
+* Mon Oct 5 2026 Vinay Mishra <hmishrv@amazon.com> - 3.3.3
+- Validate credential provider values before use
+- Validate rolearn and jwtpath mount options
+- Add optional efs_proxy_worker_threads config item to bound efs-proxy worker threads
+- Support macOS 27
+- Fix watchdog LaunchDaemon python3 path on macOS
+- Add Ubuntu 26.04 to supported distributions
+
 * Fri Sep 18 2026 Samuel Hale <samuhale@amazon.com> - 3.3.2
 - Improve watchdog handling of zombie proxy threads
 - Fix read_ahead_kb being overwritten on certain distros

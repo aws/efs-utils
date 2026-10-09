@@ -21,6 +21,7 @@ Efs-utils for EFS and S3 file systems are supported on the following Linux distr
 | Ubuntu 20.04         | `deb` | `systemd` |
 | Ubuntu 22.04         | `deb` | `systemd` |
 | Ubuntu 24.04         | `deb` | `systemd` |
+| Ubuntu 26.04         | `deb` | `systemd` |
 | OpenSUSE Leap        | `rpm` | `systemd` |
 | SLES 15              | `rpm` | `systemd` |
 
