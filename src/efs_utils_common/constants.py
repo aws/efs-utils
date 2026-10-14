@@ -6,11 +6,12 @@
 # for the specific language governing permissions and limitations under
 # the License.
 
+
 import os
 import pwd
 import re
 
-VERSION = "3.3.3"
+VERSION = "3.3.4"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
 AMAZON_LINUX_2_PRETTY_NAME = "Amazon Linux 2"
@@ -164,6 +165,7 @@ MACOS_SONOMA_RELEASE = "macOS-14"
 MACOS_SEQUOIA_RELEASE = "macOS-15"
 MACOS_TAHOE_RELEASE = "macOS-26"
 MACOS_GOLDEN_GATE_RELEASE = "macOS-27"
+
 
 # Multiplier for max read ahead buffer size
 # Set default as 15 aligning with prior linux kernel 5.4

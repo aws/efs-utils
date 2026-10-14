@@ -1,3 +1,7 @@
+# v3.3.4
+- Document Rust 1.94.1 as the minimum build version
+- Improve state file recovery when mounts die
+
 # v3.3.3
 - Validate credential provider values before use
 - Validate rolearn and jwtpath mount options

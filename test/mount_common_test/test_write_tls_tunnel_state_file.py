@@ -180,3 +180,73 @@ def test_write_tunnel_state_file_no_cert(tmpdir):
     assert "accessPoint" not in state
     assert "fsId" not in state
     assert "useIam" not in state
+
+
+def test_update_tunnel_temp_state_file_with_tunnel_pid(tmpdir):
+    state_file_dir = str(tmpdir)
+    state_file = proxy.write_tunnel_state_file(
+        FS_ID, "/home/user/foo/mount", PORT, -1, COMMAND, FILES, state_file_dir
+    )
+
+    updated = proxy.update_tunnel_temp_state_file_with_tunnel_pid(
+        state_file, state_file_dir, PID
+    )
+
+    assert updated == state_file
+    with open(os.path.join(state_file_dir, state_file)) as f:
+        state = json.load(f)
+    assert PID == state.get("pid")
+    assert state.get("pid_start_time") == proxy.get_process_start_time(PID)
+    assert COMMAND == state.get("cmd")
+    assert os.listdir(state_file_dir) == [state_file]
+
+
+def test_update_tunnel_temp_state_file_leaves_record_intact_if_write_dies(
+    tmpdir, mocker
+):
+    state_file_dir = str(tmpdir)
+    state_file = proxy.write_tunnel_state_file(
+        FS_ID, "/home/user/foo/mount", PORT, -1, COMMAND, FILES, state_file_dir
+    )
+    mocker.patch("efs_utils_common.proxy.json.dump", side_effect=OSError("killed"))
+
+    with pytest.raises(OSError):
+        proxy.update_tunnel_temp_state_file_with_tunnel_pid(
+            state_file, state_file_dir, PID
+        )
+
+    with open(os.path.join(state_file_dir, state_file)) as f:
+        assert json.load(f).get("pid") == -1
+    assert os.listdir(state_file_dir) == [state_file]
+
+
+def test_write_tunnel_state_file_records_writer(tmpdir):
+    state_file_dir = str(tmpdir)
+
+    state_file = proxy.write_tunnel_state_file(
+        FS_ID, "/home/user/foo/mount", PORT, -1, COMMAND, FILES, state_file_dir
+    )
+
+    with open(os.path.join(state_file_dir, state_file)) as f:
+        state = json.load(f)
+    assert state["writer_pid"] == os.getpid()
+    assert state["writer_start_time"] == proxy.get_process_start_time(os.getpid())
+    assert os.listdir(state_file_dir) == [state_file]
+
+
+def test_get_process_start_time_of_missing_pid_is_none():
+    assert proxy.get_process_start_time(2**22 + 1) is None
+
+
+def test_get_process_start_time_on_mac_pins_ps_environment(mocker):
+    mocker.patch("efs_utils_common.proxy.check_if_platform_is_mac", return_value=True)
+    proc = mocker.MagicMock()
+    proc.communicate.return_value = (b"Thu Oct  8 12:00:00 2026\n", b"")
+    popen = mocker.patch("efs_utils_common.proxy.subprocess.Popen", return_value=proc)
+
+    assert proxy.get_process_start_time(7) == "Thu Oct  8 12:00:00 2026"
+    assert popen.call_args[1]["env"] == {
+        "LC_ALL": "C",
+        "TZ": "UTC",
+        "PATH": "/bin:/usr/bin",
+    }

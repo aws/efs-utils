@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 3.3.3
+Version   : 3.3.4
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -221,6 +221,10 @@ fi
 %clean
 
 %changelog
+* Mon Oct 12 2026 Samuel Hale <samuhale@amazon.com> - 3.3.4
+- Document Rust 1.94.1 as the minimum build version
+- Improve state file recovery when mounts die
+
 * Mon Oct 5 2026 Vinay Mishra <hmishrv@amazon.com> - 3.3.3
 - Validate credential provider values before use
 - Validate rolearn and jwtpath mount options
