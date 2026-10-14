@@ -7,6 +7,8 @@ import os
 import tempfile
 from unittest.mock import MagicMock
 
+import pytest
+
 import efs_utils_common
 import efs_utils_common.certificate_utils as certificate_utils
 import efs_utils_common.proxy as proxy
@@ -131,6 +133,34 @@ def test_bootstrap_proxy_state_file_dir_exists(mocker, tmpdir):
 
     assert "/usr/bin/efs-proxy" in args
     assert EXPECTED_STUNNEL_CONFIG_FILE in args
+
+
+def _bootstrap(mocker, state_file_dir):
+    mocker.patch("efs_utils_common.proxy.is_ocsp_enabled", return_value=False)
+    mocker.patch(
+        "efs_utils_common.proxy._efs_proxy_bin", return_value="/usr/bin/efs-proxy"
+    )
+    with proxy.bootstrap_proxy(
+        MOCK_CONFIG, INIT_SYSTEM, DNS_NAME, FS_ID, MOUNT_POINT, {}, state_file_dir
+    ):
+        pass
+
+
+def test_bootstrap_proxy_tolerates_state_file_finalized_by_watchdog(mocker, tmpdir):
+    # The watchdog renamed the temp first; the record is in place.
+    setup_mocks(mocker)
+    mocker.patch("os.rename", side_effect=FileNotFoundError())
+    tmpdir.join("mocktempfile").write("{}")
+
+    _bootstrap(mocker, str(tmpdir))
+
+
+def test_bootstrap_proxy_fails_when_state_file_is_missing(mocker, tmpdir):
+    setup_mocks(mocker)
+    mocker.patch("os.rename", side_effect=FileNotFoundError())
+
+    with pytest.raises(FileNotFoundError):
+        _bootstrap(mocker, str(tmpdir))
 
 
 def test_bootstrap_proxy_state_file_nonexistent_dir(mocker, tmpdir):

@@ -15,21 +15,55 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
+      # Untrusted GitHub event fields (titles, bodies, logins) are passed via env
+      # and encoded into JSON with `jq --arg`, never interpolated into the payload
+      # string directly: a `jq` encoder quotes them safely, so a crafted title or
+      # comment cannot break out of the JSON or inject keys into the webhook body.
+      - name: Build issue notification payload
+        if: github.event_name == 'issues'
+        env:
+          ACTION: ${{ github.event.action }}
+          NUMBER: ${{ github.event.issue.number }}
+          TITLE: ${{ github.event.issue.title }}
+          URL: ${{ github.event.issue.html_url }}
+          USER: ${{ github.event.issue.user.login }}
+        run: |
+          jq -n \
+            --arg type "issue_update" \
+            --arg action "$ACTION" \
+            --argjson number "$NUMBER" \
+            --arg title "$TITLE" \
+            --arg url "$URL" \
+            --arg user "$USER" \
+            '{type: $type, action: $action, number: $number, title: $title, url: $url, user: $user}' \
+            > "${RUNNER_TEMP}/slack-payload.json"
+
       - name: Send issue notification to Slack
         if: github.event_name == 'issues'
         uses: slackapi/slack-github-action@v2.1.1
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
           webhook-type: incoming-webhook
-          payload: |
-            {
-              "type": "issue_update",
-              "action": "${{ github.event.action }}",
-              "number": ${{ github.event.issue.number }},
-              "title": "${{ github.event.issue.title }}",
-              "url": "${{ github.event.issue.html_url }}",
-              "user": "${{ github.event.issue.user.login }}"
-            }
+          payload-file-path: ${{ runner.temp }}/slack-payload.json
+
+      - name: Build pull request notification payload
+        if: github.event_name == 'pull_request_target'
+        env:
+          ACTION: ${{ github.event.action }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+          URL: ${{ github.event.pull_request.html_url }}
+          USER: ${{ github.event.pull_request.user.login }}
+        run: |
+          jq -n \
+            --arg type "pr_update" \
+            --arg action "$ACTION" \
+            --argjson number "$NUMBER" \
+            --arg title "$TITLE" \
+            --arg url "$URL" \
+            --arg user "$USER" \
+            '{type: $type, action: $action, number: $number, title: $title, url: $url, user: $user}' \
+            > "${RUNNER_TEMP}/slack-payload.json"
 
       - name: Send pull request notification to Slack
         if: github.event_name == 'pull_request_target'
@@ -37,15 +71,28 @@ jobs:
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
           webhook-type: incoming-webhook
-          payload: |
-            {
-              "type": "pr_update",
-              "action": "${{ github.event.action }}",
-              "number": ${{ github.event.pull_request.number }},
-              "title": "${{ github.event.pull_request.title }}",
-              "url": "${{ github.event.pull_request.html_url }}",
-              "user": "${{ github.event.pull_request.user.login }}"
-            }
+          payload-file-path: ${{ runner.temp }}/slack-payload.json
+
+      - name: Build issue comment notification payload
+        if: github.event_name == 'issue_comment' && !github.event.issue.pull_request
+        env:
+          ACTION: ${{ github.event.action }}
+          NUMBER: ${{ github.event.issue.number }}
+          TITLE: ${{ github.event.issue.title }}
+          URL: ${{ github.event.comment.html_url }}
+          BODY: ${{ github.event.comment.body }}
+          USER: ${{ github.event.comment.user.login }}
+        run: |
+          jq -n \
+            --arg type "issue_comment" \
+            --arg action "$ACTION" \
+            --argjson number "$NUMBER" \
+            --arg title "$TITLE" \
+            --arg url "$URL" \
+            --arg body "$BODY" \
+            --arg user "$USER" \
+            '{type: $type, action: $action, number: $number, title: $title, url: $url, body: $body, user: $user}' \
+            > "${RUNNER_TEMP}/slack-payload.json"
 
       - name: Send issue comments notification to Slack
         if: github.event_name == 'issue_comment' && !github.event.issue.pull_request
@@ -53,13 +100,4 @@ jobs:
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
           webhook-type: incoming-webhook
-          payload: |
-            {
-              "type": "issue_comment",
-              "action": "${{ github.event.action }}",
-              "number": ${{ github.event.issue.number }},
-              "title": "${{ github.event.issue.title }}",
-              "url": "${{ github.event.comment.html_url }}",
-              "body": "${{ github.event.comment.body }}",
-              "user": "${{ github.event.comment.user.login }}"
-            }
+          payload-file-path: ${{ runner.temp }}/slack-payload.json

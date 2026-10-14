@@ -567,21 +567,77 @@ def write_tunnel_state_file(
         "mount_time": time.time(),
         "mountpoint": mountpoint,
         "service_type": context.service,
+        # Lets the watchdog tell a mount still in progress from one whose
+        # mount helper died before renaming this file.
+        "writer_pid": os.getpid(),
+        "writer_start_time": get_process_start_time(os.getpid()),
     }
 
     if cert_details:
         state.update(cert_details)
 
-    with open(os.path.join(state_file_dir, state_file), "w") as f:
-        json.dump(state, f)
+    return rewrite_tunnel_state_file(state, state_file_dir, state_file)
 
-    return state_file
+
+# `ps -o lstart` is formatted with the caller's locale and time zone. Pin both so
+# the watchdog and mount.efs produce the same string for the same process.
+PS_LSTART_ENV = {"LC_ALL": "C", "TZ": "UTC", "PATH": "/bin:/usr/bin"}
+
+
+def get_process_start_time(pid):
+    """Return the start time of pid, or None if it is not running.
+
+    Linux: field 22 of /proc/<pid>/stat, clock ticks since boot. macOS: the
+    fixed-format `ps -o lstart` string. The watchdog compares it for equality.
+    """
+    if check_if_platform_is_mac():
+        p = subprocess.Popen(
+            ["ps", "-p", str(pid), "-o", "lstart="],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            close_fds=True,
+            env=PS_LSTART_ENV,
+        )
+        try:
+            out = p.communicate(timeout=5)[0]
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.communicate()
+            return None
+        return out.decode().strip() or None
+    try:
+        with open("/proc/%s/stat" % pid, "rb") as f:
+            stat_line = f.read()
+    except OSError:
+        return None
+    # The name in field 2 may contain spaces or parentheses; it ends at the last ")".
+    fields_after_name = stat_line[stat_line.rfind(b")") + 1 :].split()
+    try:
+        return int(fields_after_name[19])
+    except (IndexError, ValueError):
+        return None
 
 
 def rewrite_tunnel_state_file(state, state_file_dir, state_file):
-    with open(os.path.join(state_file_dir, state_file), "w") as f:
-        json.dump(state, f)
+    # Write then rename so a kill mid-write cannot leave a truncated record. The
+    # scratch name matches none of the state dir scans (fs-, ~fs-, .<port>).
+    state_file_path = os.path.join(state_file_dir, state_file)
+    scratch_path = os.path.join(state_file_dir, "~" + state_file + ".tmp")
+    try:
+        with open(scratch_path, "w") as f:
+            json.dump(state, f)
+    except Exception:
+        _remove_scratch(scratch_path)
+        raise
+    os.rename(scratch_path, state_file_path)
     return state_file
+
+
+def _remove_scratch(scratch_path):
+    try:
+        os.remove(scratch_path)
+    except OSError:
+        pass
 
 
 def update_tunnel_temp_state_file_with_tunnel_pid(
@@ -590,6 +646,8 @@ def update_tunnel_temp_state_file_with_tunnel_pid(
     with open(os.path.join(state_file_dir, temp_tls_state_file), "r") as f:
         state = json.load(f)
     state["pid"] = stunnel_pid
+    # Lets the watchdog tell this proxy from another process that reused its pid.
+    state["pid_start_time"] = get_process_start_time(stunnel_pid)
     temp_tls_state_file = rewrite_tunnel_state_file(
         state, state_file_dir, temp_tls_state_file
     )
@@ -1007,7 +1065,15 @@ def bootstrap_proxy(
     finally:
         # The caller of this function should use this function in the context of a `with` statement
         # so that the state file is correctly renamed.
-        os.rename(
-            os.path.join(state_file_dir, temp_tls_state_file),
-            os.path.join(state_file_dir, temp_tls_state_file[1:]),
-        )
+        temp_path = os.path.join(state_file_dir, temp_tls_state_file)
+        final_path = os.path.join(state_file_dir, temp_tls_state_file[1:])
+        try:
+            os.rename(temp_path, final_path)
+        except FileNotFoundError:
+            # The watchdog may have finalized it first.
+            if not os.path.exists(final_path):
+                raise
+            logging.info(
+                "State file %s was already finalized by the watchdog",
+                temp_tls_state_file[1:],
+            )

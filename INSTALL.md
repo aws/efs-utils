@@ -14,11 +14,11 @@ This guide provides detailed instructions for building `efs-utils` from source o
 
 Building efs-utils v3.0+ requires the following dependencies:
 
-* `rust` 1.91.1+
+* `rust` 1.94.1+
 * `cargo`
 * `go` 1.17.13+
 * `perl`
-* `cmake` 3.0+
+* `cmake` 3.5+
 * `gcc` and `g++` (or `gcc-c++`)
 * `make`
 * `git`
@@ -113,7 +113,7 @@ export CXX=g++-10
 
 ## CMake version requirement ##
 
-Building AWS-LC requires CMake 3.0 or later. CMake is typically available through the standard packager manager.
+Building AWS-LC requires CMake 3.5 or later. CMake is typically available through the standard package manager.
 
 **Amazon Linux 2 specific:**
 
@@ -181,7 +181,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 ### `make rpm` fails due to "rustc X.X.X is not supported by the following packages" ###
 
-Your system Rust is older than 1.91.1. Remove the system Rust, install via rustup, and build with `make rpm-without-system-rust`:
+Your system Rust is older than 1.94.1. Remove the system Rust, install via rustup, and build with `make rpm-without-system-rust`:
 ```bash
 sudo yum remove -y cargo rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh

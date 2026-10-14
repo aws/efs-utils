@@ -56,7 +56,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "3.3.3"
+VERSION = "3.3.4"
 SERVICE = "elasticfilesystem"
 FS_PREFIX = "fs-"
 
@@ -958,6 +958,198 @@ def get_state_files(state_file_dir):
             state_files[mount_point_and_port] = sf
 
     return state_files
+
+
+def get_orphaned_temp_state_files(state_file_dir):
+    """Return "~fs-" temp state files, which get_state_files does not see."""
+    temp_prefix = "~" + FS_PREFIX
+    orphans = []
+
+    if os.path.isdir(state_file_dir):
+        for sf in os.listdir(state_file_dir):
+            path = os.path.join(state_file_dir, sf)
+            if sf.startswith(temp_prefix) and not os.path.isdir(path):
+                orphans.append(path)
+
+    return orphans
+
+
+# Fallback for temp state files that do not record their writer (written by an
+# older mount helper): one past this age is assumed abandoned.
+ORPHANED_TEMP_STATE_FILE_GRACE_SEC = 300
+
+
+def _remove_orphaned_path(path):
+    try:
+        os.remove(path)
+    except OSError as e:
+        if e.errno != errno.ENOENT:
+            logging.debug("Failed to remove orphaned path %s: %s", path, e)
+
+
+def remove_stale_scratch_files(state_file_dir, grace_period_sec, now):
+    """Remove "~*.tmp" scratch files left by a mount helper killed mid-write.
+
+    A scratch file is live for one json.dump, so one past the grace period
+    is garbage. No scan matches the name, so nothing else would remove it.
+    """
+    if not os.path.isdir(state_file_dir):
+        return
+    for sf in os.listdir(state_file_dir):
+        path = os.path.join(state_file_dir, sf)
+        if not (sf.startswith("~") and sf.endswith(".tmp")) or os.path.isdir(path):
+            continue
+        try:
+            if now - os.path.getmtime(path) < grace_period_sec:
+                continue
+        except OSError:
+            continue
+        logging.info("Removing stale scratch file %s", path)
+        _remove_orphaned_path(path)
+
+
+def get_process_start_time(pid):
+    """Return the start time of pid, or None if it is not running.
+
+    Linux: field 22 of /proc/<pid>/stat, clock ticks since boot. macOS: the
+    fixed-format `ps -o lstart` string. Only compared for equality.
+    """
+    if check_if_running_on_macos():
+        return _get_process_start_time_macos(pid)
+    try:
+        with open(PROC_STAT_PATH_FORMAT % pid, "rb") as f:
+            stat_line = f.read()
+    except OSError:
+        return None
+    # The name in field 2 may contain spaces or parentheses; it ends at the last ")".
+    fields_after_name = stat_line[stat_line.rfind(b")") + 1 :].split()
+    try:
+        return int(fields_after_name[19])
+    except (IndexError, ValueError):
+        return None
+
+
+# Local copy of efs_utils_common.proxy.PS_LSTART_ENV: `ps -o lstart` is formatted
+# with the caller's locale and time zone, so both sides pin them.
+PS_LSTART_ENV = {"LC_ALL": "C", "TZ": "UTC", "PATH": "/bin:/usr/bin"}
+
+
+def _get_process_start_time_macos(pid):
+    p = subprocess.Popen(
+        ["ps", "-p", str(pid), "-o", "lstart="],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        close_fds=True,
+        env=PS_LSTART_ENV,
+    )
+    try:
+        out = p.communicate(timeout=PROCESS_NAME_TIMEOUT_SEC)[0]
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        return None
+    return out.decode().strip() or None
+
+
+def is_recorded_proxy_pid_stale(state):
+    """True if the state's pid now belongs to another process (or none)."""
+    start_time = state.get("pid_start_time")
+    if not state.get("pid") or start_time is None:
+        return False
+    return get_process_start_time(state["pid"]) != start_time
+
+
+def is_state_file_writer_alive(state):
+    """True/False if the mount helper that wrote this state is alive; None if unknown."""
+    pid = state.get("writer_pid")
+    start_time = state.get("writer_start_time")
+    if not pid or start_time is None:
+        return None
+    # pid and start time together identify the process; a reused pid has a new start time.
+    return get_process_start_time(pid) == start_time
+
+
+def reconcile_orphaned_temp_state_files(
+    state_file_dir=STATE_FILE_DIR,
+    grace_period_sec=ORPHANED_TEMP_STATE_FILE_GRACE_SEC,
+):
+    """Finalize temp state files whose mount helper died before renaming them.
+
+    Once finalized, check_efs_mounts restarts efs-proxy if the mount is live or
+    cleans up if it is not. Temps that cannot be finalized are removed, as are
+    stale "~*.tmp" scratch files.
+    """
+    now = time.time()
+    remove_stale_scratch_files(state_file_dir, grace_period_sec, now)
+    for temp_path in get_orphaned_temp_state_files(state_file_dir):
+        try:
+            past_grace = now - os.path.getmtime(temp_path) >= grace_period_sec
+        except OSError as e:
+            logging.debug(
+                "Could not stat orphaned temp state file %s: %s", temp_path, e
+            )
+            continue
+
+        final_name = os.path.basename(temp_path)[1:]
+        final_path = os.path.join(state_file_dir, final_name)
+        if os.path.exists(final_path):
+            if past_grace:
+                logging.info(
+                    "Removing stale temp state file %s; finalized state file %s exists",
+                    temp_path,
+                    final_name,
+                )
+                _remove_orphaned_path(temp_path)
+            continue
+
+        state = {}
+        try:
+            with open(temp_path) as f:
+                state = json.load(f)
+        except (ValueError, OSError) as e:
+            logging.debug(
+                "Could not parse orphaned temp state file %s: %s", temp_path, e
+            )
+        # start_tls_tunnel needs "cmd"; a temp without it is a torn write.
+        if not state.get("cmd"):
+            if past_grace:
+                logging.warning(
+                    "Removing unreadable orphaned temp state file %s for mountpoint %s",
+                    temp_path,
+                    state.get("mountpoint"),
+                )
+                _remove_orphaned_path(temp_path)
+            continue
+
+        writer_alive = is_state_file_writer_alive(state)
+        if writer_alive or (writer_alive is None and not past_grace):
+            logging.debug(
+                "Temp state file %s may be a mount in progress, skipping", temp_path
+            )
+            continue
+
+        logging.warning(
+            "Finalizing orphaned temp state file %s for mountpoint %s",
+            temp_path,
+            state.get("mountpoint"),
+        )
+        try:
+            os.rename(temp_path, final_path)
+        except OSError as e:
+            # The writer may have renamed it first.
+            if e.errno != errno.ENOENT:
+                logging.debug(
+                    "Failed to finalize orphaned temp state file %s: %s", temp_path, e
+                )
+            continue
+        # clean_up_previous_tunnel_pids only runs at startup, so a pid that has
+        # since been reused would otherwise pass as this mount's proxy.
+        if is_recorded_proxy_pid_stale(state):
+            logging.info(
+                "Dropping stale proxy pid %s from %s", state.pop("pid"), final_name
+            )
+            state.pop("pid_start_time", None)
+            rewrite_state_file(state, state_file_dir, final_name)
 
 
 def get_pid_in_state_dir(state_file, state_file_dir):
@@ -2657,6 +2849,8 @@ def clean_up_previous_tunnel_pids(state_file_dir=STATE_FILE_DIR):
     pod after driver restart, upgrade, or crash. This method attempts to clean PIDs from persisted
     state files after efs-csi-driver restart to ensure watchdog creates a new tunnel.
     """
+    reconcile_orphaned_temp_state_files(state_file_dir)
+
     state_files = get_state_files(state_file_dir)
     logging.debug(
         'Persisted state files in "%s": %s', state_file_dir, list(state_files.values())
@@ -2732,6 +2926,7 @@ def main():
         while True:
             config = read_config()
 
+            reconcile_orphaned_temp_state_files()
             check_efs_mounts(
                 config,
                 child_procs,
