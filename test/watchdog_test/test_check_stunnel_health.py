@@ -37,8 +37,16 @@ DEFAULT_MOUNTS = {
 
 
 def setup_mocks(
-    mocker, mock_subprocess_success=False, mock_subprocess_timeout_sec=None
+    mocker,
+    mock_subprocess_success=False,
+    mock_subprocess_timeout_sec=None,
+    platform="linux",
 ):
+    # These tests exercise the `df`-based health check path. Pin the platform so
+    # they run identically on any host, including FreeBSD (where
+    # check_stunnel_health takes a different, sockstat-based branch that is
+    # covered by the dedicated FreeBSD tests below).
+    mocker.patch("watchdog.sys.platform", platform)
     check_time_mock = mocker.patch("time.time", return_value=FIXED_TIME)
     popen_mock = None
     if mock_subprocess_success:
@@ -284,3 +292,100 @@ def _test_stunnel_health_checked_passed_for_non_first_check_helper(
     assert FIXED_TIME == new_state["last_stunnel_check_time"]
     if not mountpoint:
         assert mountpoint == new_state["mountpoint"]
+
+
+# --- FreeBSD branch ---------------------------------------------------------
+# On FreeBSD check_stunnel_health does not run `df`; it probes the efs-proxy's
+# loopback socket via _freebsd_proxy_port_established and only restarts when the
+# proxy is confirmed gone (no established socket AND process not running).
+
+FREEBSD_STATE_FILE_NAME = "fs-deadbeef.mnt.12345"
+
+
+def _write_freebsd_state(tmpdir):
+    state = {
+        "mount_time": DEFAULT_MOUNT_TIME,
+        "mountpoint": "/mnt",
+        "pid": 9999,
+        "last_stunnel_check_time": DEFAULT_LAST_STUNNEL_CHECK_TIME,
+    }
+    state_file = tmpdir.join(FREEBSD_STATE_FILE_NAME)
+    state_file.write(json.dumps(state), ensure=True)
+    return state, state_file
+
+
+def test_freebsd_health_established_does_not_restart(mocker, tmpdir):
+    setup_mocks(mocker, platform="freebsd16")
+    config = _get_config(stunnel_health_check_enabled=True)
+    state, state_file = _write_freebsd_state(tmpdir)
+
+    established_mock = mocker.patch(
+        "watchdog._freebsd_proxy_port_established", return_value=True
+    )
+    kill_mock = mocker.patch("os.killpg")
+    restart_mock = mocker.patch("watchdog.restart_tls_tunnel")
+
+    watchdog.check_stunnel_health(
+        config, state, state_file.dirname, state_file.basename, [], DEFAULT_MOUNTS
+    )
+
+    established_mock.assert_called_once_with("12345")
+    assert 0 == kill_mock.call_count
+    assert 0 == restart_mock.call_count
+
+
+def test_freebsd_health_sockstat_unavailable_does_not_restart(mocker, tmpdir):
+    # sockstat unavailable -> no evidence of failure -> do nothing (fail-safe).
+    setup_mocks(mocker, platform="freebsd16")
+    config = _get_config(stunnel_health_check_enabled=True)
+    state, state_file = _write_freebsd_state(tmpdir)
+
+    mocker.patch("watchdog._freebsd_proxy_port_established", return_value=None)
+    kill_mock = mocker.patch("os.killpg")
+    restart_mock = mocker.patch("watchdog.restart_tls_tunnel")
+
+    watchdog.check_stunnel_health(
+        config, state, state_file.dirname, state_file.basename, [], DEFAULT_MOUNTS
+    )
+
+    assert 0 == kill_mock.call_count
+    assert 0 == restart_mock.call_count
+
+
+def test_freebsd_health_not_established_but_proc_alive_does_not_restart(
+    mocker, tmpdir
+):
+    # No established socket but the proxy process is still running: leave it
+    # alone (mid-reconnect), do not SIGKILL it mid-recovery.
+    setup_mocks(mocker, platform="freebsd16")
+    config = _get_config(stunnel_health_check_enabled=True)
+    state, state_file = _write_freebsd_state(tmpdir)
+
+    mocker.patch("watchdog._freebsd_proxy_port_established", return_value=False)
+    mocker.patch("watchdog.is_mount_stunnel_proc_running", return_value=True)
+    kill_mock = mocker.patch("os.killpg")
+    restart_mock = mocker.patch("watchdog.restart_tls_tunnel")
+
+    watchdog.check_stunnel_health(
+        config, state, state_file.dirname, state_file.basename, [], DEFAULT_MOUNTS
+    )
+
+    assert 0 == restart_mock.call_count
+
+
+def test_freebsd_health_not_established_and_proc_dead_restarts(mocker, tmpdir):
+    # No established socket AND proxy process gone: both signals agree the proxy
+    # is dead, so restart it.
+    setup_mocks(mocker, platform="freebsd16")
+    config = _get_config(stunnel_health_check_enabled=True)
+    state, state_file = _write_freebsd_state(tmpdir)
+
+    mocker.patch("watchdog._freebsd_proxy_port_established", return_value=False)
+    mocker.patch("watchdog.is_mount_stunnel_proc_running", return_value=False)
+    restart_mock = mocker.patch("watchdog.restart_tls_tunnel")
+
+    watchdog.check_stunnel_health(
+        config, state, state_file.dirname, state_file.basename, [], DEFAULT_MOUNTS
+    )
+
+    utils.assert_called_once(restart_mock)
