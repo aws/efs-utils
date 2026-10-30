@@ -40,6 +40,8 @@ from efs_utils_common.cloudwatch import bootstrap_cloudwatch_logging
 from efs_utils_common.config_utils import bootstrap_logging, read_config
 from efs_utils_common.constants import (
     MOUNT_TYPE_S3FILES,
+    PROXY_MODE_EFS_PROXY,
+    PROXY_MODE_STUNNEL,
     S3FILES_CONFIG_FILE,
     S3FILES_SERVICE_NAME,
     VERSION,
@@ -47,7 +49,11 @@ from efs_utils_common.constants import (
 from efs_utils_common.context import MountContext
 from efs_utils_common.error_reporting import fatal_error
 from efs_utils_common.file_utils import usage
-from efs_utils_common.metadata import legacy_stunnel_mode_enabled
+from efs_utils_common.metadata import (
+    get_target_region,
+    legacy_stunnel_mode_enabled,
+    warn_if_region_has_no_fips_endpoints,
+)
 from efs_utils_common.mount_options import (
     check_options_validity,
     check_unsupported_options,
@@ -151,11 +157,12 @@ def main():
 
     fs_id, path, mountpoint, options, fake = parse_arguments(config)
 
-    # For s3files, only allow stunnel on macOS
+    # For s3files, only allow stunnel on macOS. No warning: there is no efs-proxy
+    # build for macOS, so this is not a choice the caller can act on.
     if check_if_platform_is_mac():
-        context.proxy_mode = "stunnel"
+        context.proxy_mode = PROXY_MODE_STUNNEL
     else:
-        context.proxy_mode = "efs_proxy"
+        context.proxy_mode = PROXY_MODE_EFS_PROXY
 
     logging.info("version=%s options=%s", VERSION, options)
 
@@ -166,6 +173,10 @@ def main():
 
     init_system = get_init_system()
     check_network_status(fs_id, init_system)
+    warn_if_region_has_no_fips_endpoints(
+        config=config,
+        region=get_target_region(config, options),
+    )
 
     dns_name, fallback_ip_address = get_dns_name_and_mount_target_ip_address(
         config, fs_id, options

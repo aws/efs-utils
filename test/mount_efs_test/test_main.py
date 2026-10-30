@@ -3,14 +3,22 @@
 # Licensed under the MIT License. See the LICENSE accompanying this file
 # for the specific language governing permissions and limitations under
 # the License.
+import logging
 from contextlib import contextmanager
+from typing import Optional
 from unittest.mock import MagicMock
 
 import pytest
+from pytest_mock import MockFixture
 
 import efs_utils_common.context as efs_context
 import mount_efs
-from efs_utils_common.constants import CONFIG_SECTION, PROXY_MODE_STUNNEL
+from efs_utils_common.constants import (
+    CONFIG_SECTION,
+    LEGACY_STUNNEL_MODE_WARNING_OCSP,
+    LEGACY_STUNNEL_MODE_WARNING_STUNNEL_OPTION,
+    PROXY_MODE_STUNNEL,
+)
 
 from .. import utils
 
@@ -37,23 +45,25 @@ def dummy_contextmanager(*args, **kwargs):
 
 
 def _test_main(
-    mocker,
-    tls=False,
-    root=True,
-    ap_id=None,
-    iam=False,
-    awsprofile=None,
-    ocsp=False,
-    noocsp=False,
-    port=None,
-    tlsport=None,
-    awscredsuri=None,
-    notls=False,
-    crossaccount=False,
-    stunnel=False,
-    macos=False,
-    fake=False,
-):
+    mocker: MockFixture,
+    tls: bool = False,
+    root: bool = True,
+    ap_id: Optional[str] = None,
+    iam: bool = False,
+    awsprofile: Optional[str] = None,
+    ocsp: bool = False,
+    noocsp: bool = False,
+    port: Optional[int] = None,
+    tlsport: Optional[int] = None,
+    awscredsuri: Optional[str] = None,
+    notls: bool = False,
+    crossaccount: bool = False,
+    stunnel: bool = False,
+    macos: bool = False,
+    fake: bool = False,
+    region: str = "us-west-1",
+    fips: bool = False,
+) -> None:
     options = {}
 
     if tls:
@@ -88,6 +98,14 @@ def _test_main(
 
     bootstrap_logging_mock = mocker.patch("mount_efs.bootstrap_logging")
     network_status_check_mock = mocker.patch("mount_efs.check_network_status")
+    mocker.patch(
+        target="mount_efs.get_target_region",
+        return_value=region,
+    )
+    mocker.patch(
+        target="efs_utils_common.metadata.get_fips_config",
+        return_value=fips,
+    )
     if crossaccount:
         get_dns_mock = mocker.patch(
             "mount_efs.get_dns_name_and_fallback_mount_target_ip_address",
@@ -183,6 +201,33 @@ def _test_main_macos_assert_error(
         return_value=is_supported_macos_version,
     )
     _test_main_assert_error(mocker, capsys, expected_err, **kwargs)
+
+
+def test_main_fips_in_us_region(mocker: MockFixture) -> None:
+    _test_main(
+        mocker=mocker,
+        tls=True,
+        tlsport=TLS_PORT,
+        region="us-east-1",
+        fips=True,
+    )
+
+
+def test_main_fips_outside_us_and_canada(
+    mocker: MockFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # The mount goes ahead and logs the region warning.
+    with caplog.at_level(logging.WARNING):
+        _test_main(
+            mocker=mocker,
+            tls=True,
+            tlsport=TLS_PORT,
+            region="eu-west-2",
+            fips=True,
+        )
+
+    assert "region eu-west-2 has no FIPS endpoints" in caplog.text
 
 
 def test_main_tls(mocker):
@@ -442,6 +487,10 @@ def _run_main_for_real_proxy_mode(mocker, options, config, is_mac=False):
     mocker.patch("mount_efs.bootstrap_cloudwatch_logging", return_value=None)
     mocker.patch("mount_efs.check_network_status")
     mocker.patch(
+        target="mount_efs.get_target_region",
+        return_value="us-west-1",
+    )
+    mocker.patch(
         "mount_efs.get_dns_name_and_fallback_mount_target_ip_address",
         return_value=("fs-deadbeef.efs.us-west-1.amazonaws.com", None),
     )
@@ -490,3 +539,45 @@ def test_main_real_proxy_mode_default_stays_efs_proxy(mocker):
     proxy_mode = _run_main_for_real_proxy_mode(mocker, {}, _real_proxy_mode_config())
     assert proxy_mode != PROXY_MODE_STUNNEL
     assert proxy_mode is None
+
+
+STUNNEL_OPTION_WARNING = LEGACY_STUNNEL_MODE_WARNING_STUNNEL_OPTION
+OCSP_WARNING = LEGACY_STUNNEL_MODE_WARNING_OCSP
+
+
+@pytest.mark.parametrize(
+    "options, ocsp_in_config, is_mac, expected_warning",
+    [
+        # Caller-actionable triggers warn, with the message naming what to change.
+        ({"tls": None, "stunnel": None}, False, False, STUNNEL_OPTION_WARNING),
+        ({"stunnel": None}, False, False, STUNNEL_OPTION_WARNING),
+        ({"tls": None, "ocsp": None}, False, False, OCSP_WARNING),
+        ({"tls": None}, True, False, OCSP_WARNING),
+        # Both triggers: one warning, the explicit option wins.
+        ({"tls": None, "stunnel": None}, True, False, STUNNEL_OPTION_WARNING),
+        # macOS has no efs-proxy build, so it is silent even with an explicit option.
+        ({}, False, True, None),
+        ({"stunnel": None}, False, True, None),
+        # Default efs-proxy path.
+        ({}, False, False, None),
+    ],
+)
+def test_main_real_proxy_mode_legacy_stunnel_warning(
+    mocker, capsys, caplog, options, ocsp_in_config, is_mac, expected_warning
+):
+    """The warning goes to the mount log only, never to the caller's terminal."""
+    caplog.set_level(logging.WARNING)
+
+    _run_main_for_real_proxy_mode(
+        mocker,
+        options,
+        _real_proxy_mode_config(stunnel_check_cert_validity=ocsp_in_config),
+        is_mac=is_mac,
+    )
+
+    assert "stunnel" not in capsys.readouterr().err
+    warnings = [r.getMessage() for r in caplog.records if "stunnel" in r.getMessage()]
+    if expected_warning is None:
+        assert warnings == []
+    else:
+        assert warnings == [expected_warning]

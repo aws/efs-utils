@@ -17,6 +17,7 @@ use log::{debug, error, info, warn};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+use super::S3ClientBuilder;
 use crate::{
     aws::{
         credentials::{get_aws_config_loader, ProxyCredentialsChain},
@@ -698,16 +699,6 @@ impl Drop for S3Client {
 }
 
 pub struct S3ClientStandardBuilder;
-
-#[async_trait]
-pub trait S3ClientBuilder {
-    async fn build(
-        &self,
-        bucket: &str,
-        prefix: &str,
-        proxy_config: &ProxyConfig,
-    ) -> Option<S3Client>;
-}
 
 #[async_trait]
 impl S3ClientBuilder for S3ClientStandardBuilder {

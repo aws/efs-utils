@@ -6,7 +6,10 @@
 import json
 import logging
 import os
+import subprocess
 from datetime import datetime, timedelta, timezone
+from typing import Optional
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -579,6 +582,37 @@ def test_get_public_key_sha1(tmpdir):
     assert sha1_result == "d9c2a68f2c4de49982e310d95e539a89abd6bc13"
 
 
+def test_get_public_key_sha1_returns_none_when_openssl_fails(mocker, tmpdir):
+    fake_public_key_filename = "fake_public_key.pem"
+    fake_public_key_path = os.path.join(str(tmpdir), fake_public_key_filename)
+    tmpdir.join(fake_public_key_filename).write(PUBLIC_KEY_BODY)
+    mocker.patch("watchdog.subprocess_call", return_value=None)
+
+    assert watchdog.get_public_key_sha1(fake_public_key_path) is None
+
+
+def test_subprocess_call_returns_none_when_spawn_times_out(mocker):
+    mocker.patch(
+        "watchdog.popen_with_spawn_deadline",
+        side_effect=watchdog.SpawnTimeoutError("did not exec"),
+    )
+
+    assert watchdog.subprocess_call("openssl version", "Failed") is None
+
+
+def test_subprocess_call_kills_command_that_times_out(mocker):
+    process = MagicMock()
+    process.communicate.side_effect = [
+        subprocess.TimeoutExpired("openssl", watchdog.OPENSSL_TIMEOUT_SEC),
+        (b"", b""),
+    ]
+    mocker.patch("watchdog.popen_with_spawn_deadline", return_value=process)
+
+    assert watchdog.subprocess_call("openssl genpkey", "Failed") is None
+    process.kill.assert_called_once()
+    assert 2 == process.communicate.call_count
+
+
 def test_create_string_to_sign(mocker):
     mocker.patch("watchdog.get_utc_now", return_value=FIXED_DT)
     canonical_request = "canonical_request"
@@ -1078,6 +1112,62 @@ def test_check_certificate_refreshes_when_token_near_expiry(mocker, tmpdir, capl
     ) > datetime.strptime(created, DT_PATTERN)
     assert state["certificateExpirationTime"] == fresh_expiration
     assert "early: scheduled deadline" in caplog.text
+
+
+@pytest.mark.parametrize(
+    argnames="recorded_choice",
+    argvalues=[
+        True,
+        False,
+        None,
+    ],
+)
+def test_check_certificate_refreshes_through_the_mounts_sts_endpoint(
+    mocker,
+    tmpdir,
+    recorded_choice: Optional[bool],
+) -> None:
+    # The FIPS choice the mount helper recorded in the state file (None: no record)
+    # reaches the credential refresh, which picks the STS endpoint from it.
+    mocker.patch(
+        target="watchdog.get_utc_now",
+        return_value=FIXED_DT,
+    )
+    pk_path: str = _get_mock_private_key_path(
+        mocker=mocker,
+        tmpdir=tmpdir,
+    )
+    created: str = (FIXED_DT - timedelta(hours=2)).strftime(DT_PATTERN)
+    tls_dict: dict[str, str] = watchdog.tls_paths_dictionary(
+        mount_name=MOUNT_NAME,
+        base_path=str(tmpdir),
+    )
+    state: dict[str, object] = _create_certificate_and_state(
+        tls_dict=tls_dict,
+        temp_dir=str(tmpdir),
+        pk_path=pk_path,
+        timestamp=created,
+        security_credentials=CREDENTIALS,
+        credentials_source=CREDENTIALS_SOURCE,
+        ap_id=AP_ID,
+    )
+    if recorded_choice is not None:
+        state[watchdog.USE_FIPS_ENDPOINT_STATE_KEY] = recorded_choice
+    credentials_mock = mocker.patch(
+        target="watchdog.get_aws_security_credentials",
+        return_value=CREDENTIALS,
+    )
+
+    watchdog.check_certificate(
+        config=_get_config(),
+        state=state,
+        state_file_dir=str(tmpdir),
+        state_file=STATE_FILE,
+        service=SERVICE,
+        base_path=str(tmpdir),
+    )
+
+    assert credentials_mock.call_args.kwargs["use_fips_endpoint"] is recorded_choice
 
 
 def test_check_certificate_does_not_refresh_when_token_far_from_expiry(mocker, tmpdir):

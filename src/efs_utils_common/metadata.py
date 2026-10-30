@@ -19,9 +19,9 @@ import time
 from efs_utils_common.context import MountContext
 
 try:
-    from configparser import NoOptionError
+    from configparser import ConfigParser, NoOptionError
 except ImportError:
-    from ConfigParser import NoOptionError
+    from ConfigParser import ConfigParser, NoOptionError
 
 try:
     from urllib.error import HTTPError, URLError
@@ -59,6 +59,8 @@ from efs_utils_common.constants import (
     ECS_FARGATE_CLIENT_IDENTIFIER,
     ECS_FARGATE_TASK_METADATA_ENDPOINT_ENV,
     ECS_FARGATE_TASK_METADATA_ENDPOINT_URL_EXTENSION,
+    FIPS_REGION_PREFIXES,
+    FIPS_REGIONS_HELP_URL,
     INSTANCE_METADATA_SERVICE_AZ_ID_URL,
     INSTANCE_METADATA_SERVICE_URL,
     INSTANCE_METADATA_TOKEN_URL,
@@ -543,14 +545,42 @@ def get_fips_config(config):
     Check whether FIPS is enabled either by setting the `AWS_USE_FIPS_ENDPOINT`
     environmental variable, or through the efs-utils config file.
 
-    Enabling FIPS means that both the Botocore client and stunnel will be configured
-    to use FIPS.
+    Enabling FIPS sets `fips = yes` in the TLS tunnel config, and sends the botocore
+    clients' calls and the web identity STS call to FIPS endpoints.
     """
 
     return os.getenv(
         AWS_FIPS_ENDPOINT_CONFIG_ENV, "False"
     ).lower() == "true" or get_boolean_config_item_value(
         config, CONFIG_SECTION, "fips_mode_enabled", default_value=False
+    )
+
+
+def has_fips_endpoints(region: str) -> bool:
+    """Return whether region has FIPS endpoints: the US (GovCloud included) and Canada
+    regions, FIPS_REGION_PREFIXES."""
+    return region.startswith(FIPS_REGION_PREFIXES)
+
+
+def warn_if_region_has_no_fips_endpoints(
+    config: ConfigParser,
+    region: str,
+) -> None:
+    """Log a warning when FIPS is on in a region that has no FIPS endpoints.
+
+    The mount goes ahead. Its TLS tunnel still runs in FIPS mode, and its web identity STS
+    call, if it makes one, goes to the standard STS endpoint (see
+    aws_credentials.is_sts_call_fips).
+    """
+    if not get_fips_config(config) or has_fips_endpoints(region):
+        return
+    logging.warning(
+        "FIPS is on (fips_mode_enabled or %s), but region %s has no FIPS endpoints; they"
+        " exist only in US and Canada regions, see %s. The mount goes ahead, and its web"
+        " identity STS call, if it makes one, uses the standard STS endpoint.",
+        AWS_FIPS_ENDPOINT_CONFIG_ENV,
+        region,
+        FIPS_REGIONS_HELP_URL,
     )
 
 

@@ -11,7 +11,7 @@ set -ex
 
 BASE_DIR=$(pwd)
 BUILD_ROOT=${BASE_DIR}/build/debbuild
-VERSION=3.3.4
+VERSION=3.3.5
 RELEASE=1
 ARCH=$(dpkg --print-architecture)
 DEB_SYSTEM_RELEASE_PATH=/etc/os-release
@@ -37,6 +37,9 @@ echo 'Building efs-proxy'
 # efs-proxy and the nfs-xdr-bindings crate share a Cargo workspace rooted at
 # src/, so build output lands in src/target/ (not src/proxy/target/).
 cd src
+if [ "${ARCH}" = "arm64" ]; then
+    export JEMALLOC_SYS_WITH_LG_PAGE=16
+fi
 # --locked: build strictly against the committed Cargo.lock. If the lock and the
 # manifests disagree this fails loudly instead of silently re-resolving and
 # rewriting the lock, so the shipped binary matches the vetted dependency versions.

@@ -11,7 +11,7 @@ import os
 import pwd
 import re
 
-VERSION = "3.3.4"
+VERSION = "3.3.5"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
 AMAZON_LINUX_2_PRETTY_NAME = "Amazon Linux 2"
@@ -81,7 +81,24 @@ REQUEST_PAYLOAD = ""
 
 CREDENTIALS_KEYS = ["AccessKeyId", "SecretAccessKey", "Token"]
 ECS_TASK_METADATA_API = "http://169.254.170.2"
-STS_ENDPOINT_URL_FORMAT = "https://sts.{}.{}/"
+STS_ENDPOINT_URL_FORMAT: str = "https://{host}.{region}.{dns_name_suffix}/"
+STS_HOST: str = "sts"
+STS_FIPS_HOST: str = "sts-fips"
+# GovCloud's standard STS endpoint is its FIPS endpoint; it has no sts-fips host.
+GOVCLOUD_REGION_PREFIX: str = "us-gov-"
+# The regions that have FIPS endpoints: the US (GovCloud included) and Canada,
+# per https://aws.amazon.com/compliance/fips/. Outside them a FIPS mount logs a
+# warning, and its web identity STS call uses the standard endpoint.
+# The annotation is a string: a module-level annotation is evaluated at import
+# time, and tuple[...] is not subscriptable before Python 3.9.
+FIPS_REGION_PREFIXES: "tuple[str, ...]" = (
+    "us-",
+    "ca-",
+)
+FIPS_REGIONS_HELP_URL: str = "https://aws.amazon.com/compliance/fips/"
+# The state file key that records whether a mount's STS calls use the FIPS endpoint.
+# The watchdog reads it through its own copy, kept in sync by value.
+USE_FIPS_ENDPOINT_STATE_KEY: str = "useFipsEndpoint"
 INSTANCE_METADATA_TOKEN_URL = "http://169.254.169.254/latest/api/token"
 INSTANCE_METADATA_SERVICE_URL = (
     "http://169.254.169.254/latest/dynamic/instance-identity/document/"
@@ -113,12 +130,28 @@ LEGACY_STUNNEL_MOUNT_OPTION = "stunnel"
 
 NFS_MOUNT_OPTION = "nfs"
 
+# Logged when a mount selects stunnel for a reason the caller can undo (macOS is silent).
+_LEGACY_STUNNEL_MODE_WARNING_PREFIX = (
+    "This mount uses legacy stunnel mode instead of efs-proxy. EFS recommends efs-proxy "
+    "for the latest feature and per-client throughput improvements. "
+)
+LEGACY_STUNNEL_MODE_WARNING_STUNNEL_OPTION = (
+    _LEGACY_STUNNEL_MODE_WARNING_PREFIX
+    + "Remove the 'stunnel' mount option to mount with efs-proxy."
+)
+LEGACY_STUNNEL_MODE_WARNING_OCSP = (
+    _LEGACY_STUNNEL_MODE_WARNING_PREFIX
+    + "efs-proxy does not support OCSP; to mount with efs-proxy, remove the 'ocsp' mount "
+    "option and set stunnel_check_cert_validity = false in %s." % CONFIG_FILE
+)
+
 NOT_BEFORE_MINS = 15
 NOT_AFTER_HOURS = 3
 
 EFS_PROXY_TLS_OPTION = "--tls"
 EFS_PROXY_NO_READ_BYPASS_OPTION = "--no-direct-s3-read"
 EFS_PROXY_WORKER_THREADS_OPTION = "--worker-threads"
+EFS_PROXY_LISTEN_FD_OPTION = "--listen-fd"
 
 # Optional [mount] item selecting how many Tokio worker threads each efs-proxy
 # process starts. Left unset, efs-proxy keeps its own default of one worker per

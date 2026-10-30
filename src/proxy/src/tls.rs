@@ -206,7 +206,7 @@ pub async fn establish_tls_stream(
 
     let tls_connector = TlsConnector::new(config);
 
-    let tcp_stream = configure_stream(TcpStream::connect(tls_config.remote_addr).await?);
+    let tcp_stream = configure_stream(TcpStream::connect(tls_config.remote_addr).await?, true);
 
     let tls_stream = tls_connector
         .connect(&tls_config.server_domain, tcp_stream)

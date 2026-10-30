@@ -781,7 +781,7 @@ mod tests {
     use crate::rpc::rpc_envelope::{
         EnvelopeHeader, RpcMessageParams, RpcMessageType, RpcReplyParams,
     };
-    use crate::test_utils::{get_test_config, FailingS3Reader};
+    use crate::test_utils::get_test_config;
     use crate::util::read_bypass_request_context;
     use bytes::{Bytes, BytesMut};
     use mockall::predicate::le;
@@ -790,6 +790,24 @@ mod tests {
     use tokio::task::JoinHandle;
     use tokio_util::sync::CancellationToken;
     use xdr_codec::Pack;
+
+    /// Mock S3Reader whose reads always fail with a fixed S3 error class.
+    pub struct FailingS3Reader {
+        pub make_error: fn() -> S3ClientError,
+    }
+
+    #[async_trait::async_trait]
+    impl S3Reader for FailingS3Reader {
+        async fn read_data(
+            &self,
+            _read_bypass_request_context: Arc<ReadBypassRequestContext>,
+            _s3_data_locator: awsfile_bypass_data_locator,
+            _filehandle: nfs_fh4,
+            _file_size: u64,
+        ) -> Result<Option<Bytes>, ReadBypassAgentError> {
+            Err(ReadBypassAgentError::S3Error((self.make_error)()))
+        }
+    }
 
     /////////////////////////////////////////////////////////////////////////////////////
     // Auxiliary test functions

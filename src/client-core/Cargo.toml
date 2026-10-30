@@ -8,16 +8,38 @@ license = "MIT"
 name = "efs_client_core"
 
 [features]
+# Optional client features, all in the default build. Without them the crate
+# keeps the NFS/AWSFILE mount-target path and no AWS SDK.
+default = ["read-bypass", "cloudwatch"]
+# Direct S3 reads: the S3 client, readahead cache, memory pool and file-handle
+# denylist. The S3 client publishes bucket reachability, so it needs `cloudwatch`.
+read-bypass = [
+    "cloudwatch",
+    "dep:anyhow",
+    "dep:aws-sdk-s3",
+    "dep:bytes",
+    "dep:dyn-clone",
+    "dep:futures",
+    "dep:lru",
+    "dep:moka",
+    "dep:regex-lite",
+    "dep:sysinfo",
+]
+# CloudWatch metrics and logs publisher.
+cloudwatch = ["aws-sdk", "dep:aws-sdk-cloudwatch", "dep:aws-sdk-cloudwatchlogs"]
+# AWS SDK configuration, credentials and HTTP client used by the features above.
+aws-sdk = [
+    "dep:aws-config",
+    "dep:aws-credential-types",
+    "dep:aws-smithy-http-client",
+    "dep:aws-smithy-types",
+]
 # Enables the in-crate test-only constructors (e.g. ReadBypassContext::default,
 # create_test_read_bypass_context) so that efs-proxy's tests can reuse them,
 # and the test-build-only S3 endpoint-override behavior (path-style addressing
 # and environment credentials when AWS_ENDPOINT_URL_S3 is set). Never enabled
 # for release binaries.
 test-util = []
-# Permits the readahead cache on Lambda; the default build keeps it off there
-# because total-memory detection sees the host rather than the container
-# limit. See `utils::platform_blocks_readahead_cache`.
-lambda-readahead-cache = []
 # Shuttle concurrency testing: swaps std/tokio/dashmap primitives for
 # Shuttle-instrumented equivalents via the wrapper crates and the crate::sync
 # module. Enabled by downstream test crates; never enabled for release binaries.
@@ -31,38 +53,38 @@ shuttle = [
 ]
 
 [dependencies]
-anyhow = "1.0.72"
+anyhow = { version = "1.0.72", optional = true }
 async-trait = "0.1"
-aws-config = "1.6.3"
-aws-credential-types = "1.2.3"
+aws-config = { version = "1.6.3", optional = true }
+aws-credential-types = { version = "1.2.3", optional = true }
 # The AWS SDK crates are taken without default features so that the deprecated
 # `rustls` alias stays off. That alias resolves to
 # aws-smithy-runtime/tls-rustls, which pulls the ring-based rustls 0.21 over
 # hyper 0.14 alongside the modern stack. `default-https-client` already selects
-# rustls-aws-lc (rustls 0.23 + aws-lc), and s3_client.rs picks the provider
+# rustls-aws-lc (rustls 0.23 + aws-lc), and the S3 client picks the provider
 # explicitly (CryptoMode::AwsLcFips / AwsLc), so every other default feature is
 # kept and only the legacy alias is dropped.
-aws-sdk-s3 = { version = "1.87.0", default-features = false, features = ["sigv4a", "http-1x", "default-https-client", "rt-tokio"] }
-aws-sdk-cloudwatch = { version = "1.64.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
-aws-sdk-cloudwatchlogs = { version = "1.64.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
-aws-smithy-http-client = { version = "1.1.9", features = ["default-client", "rustls-aws-lc", "rustls-aws-lc-fips"] }
-aws-smithy-types = "1.3"
-bytes = { version = "1.11.1" }
-dyn-clone = "1.0"
-futures = "0.3"
+aws-sdk-s3 = { version = "1.87.0", default-features = false, features = ["sigv4a", "http-1x", "default-https-client", "rt-tokio"], optional = true }
+aws-sdk-cloudwatch = { version = "1.64.0", default-features = false, features = ["default-https-client", "rt-tokio"], optional = true }
+aws-sdk-cloudwatchlogs = { version = "1.64.0", default-features = false, features = ["default-https-client", "rt-tokio"], optional = true }
+aws-smithy-http-client = { version = "1.1.9", features = ["default-client", "rustls-aws-lc", "rustls-aws-lc-fips"], optional = true }
+aws-smithy-types = { version = "1.3", optional = true }
+bytes = { version = "1.11.1", optional = true }
+dyn-clone = { version = "1.0", optional = true }
+futures = { version = "0.3", optional = true }
 log = "0.4"
 libc = "0.2"
-lru = "0.18"
-moka = { version = "0.12.10", features = ["sync"] }
+lru = { version = "0.18", optional = true }
+moka = { version = "0.12.10", features = ["sync"], optional = true }
 onc-rpc = "0.3.3"
 # regex-lite: same API and pattern syntax as `regex` for the bucket-name check,
 # built as a single backtracking engine. Keeps the DFA/SIMD engines and the
 # Unicode tables out of the client binary.
-regex-lite = "0.1.9"
+regex-lite = { version = "0.1.9", optional = true }
 s2n-tls = { version = "^0.3.19", features = ["fips"] }
 serde = { version = "1.0.175", features = ["derive"] }
 serde_ini = "0.2.0"
-sysinfo = "0.33"
+sysinfo = { version = "0.33", optional = true }
 thiserror = "1.0.44"
 uuid = { version = "1.4.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
 # XDR runtime + shared NFSv4.1 wire bindings. xdr_codec keeps its lib name so
@@ -106,7 +128,8 @@ shuttle = { version = "0.9", optional = true }
 # to constrain resolution and must NEVER be imported or used in code — always
 # use the aliases above. See
 # https://github.com/awslabs/shuttle/blob/main/wrappers/README.md
-tokio-version-constraint = { package = "tokio", version = "^1.40.0" }
+# Below 1.54.0 because tokio 1.54.0 is flagged as an availability risk.
+tokio-version-constraint = { package = "tokio", version = ">=1.40.0, <1.54.0" }
 tokio-util-version-constraint = { package = "tokio-util", version = "0.7.8" }
 dashmap-version-constraint = { package = "dashmap", version = "6.0.1" }
 
@@ -115,7 +138,7 @@ test-case = "*"
 tokio = { package = "shuttle-tokio", version = "1", features = ["test-util"] }
 tempfile = "3.10.1"
 aws-smithy-mocks = "0.1.1"
-aws-sdk-s3 = { version = "1.87.0", features = ["test-util"] }
+aws-sdk-s3 = { version = "1.87.0", default-features = false, features = ["sigv4a", "http-1x", "default-https-client", "rt-tokio", "test-util"] }
 aws-smithy-runtime-api = "1.8.0"
 # Test-only randomness, deliberately the real crate (not the shuttle-rand
 # wrapper): dev-dependencies cannot be feature-switched, so it stays

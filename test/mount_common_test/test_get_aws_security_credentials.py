@@ -7,6 +7,8 @@ import json
 import logging
 import os
 import socket
+from typing import NamedTuple
+from unittest.mock import MagicMock
 
 try:
     from urllib.parse import parse_qs, urlparse
@@ -14,6 +16,7 @@ except ImportError:
     from urlparse import parse_qs, urlparse
 
 import pytest
+from pytest_mock import MockFixture
 
 import efs_utils_common
 import efs_utils_common.aws_credentials as aws_credentials
@@ -90,6 +93,16 @@ def setup(mocker):
     mount_context.config_file_path = constants.CONFIG_FILE
     yield
     mount_context.reset()
+
+
+@pytest.fixture(autouse=True)
+def unset_fips_endpoint_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The STS endpoint depends on AWS_USE_FIPS_ENDPOINT, so a value set in the shell
+    # running the tests would change the expected URLs.
+    monkeypatch.delenv(
+        name=constants.AWS_FIPS_ENDPOINT_CONFIG_ENV,
+        raising=False,
+    )
 
 
 def get_fake_aws_config_file(tmpdir):
@@ -864,6 +877,245 @@ def test_get_sts_endpoint_url_remaps_on_amazonwebservices_cn(mocker):
         aws_credentials.get_sts_endpoint_url(config, "cn-north-1")
         == "https://sts.cn-north-1.amazonaws.com.cn/"
     )
+
+
+class StsFipsEndpointCase(NamedTuple):
+    region: str
+    dns_name_suffix: str
+    expected_url: str
+
+
+# With FIPS on: the URL botocore resolves for STS with use_fips_endpoint=True in a region
+# that has FIPS endpoints, and the standard URL in a region that has none.
+STS_FIPS_ENDPOINT_CASES: list[StsFipsEndpointCase] = [
+    StsFipsEndpointCase(
+        region="us-east-2",
+        dns_name_suffix="amazonaws.com",
+        expected_url="https://sts-fips.us-east-2.amazonaws.com/",
+    ),
+    StsFipsEndpointCase(
+        region="us-east-2",
+        dns_name_suffix="on.aws",
+        expected_url="https://sts-fips.us-east-2.amazonaws.com/",
+    ),
+    StsFipsEndpointCase(
+        region="us-gov-west-1",
+        dns_name_suffix="amazonaws.com",
+        expected_url="https://sts.us-gov-west-1.amazonaws.com/",
+    ),
+    StsFipsEndpointCase(
+        region="ca-central-1",
+        dns_name_suffix="amazonaws.com",
+        expected_url="https://sts-fips.ca-central-1.amazonaws.com/",
+    ),
+    StsFipsEndpointCase(
+        region="eu-west-2",
+        dns_name_suffix="amazonaws.com",
+        expected_url="https://sts.eu-west-2.amazonaws.com/",
+    ),
+    StsFipsEndpointCase(
+        region="cn-north-1",
+        dns_name_suffix="on.amazonwebservices.com.cn",
+        expected_url="https://sts.cn-north-1.amazonaws.com.cn/",
+    ),
+]
+
+
+def get_fake_config_with_fips_mode(
+    dns_name_suffix: str,
+    fips_mode_enabled: bool,
+) -> ConfigParser:
+    config: ConfigParser = get_fake_config_with_dns_suffix(dns_name_suffix)
+    config.set(
+        section="mount",
+        option="fips_mode_enabled",
+        value=str(fips_mode_enabled).lower(),
+    )
+    return config
+
+
+@pytest.mark.parametrize(
+    argnames="case",
+    argvalues=STS_FIPS_ENDPOINT_CASES,
+)
+def test_get_sts_endpoint_url_with_fips_mode_enabled(case: StsFipsEndpointCase) -> None:
+    config: ConfigParser = get_fake_config_with_fips_mode(
+        dns_name_suffix=case.dns_name_suffix,
+        fips_mode_enabled=True,
+    )
+    assert (
+        aws_credentials.get_sts_endpoint_url(
+            config=config,
+            region=case.region,
+        )
+        == case.expected_url
+    )
+
+
+def test_get_sts_endpoint_url_with_fips_endpoint_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        name=constants.AWS_FIPS_ENDPOINT_CONFIG_ENV,
+        value="true",
+    )
+    config: ConfigParser = get_fake_config_with_fips_mode(
+        dns_name_suffix="amazonaws.com",
+        fips_mode_enabled=False,
+    )
+    assert (
+        aws_credentials.get_sts_endpoint_url(
+            config=config,
+            region="us-east-2",
+        )
+        == "https://sts-fips.us-east-2.amazonaws.com/"
+    )
+
+
+def test_get_sts_endpoint_url_with_fips_off() -> None:
+    config: ConfigParser = get_fake_config_with_fips_mode(
+        dns_name_suffix="amazonaws.com",
+        fips_mode_enabled=False,
+    )
+    assert (
+        aws_credentials.get_sts_endpoint_url(
+            config=config,
+            region="us-east-2",
+        )
+        == "https://sts.us-east-2.amazonaws.com/"
+    )
+
+
+def test_get_aws_security_credentials_from_webidentity_calls_sts_fips_endpoint(
+    mocker,
+) -> None:
+    # The AssumeRoleWithWebIdentity request is sent to the FIPS host.
+    config: ConfigParser = get_fake_config_with_fips_mode(
+        dns_name_suffix="amazonaws.com",
+        fips_mode_enabled=True,
+    )
+    mocker.patch(
+        target="builtins.open",
+        new=mocker.mock_open(read_data="FAKE_JWT"),
+    )
+    url_request_mock = mocker.patch(
+        target="efs_utils_common.aws_credentials.url_request_helper",
+        return_value=None,
+    )
+
+    aws_credentials.get_aws_security_credentials_from_webidentity(
+        config=config,
+        role_arn=WEB_IDENTITY_ROLE_ARN,
+        token_file=WEB_IDENTITY_TOKEN_FILE,
+        region="us-east-2",
+        is_fatal=False,
+    )
+
+    requested_url: str = url_request_mock.call_args.args[1]
+    assert urlparse(requested_url).netloc == "sts-fips.us-east-2.amazonaws.com"
+
+
+def mock_failed_webidentity_call_before_instance_role(
+    mocker: MockFixture,
+    instance_role_credentials: dict[str, str],
+) -> MagicMock:
+    """Make the web identity STS call return nothing and the instance role return credentials.
+
+    Returns the mock of the instance role lookup, so a test can assert whether the chain reached it.
+    """
+    mocker.patch.dict(
+        in_dict=os.environ,
+        values={},
+    )
+    mocker.patch(
+        target="os.path.exists",
+        return_value=False,
+    )
+    mocker.patch(
+        target="builtins.open",
+        new=mocker.mock_open(read_data="FAKE_JWT"),
+    )
+    mocker.patch(
+        target="efs_utils_common.aws_credentials.url_request_helper",
+        return_value=None,
+    )
+    mocker.patch(
+        target="efs_utils_common.aws_credentials.get_iam_role_name",
+        return_value="FAKE_IAM_ROLE_NAME",
+    )
+    instance_role_mock: MagicMock = mocker.patch(
+        target="efs_utils_common.aws_credentials.get_aws_security_credentials_from_instance_metadata",
+        return_value=(instance_role_credentials, "metadata:"),
+    )
+    return instance_role_mock
+
+
+INSTANCE_ROLE_CREDENTIALS: dict[str, str] = {
+    "AccessKeyId": ACCESS_KEY_ID_VAL,
+    "SecretAccessKey": SECRET_ACCESS_KEY_VAL,
+    "Token": SESSION_TOKEN_VAL,
+}
+
+
+@pytest.mark.parametrize(
+    argnames="region",
+    argvalues=[
+        "us-east-2",
+        "eu-west-2",
+    ],
+)
+def test_get_aws_security_credentials_webidentity_failure_with_fips_on_falls_through(
+    mocker: MockFixture,
+    region: str,
+) -> None:
+    # With FIPS on, a failed web identity call falls through to the instance role, in a
+    # region with FIPS endpoints and in one without, as with FIPS off.
+    config: ConfigParser = get_fake_config_with_fips_mode(
+        dns_name_suffix="amazonaws.com",
+        fips_mode_enabled=True,
+    )
+    instance_role_mock = mock_failed_webidentity_call_before_instance_role(
+        mocker=mocker,
+        instance_role_credentials=INSTANCE_ROLE_CREDENTIALS,
+    )
+
+    credentials, credentials_source = aws_credentials.get_aws_security_credentials(
+        config=config,
+        use_iam=True,
+        region=region,
+        jwt_path=WEB_IDENTITY_TOKEN_FILE,
+        role_arn=WEB_IDENTITY_ROLE_ARN,
+    )
+
+    instance_role_mock.assert_called_once()
+    assert credentials == INSTANCE_ROLE_CREDENTIALS
+    assert credentials_source == "metadata:"
+
+
+def test_get_aws_security_credentials_webidentity_failure_with_fips_off_falls_through(
+    mocker: MockFixture,
+) -> None:
+    # With FIPS off, a failed web identity call falls through to the instance role.
+    config: ConfigParser = get_fake_config_with_fips_mode(
+        dns_name_suffix="amazonaws.com",
+        fips_mode_enabled=False,
+    )
+    instance_role_mock = mock_failed_webidentity_call_before_instance_role(
+        mocker=mocker,
+        instance_role_credentials=INSTANCE_ROLE_CREDENTIALS,
+    )
+
+    credentials, credentials_source = aws_credentials.get_aws_security_credentials(
+        config=config,
+        use_iam=True,
+        region="eu-west-2",
+        jwt_path=WEB_IDENTITY_TOKEN_FILE,
+        role_arn=WEB_IDENTITY_ROLE_ARN,
+    )
+
+    instance_role_mock.assert_called_once()
+    assert credentials == INSTANCE_ROLE_CREDENTIALS
+    assert credentials_source == "metadata:"
 
 
 def test_get_aws_security_credentials_pod_identity(mocker):

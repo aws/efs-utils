@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import socket
+from typing import NamedTuple, Optional
 
 try:
     from urllib.parse import parse_qs, urlparse
@@ -15,6 +16,7 @@ except ImportError:
 
 import pytest
 
+import efs_utils_common.constants as constants
 import watchdog
 
 try:
@@ -40,6 +42,17 @@ WRONG_SESSION_TOKEN_VAL = "WRONG_SESSION_TOKEN"
 
 ROLE_ARN = "fake_role_arn"
 WEB_IDENTITY_TOKEN_FILE = "/fake_web_identity_token_file"
+
+
+@pytest.fixture(autouse=True)
+def unset_fips_endpoint_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The STS endpoint depends on AWS_USE_FIPS_ENDPOINT, so a value set in the shell
+    # running the tests would change the expected URLs.
+    monkeypatch.delenv(
+        name=watchdog.AWS_FIPS_ENDPOINT_CONFIG_ENV,
+        raising=False,
+    )
+
 
 AWS_CONFIG_FILE = "fake_aws_config"
 DEFAULT_PROFILE = "DEFAULT"
@@ -626,6 +639,164 @@ def test_get_sts_endpoint_url_remaps_on_amazonwebservices_cn():
         watchdog.get_sts_endpoint_url(config, "cn-north-1")
         == "https://sts.cn-north-1.amazonaws.com.cn/"
     )
+
+
+class StsEndpointChoiceCase(NamedTuple):
+    region: str
+    use_fips_endpoint: Optional[bool]
+    fips_mode_enabled: bool
+    expected_url: str
+
+
+# use_fips_endpoint is the mount's recorded choice and overrides the watchdog's own
+# config; None (no recorded choice) falls back to that config.
+STS_ENDPOINT_CHOICE_CASES: list[StsEndpointChoiceCase] = [
+    StsEndpointChoiceCase(
+        region="us-east-2",
+        use_fips_endpoint=True,
+        fips_mode_enabled=False,
+        expected_url="https://sts-fips.us-east-2.amazonaws.com/",
+    ),
+    StsEndpointChoiceCase(
+        region="us-east-2",
+        use_fips_endpoint=False,
+        fips_mode_enabled=True,
+        expected_url="https://sts.us-east-2.amazonaws.com/",
+    ),
+    StsEndpointChoiceCase(
+        region="us-east-2",
+        use_fips_endpoint=None,
+        fips_mode_enabled=True,
+        expected_url="https://sts-fips.us-east-2.amazonaws.com/",
+    ),
+    StsEndpointChoiceCase(
+        region="us-east-2",
+        use_fips_endpoint=None,
+        fips_mode_enabled=False,
+        expected_url="https://sts.us-east-2.amazonaws.com/",
+    ),
+    StsEndpointChoiceCase(
+        region="us-gov-west-1",
+        use_fips_endpoint=True,
+        fips_mode_enabled=False,
+        expected_url="https://sts.us-gov-west-1.amazonaws.com/",
+    ),
+    # A region with no FIPS endpoints gets the standard host, as the mount helper does.
+    StsEndpointChoiceCase(
+        region="eu-west-2",
+        use_fips_endpoint=True,
+        fips_mode_enabled=False,
+        expected_url="https://sts.eu-west-2.amazonaws.com/",
+    ),
+    StsEndpointChoiceCase(
+        region="eu-west-2",
+        use_fips_endpoint=None,
+        fips_mode_enabled=True,
+        expected_url="https://sts.eu-west-2.amazonaws.com/",
+    ),
+]
+
+
+def get_fake_config_with_fips_mode(fips_mode_enabled: bool) -> ConfigParser:
+    config: ConfigParser = get_fake_config_with_dns_suffix("amazonaws.com")
+    config.set(
+        section="mount",
+        option="fips_mode_enabled",
+        value=str(fips_mode_enabled).lower(),
+    )
+    return config
+
+
+@pytest.mark.parametrize(
+    argnames="case",
+    argvalues=STS_ENDPOINT_CHOICE_CASES,
+)
+def test_get_sts_endpoint_url_fips_choice(case: StsEndpointChoiceCase) -> None:
+    config: ConfigParser = get_fake_config_with_fips_mode(case.fips_mode_enabled)
+    assert (
+        watchdog.get_sts_endpoint_url(
+            config=config,
+            region=case.region,
+            use_fips_endpoint=case.use_fips_endpoint,
+        )
+        == case.expected_url
+    )
+
+
+def test_get_sts_endpoint_url_falls_back_to_fips_endpoint_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        name=watchdog.AWS_FIPS_ENDPOINT_CONFIG_ENV,
+        value="true",
+    )
+    config: ConfigParser = get_fake_config_with_fips_mode(False)
+    assert (
+        watchdog.get_sts_endpoint_url(
+            config=config,
+            region="us-east-2",
+        )
+        == "https://sts-fips.us-east-2.amazonaws.com/"
+    )
+
+
+def test_get_aws_security_credentials_webidentity_calls_sts_fips_endpoint(
+    mocker,
+) -> None:
+    # The mount's recorded choice reaches the AssumeRoleWithWebIdentity request.
+    mocker.patch(
+        target="builtins.open",
+        new=mocker.mock_open(read_data="FAKE_JWT"),
+    )
+    url_request_mock = mocker.patch(
+        target="watchdog.url_request_helper",
+        return_value=None,
+    )
+
+    watchdog.get_aws_security_credentials(
+        config=get_fake_config_with_fips_mode(False),
+        credentials_source=f"webidentity:{ROLE_ARN},{WEB_IDENTITY_TOKEN_FILE}",
+        region="us-east-2",
+        use_fips_endpoint=True,
+    )
+
+    requested_url: str = url_request_mock.call_args.args[1]
+    assert urlparse(requested_url).netloc == "sts-fips.us-east-2.amazonaws.com"
+
+
+def test_get_aws_security_credentials_webidentity_malformed_source_returns_none(
+    mocker,
+) -> None:
+    # A state file whose webidentity value is not "<role arn>,<token file>" yields no
+    # credentials and no STS call.
+    url_request_mock = mocker.patch(target="watchdog.url_request_helper")
+
+    credentials: Optional[dict[str, object]] = watchdog.get_aws_security_credentials(
+        config=get_fake_config_with_fips_mode(False),
+        credentials_source=f"webidentity:{ROLE_ARN}",
+        region="us-east-2",
+    )
+
+    assert credentials is None
+    url_request_mock.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    argnames="name",
+    argvalues=[
+        "STS_ENDPOINT_URL_FORMAT",
+        "STS_HOST",
+        "STS_FIPS_HOST",
+        "GOVCLOUD_REGION_PREFIX",
+        "FIPS_REGION_PREFIXES",
+        "AWS_FIPS_ENDPOINT_CONFIG_ENV",
+        "USE_FIPS_ENDPOINT_STATE_KEY",
+    ],
+)
+def test_watchdog_sts_constants_match_efs_utils_common(name: str) -> None:
+    # The watchdog holds copies by value; a mismatched state key silently drops the
+    # mount's recorded FIPS choice.
+    assert getattr(watchdog, name) == getattr(constants, name)
 
 
 def test_get_aws_security_credentials_pod_identity_token_invalid_characters_returns_none(

@@ -7,9 +7,11 @@
 # the License.
 
 
+import errno
 import logging
 import os
 import socket
+import struct
 import subprocess
 import time
 
@@ -68,6 +70,102 @@ def test_tlsport(tlsport):
         )
         time.sleep(DEFAULT_TIMEOUT)
         retry_times -= 1
+
+
+TCP_LISTEN_STATE = "0A"
+SOCKET_LINK_PREFIX = "socket:["
+# The tunnel (efs-proxy or stunnel) listens on, and mount.nfs4 connects to, this address only.
+TUNNEL_LISTEN_ADDRESS = "127.0.0.1"
+
+
+def _proc_net_tcp_address(ip_address, port):
+    """
+    Format an IPv4 address and port as /proc/net/tcp shows them: the address as
+    the hex of its 32-bit value in host byte order, then the port in hex, e.g.
+    127.0.0.1:20049 is "0100007F:4E51" on a little-endian host.
+    """
+    packed = socket.inet_aton(ip_address)
+    return "%08X:%04X" % (struct.unpack("=I", packed)[0], port)
+
+
+def get_listening_socket_inodes(
+    pid, port, ip_address=TUNNEL_LISTEN_ADDRESS, proc_root="/proc"
+):
+    """
+    Return the inodes of the TCP sockets listening on ip_address:port in the
+    network namespace of process `pid`. Raises OSError if that namespace's socket
+    table cannot be read.
+    """
+    local_address = _proc_net_tcp_address(ip_address, port)
+    with open(os.path.join(proc_root, str(pid), "net", "tcp")) as f:
+        lines = f.read().splitlines()[1:]
+
+    inodes = set()
+    for line in lines:
+        # sl local_address rem_address st tx_queue:rx_queue tr:tm->when retrnsmt uid timeout inode
+        fields = line.split()
+        if (
+            len(fields) >= 10
+            and fields[1] == local_address
+            and fields[3] == TCP_LISTEN_STATE
+        ):
+            inodes.add(fields[9])
+    return inodes
+
+
+# The process is gone, or going: its procfs entries no longer exist.
+PROCESS_GONE_ERRNOS = (errno.ENOENT, errno.ESRCH)
+
+
+def procfs_available(proc_root="/proc"):
+    """True if this host has a procfs that shows per-process socket tables."""
+    return os.path.isdir(os.path.join(proc_root, "self", "net"))
+
+
+def process_listens_on_port(
+    pid, port, ip_address=TUNNEL_LISTEN_ADDRESS, proc_root="/proc"
+):
+    """
+    Return True if process `pid` holds a TCP socket listening on ip_address:port,
+    False if it does not, and None if that cannot be determined on this host.
+
+    Unlike a connect to the port, this tells the process's own listener apart from
+    one that belongs to any other process.
+
+    A process whose procfs entries no longer exist is reported as not listening.
+    None is returned when the host has no procfs, or when reading the entries is
+    refused. A refusal is ambiguous: it comes from a security policy or hidepid, and
+    for a non-root reader also from a process that is exiting, whose /proc/<pid>/fd
+    (mode 0500) moves to root. Callers must not treat None from a host with procfs
+    as proof that the process is alive.
+    """
+    if not procfs_available(proc_root):
+        return None
+
+    try:
+        listening_inodes = get_listening_socket_inodes(pid, port, ip_address, proc_root)
+        if not listening_inodes:
+            return False
+
+        fd_dir = os.path.join(proc_root, str(pid), "fd")
+        fds = os.listdir(fd_dir)
+    except OSError as e:
+        return False if e.errno in PROCESS_GONE_ERRNOS else None
+
+    refused = False
+    for fd in fds:
+        try:
+            target = os.readlink(os.path.join(fd_dir, fd))
+        except OSError as e:
+            # An fd closed since the listing is gone; anything else is a refusal.
+            if e.errno not in PROCESS_GONE_ERRNOS:
+                refused = True
+            continue
+        # A socket fd links to "socket:[<inode>]".
+        if target.startswith(SOCKET_LINK_PREFIX) and target.endswith("]"):
+            if target[len(SOCKET_LINK_PREFIX) : -1] in listening_inodes:
+                return True
+    return None if refused else False
 
 
 def get_ipv6_addresses(hostname):

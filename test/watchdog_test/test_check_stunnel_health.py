@@ -284,3 +284,33 @@ def _test_stunnel_health_checked_passed_for_non_first_check_helper(
     assert FIXED_TIME == new_state["last_stunnel_check_time"]
     if not mountpoint:
         assert mountpoint == new_state["mountpoint"]
+
+
+def test_stunnel_health_check_spawn_timeout_leaves_tunnel_alone(mocker, tmpdir):
+    mocker.patch("time.time", return_value=FIXED_TIME)
+    mocker.patch(
+        "watchdog.popen_with_spawn_deadline",
+        side_effect=watchdog.SpawnTimeoutError("did not exec"),
+    )
+    kill_mock = mocker.patch("os.killpg")
+    restart_tls_tunnel_mock = mocker.patch("watchdog.restart_tls_tunnel")
+    config = _get_config(stunnel_health_check_enabled=True)
+
+    state = {
+        "mount_time": DEFAULT_MOUNT_TIME,
+        "mountpoint": "/mnt",
+        "pid": 9999,
+        "last_stunnel_check_time": DEFAULT_LAST_STUNNEL_CHECK_TIME,
+    }
+    state_file = tmpdir.join(tempfile.mkstemp()[1])
+    state_file.write(json.dumps(state), ensure=True)
+
+    watchdog.check_stunnel_health(
+        config, state, state_file.dirname, state_file.basename, [], DEFAULT_MOUNTS
+    )
+
+    utils.assert_not_called(kill_mock)
+    utils.assert_not_called(restart_tls_tunnel_mock)
+    with state_file.open() as f:
+        new_state = json.load(f)
+    assert FIXED_TIME == new_state["last_stunnel_check_time"]

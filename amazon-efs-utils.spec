@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 3.3.4
+Version   : 3.3.5
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -134,6 +134,9 @@ mv vendor %{_builddir}/%{name}/src/
 %if 0%{?amzn2}
 export CMAKE=/usr/bin/cmake3
 %endif
+%ifarch aarch64
+export JEMALLOC_SYS_WITH_LG_PAGE=16
+%endif
 cd %{_builddir}/%{name}/src
 cargo build --release --locked -p efs-proxy --manifest-path %{_builddir}/%{name}/src/Cargo.toml
 
@@ -221,6 +224,12 @@ fi
 %clean
 
 %changelog
+* Thu Oct 29 2026 David Xu <hengweix@amazon.com> - 3.3.5
+- Send the web identity STS call to the FIPS endpoint when FIPS mode is enabled
+- Fix concurrent mounts racing
+- Support 64 KiB page sizes on arm64
+- Pin tokio below 1.54.0
+
 * Mon Oct 12 2026 Samuel Hale <samuhale@amazon.com> - 3.3.4
 - Document Rust 1.94.1 as the minimum build version
 - Improve state file recovery when mounts die

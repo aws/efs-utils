@@ -226,3 +226,36 @@ def test_command_uses_efs_proxy():
     assert watchdog.command_uses_efs_proxy(cmd) == False
     cmd[0] = "/usr/bin/efs-proxy"
     assert watchdog.command_uses_efs_proxy(cmd) == True
+
+
+def test_start_tls_tunnel_spawn_timeout_propagates(mocker, tmpdir):
+    mocker.patch(
+        "watchdog.popen_with_spawn_deadline",
+        side_effect=watchdog.SpawnTimeoutError("did not exec"),
+    )
+
+    state, state_file = _initiate_state_file(tmpdir, efs_proxy_enabled=True)
+    procs = []
+    with pytest.raises(watchdog.SpawnTimeoutError):
+        watchdog.start_tls_tunnel(procs, state, str(tmpdir), state_file)
+
+    assert 0 == len(procs)
+
+
+def test_start_tls_tunnel_stunnel5_retry_spawn_timeout_propagates(mocker, tmpdir):
+    mocker.patch(
+        "watchdog.popen_with_spawn_deadline",
+        side_effect=[FileNotFoundError, watchdog.SpawnTimeoutError("did not exec")],
+    )
+    mocker.patch(
+        "watchdog.get_system_release_version",
+        return_value=watchdog.AMAZON_LINUX_2_RELEASE_VERSIONS[0],
+    )
+    mocker.patch("watchdog.find_command_path", return_value="/usr/sbin/stunnel5")
+
+    state, state_file = _initiate_state_file(tmpdir)
+    procs = []
+    with pytest.raises(watchdog.SpawnTimeoutError):
+        watchdog.start_tls_tunnel(procs, state, str(tmpdir), state_file.split("/")[-1])
+
+    assert 0 == len(procs)

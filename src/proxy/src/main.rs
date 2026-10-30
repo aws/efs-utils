@@ -1,22 +1,25 @@
-use tikv_jemallocator::Jemalloc;
-
+// musl targets keep the libc allocator, which returns freed memory to the OS.
+#[cfg(not(target_env = "musl"))]
 #[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 use clap::Parser;
-use efs_proxy::aws::cw_publisher::{CloudWatchClient, CloudWatchPublisher, CW_NAMESPACE_EFS};
+use efs_proxy::aws::cw_publisher::{self, CloudWatchClient, CW_NAMESPACE_EFS};
 use efs_proxy::aws::s3_client::S3ClientStandardBuilder;
 use efs_proxy::awsfile_rpc::AwsFileRpcClient;
 use efs_proxy::config_parser::ProxyConfig;
 use efs_proxy::connections::{PlainTextPartitionFinder, TlsPartitionFinder};
 use efs_proxy::controller::Controller;
+use efs_proxy::inherited_listener::listener_for;
 use efs_proxy::logger;
+use efs_proxy::read_bypass;
 use efs_proxy::status_reporter;
 use efs_proxy::tls::get_tls_config;
 use efs_proxy::tls::TlsConfig;
 use efs_proxy::utils::is_running_on_lambda;
 use log::{debug, error, info};
 use std::num::NonZeroUsize;
+use std::os::fd::RawFd;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -150,20 +153,44 @@ fn log_worker_threads(worker_threads: Option<NonZeroUsize>) {
     info!("Tokio runtime using {num_workers} worker threads ({source})");
 }
 
+/// Turns read bypass off in `config` when `--no-direct-s3-read` is passed (it takes precedence
+/// over read_bypass_requested in the config file) or when this build has no read bypass
+/// (`read_bypass_available` is false). Returns true when the config requests read bypass that
+/// the build cannot provide.
+fn apply_read_bypass_overrides(
+    config: &mut ProxyConfig,
+    no_direct_s3_read: bool,
+    read_bypass_available: bool,
+) -> bool {
+    let read_bypass_config = &mut config.nested_config.read_bypass_config;
+    let requested_but_unavailable =
+        read_bypass_config.requested && !no_direct_s3_read && !read_bypass_available;
+    if no_direct_s3_read || !read_bypass_available {
+        read_bypass_config.requested = false;
+        read_bypass_config.enabled = false;
+    }
+    requested_but_unavailable
+}
+
 async fn run(args: Args) {
+    let read_bypass_unavailable;
     let proxy_config = match ProxyConfig::from_path(Path::new(&args.proxy_config_path)) {
         Ok(mut config) => {
-            // no_direct_s3_read argument takes precedence over read_bypass_requested value from config file
-            if args.no_direct_s3_read {
-                config.nested_config.read_bypass_config.requested = false;
-                config.nested_config.read_bypass_config.enabled = false;
-            }
+            read_bypass_unavailable = apply_read_bypass_overrides(
+                &mut config,
+                args.no_direct_s3_read,
+                read_bypass::AVAILABLE,
+            );
             config
         }
         Err(e) => panic!("Failed to read configuration. {}", e),
     };
 
     logger::init(&proxy_config);
+    if read_bypass_unavailable {
+        // Expected where the config defaults read bypass on for a build without it (Lambda).
+        info!("Read bypass is requested but this efs-proxy is built without it; continuing without read bypass");
+    }
 
     log_worker_threads(args.worker_threads);
 
@@ -196,10 +223,10 @@ async fn run(args: Args) {
         info!("CloudWatch metrics and logs both disabled, skipping CloudWatch publisher initialization");
         None
     } else {
-        Some(Arc::new(
-            CloudWatchPublisher::new_from_config(&proxy_config, None, CW_NAMESPACE_EFS).await,
-        ))
+        cw_publisher::new_publisher(&proxy_config, CW_NAMESPACE_EFS).await
     };
+
+    let listener = listener_for(args.listen_fd, &proxy_config.nested_config.listen_addr).await;
 
     let controller_handle = if args.tls {
         let tls_config = match get_tls_config(&proxy_config).await {
@@ -209,32 +236,28 @@ async fn run(args: Args) {
 
         run_sighup_handler(proxy_config.clone(), tls_config.clone());
 
-        let controller = Controller::new(
-            &proxy_config.nested_config.listen_addr,
+        let controller = Controller::with_listener(
+            listener,
             proxy_config.clone(),
             Arc::new(TlsPartitionFinder::new(tls_config)),
             status_reporter,
             cw_publisher.clone(),
-        )
-        .await
-        .unwrap_or_else(|_| bind_failure_exit(&proxy_config.pid_file_path));
+        );
         tokio::spawn(controller.run(
             sigterm_cancellation_token.clone(),
             AwsFileRpcClient,
             S3ClientStandardBuilder,
         ))
     } else {
-        let controller = Controller::new(
-            &proxy_config.nested_config.listen_addr,
+        let controller = Controller::with_listener(
+            listener,
             proxy_config.clone(),
             Arc::new(PlainTextPartitionFinder {
                 mount_target_addr: proxy_config.nested_config.mount_target_addr.clone(),
             }),
             status_reporter,
             cw_publisher.clone(),
-        )
-        .await
-        .unwrap_or_else(|_| bind_failure_exit(&proxy_config.pid_file_path));
+        );
         tokio::spawn(controller.run(
             sigterm_cancellation_token.clone(),
             AwsFileRpcClient,
@@ -271,14 +294,6 @@ async fn write_pid_file(pid_file_path: &Path) -> Result<(), anyhow::Error> {
     pid_file.write_u8(b'\x0A').await?;
     pid_file.flush().await?;
     Ok(())
-}
-
-fn bind_failure_exit(pid_file_path: &str) -> ! {
-    let p = Path::new(pid_file_path);
-    if p.exists() {
-        let _ = std::fs::remove_file(p);
-    }
-    std::process::exit(1);
 }
 
 fn run_sighup_handler(proxy_config: ProxyConfig, tls_config: Arc<Mutex<TlsConfig>>) {
@@ -330,6 +345,13 @@ pub struct Args {
     /// refused before the runtime is built.
     #[arg(long, value_name = "N")]
     pub worker_threads: Option<NonZeroUsize>,
+
+    /// File descriptor of a TCP socket, already bound to the configured listen
+    /// address, that the mount helper hands to this process. The proxy listens on
+    /// it instead of binding the address again, so the port is never free between
+    /// the helper choosing it and the proxy serving it. Unset binds the address.
+    #[arg(long, value_name = "FD")]
+    pub listen_fd: Option<RawFd>,
 }
 
 #[cfg(test)]
@@ -356,6 +378,34 @@ pub mod tests {
     fn test_worker_threads_parsed() {
         let args = Args::parse_from(["efs-proxy", "proxy-config", "--worker-threads", "4"]);
         assert_eq!(Some(NonZeroUsize::new(4).unwrap()), args.worker_threads);
+    }
+
+    #[test]
+    fn test_listen_fd_absent_by_default() {
+        let args = Args::parse_from(["efs-proxy", "proxy-config"]);
+        assert_eq!(None, args.listen_fd);
+    }
+
+    #[test]
+    fn test_listen_fd_parsed_with_other_options() {
+        let args = Args::parse_from([
+            "efs-proxy",
+            "proxy-config",
+            "--tls",
+            "--no-direct-s3-read",
+            "--listen-fd",
+            "5",
+        ]);
+        assert_eq!("proxy-config", args.proxy_config_path);
+        assert!(args.tls);
+        assert_eq!(Some(5), args.listen_fd);
+    }
+
+    #[test]
+    fn test_listen_fd_rejects_malformed_value() {
+        assert!(
+            Args::try_parse_from(["efs-proxy", "proxy-config", "--listen-fd", "five"]).is_err()
+        );
     }
 
     #[test]
@@ -561,6 +611,65 @@ pub mod tests {
             build_runtime(worker_threads).block_on(async move {
                 log_worker_threads(worker_threads);
             });
+        }
+    }
+
+    fn read_bypass_config_after_overrides(
+        requested: bool,
+        no_direct_s3_read: bool,
+        read_bypass_available: bool,
+    ) -> (bool, bool, bool) {
+        let mut config = ProxyConfig::default();
+        config.nested_config.read_bypass_config.requested = requested;
+        config.nested_config.read_bypass_config.enabled = requested;
+        let unavailable =
+            apply_read_bypass_overrides(&mut config, no_direct_s3_read, read_bypass_available);
+        let read_bypass_config = &config.nested_config.read_bypass_config;
+        (
+            read_bypass_config.requested,
+            read_bypass_config.enabled,
+            unavailable,
+        )
+    }
+
+    #[test]
+    fn test_read_bypass_kept_when_requested_and_available() {
+        assert_eq!(
+            (true, true, false),
+            read_bypass_config_after_overrides(true, false, true)
+        );
+    }
+
+    #[test]
+    fn test_no_direct_s3_read_turns_read_bypass_off() {
+        assert_eq!(
+            (false, false, false),
+            read_bypass_config_after_overrides(true, true, true)
+        );
+        // The opt-out is not reported as unavailability, even in a build without read bypass.
+        assert_eq!(
+            (false, false, false),
+            read_bypass_config_after_overrides(true, true, false)
+        );
+    }
+
+    #[test]
+    fn test_build_without_read_bypass_turns_requested_read_bypass_off() {
+        assert_eq!(
+            (false, false, true),
+            read_bypass_config_after_overrides(true, false, false)
+        );
+    }
+
+    #[test]
+    fn test_unrequested_read_bypass_stays_off() {
+        for (no_direct_s3_read, read_bypass_available) in
+            [(false, true), (true, true), (false, false), (true, false)]
+        {
+            assert_eq!(
+                (false, false, false),
+                read_bypass_config_after_overrides(false, no_direct_s3_read, read_bypass_available)
+            );
         }
     }
 

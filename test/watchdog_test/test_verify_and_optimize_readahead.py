@@ -30,9 +30,11 @@ def mock_supported_linux(mocker):
 
 def create_mock_popen(mock_stat_process, mock_cat_process, mock_echo_process):
     def mock_popen(*args, **kwargs):
-        if len(args) > 0 and len(args[0]) > 0 and args[0][0] == "stat":
+        # The watchdog resolves the executable to an absolute path.
+        program = os.path.basename(args[0][0]) if args and args[0] else None
+        if program == "stat":
             return mock_stat_process
-        elif len(args) > 0 and len(args[0]) > 0 and args[0][0] == "cat":
+        elif program == "cat":
             return mock_cat_process
         elif kwargs.get("shell"):
             return mock_echo_process
@@ -220,6 +222,39 @@ def test_verify_and_update_readahead_cat_timeout(mocker, tmpdir, caplog):
     # Assert that timeout was logged and process was killed
     assert "Timeout reading readahead for /mnt/efs, skipping" in caplog.text
     mock_cat_process.kill.assert_called_once()
+
+
+def test_verify_and_update_readahead_write_timeout(mocker, caplog):
+    mock_config = MagicMock()
+    mock_mount_info = Mount("server", MOUNT_POINT, "nfs4", "rsize=1048576", "0", "0")
+
+    mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
+
+    mock_stat_process = MagicMock()
+    mock_stat_process.communicate.return_value = (
+        str(DEFAULT_MOUNT_DEVICE_NUMBER).encode(),
+        b"",
+    )
+    mock_stat_process.returncode = 0
+
+    mock_cat_process = MagicMock()
+    mock_cat_process.communicate.return_value = (b"128", b"")
+    mock_cat_process.returncode = 0
+
+    mock_echo_process = MagicMock()
+    mock_echo_process.communicate.side_effect = subprocess.TimeoutExpired("echo", 2)
+
+    mocker.patch(
+        "subprocess.Popen",
+        side_effect=create_mock_popen(
+            mock_stat_process, mock_cat_process, mock_echo_process
+        ),
+    )
+
+    watchdog.verify_and_update_readahead(MOUNT_POINT, mock_config, mock_mount_info)
+
+    assert "Timeout writing readahead for /mnt/efs, skipping" in caplog.text
+    mock_echo_process.kill.assert_called_once()
 
 
 def test_verify_and_update_readahead_cat_exception(mocker, tmpdir, caplog):
@@ -459,9 +494,10 @@ def test_verify_and_update_readahead_repairs_reset_on_next_invocation(mocker):
     write_calls = []
 
     def popen(args, **kwargs):
-        if args[0] == "stat":
+        program = os.path.basename(args[0]) if not kwargs.get("shell") else None
+        if program == "stat":
             return stat_process
-        if args[0] == "cat":
+        if program == "cat":
             cat_process = MagicMock()
             cat_process.communicate.return_value = (next(current_values), b"")
             return cat_process
@@ -476,3 +512,34 @@ def test_verify_and_update_readahead_repairs_reset_on_next_invocation(mocker):
     watchdog.verify_and_update_readahead(MOUNT_POINT, mock_config, mock_mount_info)
     assert len(write_calls) == 1
     assert "15360" in write_calls[0][0]
+
+
+@pytest.mark.parametrize("stuck_command", ["stat", "cat", "echo"])
+def test_verify_and_update_readahead_spawn_timeout(mocker, caplog, stuck_command):
+    mock_config = MagicMock()
+    mock_mount_info = Mount("server", MOUNT_POINT, "nfs4", "rsize=1048576", "0", "0")
+    mocker.patch("watchdog.get_boolean_config_item_value", return_value=True)
+
+    mock_stat_process = MagicMock()
+    mock_stat_process.communicate.return_value = (
+        str(DEFAULT_MOUNT_DEVICE_NUMBER).encode(),
+        b"",
+    )
+    mock_cat_process = MagicMock()
+    mock_cat_process.communicate.return_value = (b"128", b"")
+    processes = {"stat": mock_stat_process, "cat": mock_cat_process}
+
+    def spawn(args, **kwargs):
+        command = "echo" if kwargs.get("shell") else args[0]
+        if command == stuck_command:
+            raise watchdog.SpawnTimeoutError("did not exec")
+        return processes[command]
+
+    spawn_mock = mocker.patch("watchdog.popen_with_spawn_deadline", side_effect=spawn)
+
+    watchdog.verify_and_update_readahead(MOUNT_POINT, mock_config, mock_mount_info)
+
+    assert ["stat", "cat", "echo"].index(stuck_command) + 1 == spawn_mock.call_count
+    assert (
+        "Readahead check for /mnt/efs skipped: a command did not start" in caplog.text
+    )
