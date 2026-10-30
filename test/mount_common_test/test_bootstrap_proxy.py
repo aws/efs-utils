@@ -11,6 +11,7 @@ import pytest
 
 import efs_utils_common
 import efs_utils_common.certificate_utils as certificate_utils
+import efs_utils_common.constants as constants
 import efs_utils_common.proxy as proxy
 
 try:
@@ -75,7 +76,9 @@ def setup_mocks(mocker, patch_worker_threads=True):
         "stdout",
         "stderr",
     )
-    process_mock.returncode = 0
+    # A tunnel that is still running and listening on its port.
+    process_mock.returncode = None
+    mocker.patch("efs_utils_common.proxy.process_listens_on_port", return_value=True)
 
     popen_mock = mocker.patch("subprocess.Popen", return_value=process_mock)
     write_config_mock = mocker.patch(
@@ -323,6 +326,78 @@ def test_bootstrap_proxy_persists_credential_expiration_for_iam_mount(mocker, tm
     assert write_config_mock.called
 
 
+@pytest.mark.parametrize(
+    argnames="fips",
+    argvalues=[
+        True,
+        False,
+    ],
+)
+def test_bootstrap_proxy_records_fips_choice_for_iam_mount(
+    mocker,
+    tmpdir,
+    fips: bool,
+) -> None:
+    # The watchdog refreshes the mount's credentials through the STS endpoint this
+    # choice selects, so the state file must carry it.
+    setup_mocks_without_popen(mocker)
+    write_state_mock = mocker.patch(
+        target="efs_utils_common.proxy.write_tunnel_state_file",
+        return_value="~mocktempfile",
+    )
+    return_values: dict[str, object] = {
+        "efs_utils_common.proxy.get_mount_specific_filename": DNS_NAME,
+        "efs_utils_common.proxy.get_target_region": REGION,
+        "efs_utils_common.proxy.is_ocsp_enabled": False,
+        "efs_utils_common.proxy.create_certificate": "dummytime",
+        "efs_utils_common.proxy._efs_proxy_bin": "/usr/bin/efs-proxy",
+        "efs_utils_common.proxy.get_private_key_path": os.path.join(
+            str(tmpdir),
+            "privateKey.pem",
+        ),
+        "efs_utils_common.proxy.get_aws_security_credentials": (
+            {
+                "AccessKeyId": "AKID",
+                "SecretAccessKey": "SECRET",
+                "Token": "TOKEN",
+            },
+            "webidentity:arn:aws:iam::123456789012:role/efs,/tmp/token",
+        ),
+        "efs_utils_common.proxy.get_fips_config": fips,
+    }
+    target: str
+    return_value: object
+    for target, return_value in return_values.items():
+        mocker.patch(
+            target=target,
+            return_value=return_value,
+        )
+
+    MOCK_CONFIG.get.side_effect = None
+    MOCK_CONFIG.get.return_value = "info"
+    MOCK_CONFIG.getboolean.return_value = True
+
+    try:
+        with proxy.bootstrap_proxy(
+            config=MOCK_CONFIG,
+            init_system=INIT_SYSTEM,
+            dns_name=DNS_NAME,
+            fs_id=FS_ID,
+            mountpoint=MOUNT_POINT,
+            options={
+                "tls": None,
+                "iam": None,
+            },
+            state_file_dir=str(tmpdir),
+        ):
+            pass
+    except OSError:
+        pass
+
+    cert_details: dict[str, object] = write_state_mock.call_args.kwargs["cert_details"]
+    assert cert_details[constants.USE_FIPS_ENDPOINT_STATE_KEY] is fips
+
+
 def test_bootstrap_proxy_drops_malformed_credential_expiration(mocker, tmpdir, caplog):
     import logging
 
@@ -533,10 +608,10 @@ def test_bootstrap_proxy_non_default_port(mocker, tmpdir):
     assert "/usr/bin/efs-proxy" in popen_args
     assert EXPECTED_STUNNEL_CONFIG_FILE in popen_args
     assert tls_port == write_config_args[4]  # positional argument for tls_port
-    # Ensure tls port socket is closed in bootstrap_proxy
-    # The number is two here, the first one is the actual socket when choosing tls port, the second one is a socket to
-    # verify tls port can be connected after establishing TLS stunnel. They share the same mock.
-    assert 2 == tls_port_sock_mock.close.call_count
+    # Ensure the socket used to choose the tls port is closed in bootstrap_proxy. The
+    # tunnel's readiness is read from its own listener, so no socket is opened to
+    # connect to the port.
+    assert 1 == tls_port_sock_mock.close.call_count
 
 
 def test_bootstrap_proxy_non_tls_verify_ignored(mocker, tmpdir):
@@ -957,3 +1032,89 @@ def test_bootstrap_proxy_worker_threads_read_from_real_config(mocker, tmpdir):
     state_args, _ = state_file_mock.call_args
     persisted_command = state_args[4]
     assert persisted_command[persisted_command.index("--worker-threads") + 1] == "4"
+
+
+def _bootstrap_and_track_order(mocker, tmpdir, efs_proxy_enabled):
+    """Run bootstrap_proxy, recording the probe socket close and the Popen in order."""
+    import socket
+
+    popen_mock, _ = setup_mocks(mocker)
+    mocker.patch("efs_utils_common.proxy.is_ocsp_enabled", return_value=False)
+    mocker.patch(
+        "efs_utils_common.proxy._efs_proxy_bin", return_value="/usr/bin/efs-proxy"
+    )
+    mocker.patch("efs_utils_common.proxy._stunnel_bin", return_value="/usr/bin/stunnel")
+    sock = socket.socket.return_value
+    sock.fileno.return_value = 7
+    events = MagicMock()
+    events.attach_mock(popen_mock, "popen")
+    events.attach_mock(sock.close, "close")
+    with proxy.bootstrap_proxy(
+        MOCK_CONFIG,
+        INIT_SYSTEM,
+        DNS_NAME,
+        FS_ID,
+        MOUNT_POINT,
+        {"tls": None},
+        str(tmpdir),
+        efs_proxy_enabled=efs_proxy_enabled,
+    ):
+        pass
+    order = [name for name, _, _ in events.mock_calls]
+    return popen_mock, order
+
+
+def test_bootstrap_proxy_hands_listen_socket_to_efs_proxy(mocker, tmpdir):
+    popen_mock, order = _bootstrap_and_track_order(mocker, tmpdir, True)
+
+    popen_args, popen_kwargs = popen_mock.call_args
+    assert popen_args[0][-2:] == ["--listen-fd", "7"]
+    assert popen_kwargs["pass_fds"] == (7,)
+    # The probe socket stays open until efs-proxy has inherited it.
+    assert order.index("popen") < order.index("close")
+
+
+def test_bootstrap_proxy_state_file_command_has_no_listen_fd(mocker, tmpdir):
+    """The watchdog restarts a dead proxy from the saved command, with no socket to inherit."""
+    _bootstrap_and_track_order(mocker, tmpdir, True)
+
+    saved_command = proxy.write_tunnel_state_file.call_args[0][4]
+    assert "/usr/bin/efs-proxy" in saved_command
+    assert "--listen-fd" not in saved_command
+
+
+def test_bootstrap_proxy_stunnel_frees_port_before_start(mocker, tmpdir):
+    popen_mock, order = _bootstrap_and_track_order(mocker, tmpdir, False)
+
+    popen_args, popen_kwargs = popen_mock.call_args
+    assert "/usr/bin/stunnel" in popen_args[0]
+    assert "--listen-fd" not in popen_args[0]
+    assert popen_kwargs["pass_fds"] == ()
+    # stunnel binds the port itself, so the probe socket is closed first.
+    assert order.index("close") < order.index("popen")
+
+
+def test_bootstrap_proxy_closes_listen_socket_when_setup_fails(mocker, tmpdir):
+    import socket
+
+    setup_mocks(mocker)
+    mocker.patch("efs_utils_common.proxy.is_ocsp_enabled", return_value=False)
+    mocker.patch(
+        "efs_utils_common.proxy.write_stunnel_config_file",
+        side_effect=RuntimeError("config write failed"),
+    )
+    sock = socket.socket.return_value
+    with pytest.raises(RuntimeError):
+        with proxy.bootstrap_proxy(
+            MOCK_CONFIG,
+            INIT_SYSTEM,
+            DNS_NAME,
+            FS_ID,
+            MOUNT_POINT,
+            {},
+            str(tmpdir),
+            efs_proxy_enabled=True,
+        ):
+            pass
+    sock.close.assert_called_once_with()
+    proxy.subprocess.Popen.assert_not_called()

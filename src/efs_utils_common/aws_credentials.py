@@ -12,9 +12,9 @@ import os
 from datetime import datetime
 
 try:
-    from configparser import NoOptionError, NoSectionError
+    from configparser import ConfigParser, NoOptionError, NoSectionError
 except ImportError:
-    from ConfigParser import NoOptionError, NoSectionError
+    from ConfigParser import ConfigParser, NoOptionError, NoSectionError
 
 try:
     from urllib.parse import urlencode
@@ -41,17 +41,25 @@ from efs_utils_common.constants import (
     CREDENTIALS_KEYS,
     ECS_TASK_METADATA_API,
     ECS_URI_ENV,
+    GOVCLOUD_REGION_PREFIX,
     INSTANCE_IAM_URL,
     NAMED_PROFILE_HELP_URL,
     SECURITY_CREDS_ECS_URI_HELP_URL,
     SECURITY_CREDS_IAM_ROLE_HELP_URL,
     SECURITY_CREDS_WEBIDENTITY_HELP_URL,
     STS_ENDPOINT_URL_FORMAT,
+    STS_FIPS_HOST,
+    STS_HOST,
     WEB_IDENTITY_ROLE_ARN_ENV,
     WEB_IDENTITY_TOKEN_FILE_ENV,
 )
 from efs_utils_common.error_reporting import fatal_error
-from efs_utils_common.metadata import get_dns_name_suffix, url_request_helper
+from efs_utils_common.metadata import (
+    get_dns_name_suffix,
+    get_fips_config,
+    has_fips_endpoints,
+    url_request_helper,
+)
 
 # Format of the "Expiration" field in IMDS / ECS / STS credential responses.
 CREDENTIALS_EXPIRATION_DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
@@ -327,7 +335,27 @@ def get_aws_security_credentials_from_pod_identity(config, is_fatal=False):
     return None, None
 
 
+def is_sts_call_fips(
+    config: ConfigParser,
+    region: str,
+) -> bool:
+    """Return whether the AssumeRoleWithWebIdentity call goes to the FIPS STS endpoint.
+
+    It does when FIPS is on (see get_fips_config) and the region has FIPS endpoints. With
+    FIPS on elsewhere, the call goes to the standard STS endpoint, and the mount logs a
+    warning (metadata.warn_if_region_has_no_fips_endpoints).
+    """
+    return get_fips_config(config) and has_fips_endpoints(region)
+
+
 def get_sts_endpoint_url(config, region):
+    """Return the regional STS endpoint URL that AssumeRoleWithWebIdentity calls.
+
+    When the call is FIPS (see is_sts_call_fips), this is the endpoint botocore resolves
+    with use_fips_endpoint=True: sts-fips.<region>.<suffix>, except in GovCloud, where the
+    standard sts host is the FIPS endpoint and no sts-fips host exists. Otherwise it is the
+    standard sts.<region>.<suffix>.
+    """
     # The dns_name_suffix from config may be an S3 Files "on.*" domain that
     # doesn't match the STS endpoint domain. Map to the correct STS domain.
     dns_name_suffix = get_dns_name_suffix(config, region)
@@ -335,7 +363,20 @@ def get_sts_endpoint_url(config, region):
         dns_name_suffix = "amazonaws.com"
     elif dns_name_suffix == "on.amazonwebservices.com.cn":
         dns_name_suffix = "amazonaws.com.cn"
-    return STS_ENDPOINT_URL_FORMAT.format(region, dns_name_suffix)
+    host: str = (
+        STS_FIPS_HOST
+        if is_sts_call_fips(
+            config=config,
+            region=region,
+        )
+        and not region.startswith(GOVCLOUD_REGION_PREFIX)
+        else STS_HOST
+    )
+    return STS_ENDPOINT_URL_FORMAT.format(
+        host=host,
+        region=region,
+        dns_name_suffix=dns_name_suffix,
+    )
 
 
 def get_aws_security_credentials_from_instance_metadata(config, iam_role_name):

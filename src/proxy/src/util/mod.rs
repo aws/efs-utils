@@ -1,6 +1,8 @@
 // The read-bypass utility submodules were relocated into amzn-efs-client-core.
 // Re-export them here so `crate::util::{fh_denylist, read_bypass_request_context,
-// s3_data_reader}` references across efs-proxy keep compiling unchanged.
+// s3_data_reader}` references across efs-proxy keep compiling unchanged. They
+// exist only with the `read-bypass` feature.
+#[cfg(feature = "read-bypass")]
 pub use efs_client_core::util::{fh_denylist, read_bypass_request_context, s3_data_reader};
 
 pub mod time_utils;
@@ -11,6 +13,7 @@ pub mod time_utils;
 // do not exist in the core crate. Re-export the core module's contents here and
 // re-add those two aliases so `crate::util::read_bypass_context::*` resolves
 // unchanged for efs-proxy.
+#[cfg(feature = "read-bypass")]
 pub mod read_bypass_context {
     pub use efs_client_core::util::read_bypass_context::*;
 

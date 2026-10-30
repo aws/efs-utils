@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use log::{debug, info, warn};
 use s2n_tls_tokio::TlsStream;
+use socket2::{SockRef, TcpKeepalive};
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 use tokio::task::JoinHandle;
@@ -35,6 +36,16 @@ sa::const_assert!(MULTIPLEX_CONNECTION_TIMEOUT_SEC < SINGLE_CONNECTION_TIMEOUT_S
 const SINGLE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(SINGLE_CONNECTION_TIMEOUT_SEC);
 pub const MULTIPLEX_CONNECTION_TIMEOUT: Duration =
     Duration::from_secs(MULTIPLEX_CONNECTION_TIMEOUT_SEC);
+
+// Dead-peer detection for the proxy's outward connections to EFS and S3 Files: keepalive probes an idle
+// connection, TCP_USER_TIMEOUT covers data in flight (keepalive never fires then). Sized to the
+// keepalive schedule so both bound detection to ~75s.
+const KEEPALIVE_IDLE: Duration = Duration::from_secs(30);
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
+const KEEPALIVE_RETRIES: u32 = 3;
+// Unsupported on macOS
+#[cfg(target_os = "linux")]
+const USER_TIMEOUT: Duration = Duration::from_secs(75);
 
 pub trait ProxyStream: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ProxyStream for T {}
@@ -280,10 +291,26 @@ pub trait PartitionFinder<S: ProxyStream> {
     }
 }
 
-pub fn configure_stream(tcp_stream: TcpStream) -> TcpStream {
+/// Sets `TCP_NODELAY`; when `set_timeouts`, also adds keepalive + `TCP_USER_TIMEOUT` for
+/// dead-peer detection. Outward sockets pass `true`; the kernel loopback passes `false`.
+pub fn configure_stream(tcp_stream: TcpStream, set_timeouts: bool) -> TcpStream {
     match tcp_stream.set_nodelay(true) {
         Ok(_) => {}
         Err(e) => warn!("Error setting TCP_NODELAY: {}", e),
+    }
+    if set_timeouts {
+        let sock = SockRef::from(&tcp_stream);
+        let keepalive = TcpKeepalive::new()
+            .with_time(KEEPALIVE_IDLE)
+            .with_interval(KEEPALIVE_INTERVAL)
+            .with_retries(KEEPALIVE_RETRIES);
+        if let Err(e) = sock.set_tcp_keepalive(&keepalive) {
+            warn!("Error setting TCP keepalive: {}", e);
+        }
+        #[cfg(target_os = "linux")]
+        if let Err(e) = sock.set_tcp_user_timeout(Some(USER_TIMEOUT)) {
+            warn!("Error setting TCP_USER_TIMEOUT: {}", e);
+        }
     }
     tcp_stream
 }
@@ -342,7 +369,7 @@ impl PartitionFinder<TcpStream> for PlainTextPartitionFinder {
         let mount_target_address = self.mount_target_addr.clone();
         Box::pin(async move {
             match TcpStream::connect(mount_target_address).await {
-                Ok(tcp_stream) => Ok(configure_stream(tcp_stream)),
+                Ok(tcp_stream) => Ok(configure_stream(tcp_stream, true)),
                 Err(e) => Err(ConnectError::IoError(e)),
             }
         })
@@ -374,10 +401,11 @@ mod tests {
     use super::*;
     use crate::config_parser::ProxyConfig;
     use crate::connections::PartitionFinder;
-    use crate::test_utils::find_available_port;
+    use crate::test_utils::{find_available_port, getsockopt_int};
     use crate::tls::get_tls_config;
     use nix::sys::signal::kill;
     use nix::sys::signal::Signal;
+    use std::os::unix::io::AsRawFd;
     use std::path::Path;
     use std::str::FromStr;
     use tokio::signal;
@@ -573,5 +601,55 @@ mod tests {
             old_cert,
             tls_partition_finder.tls_config.lock().await.client_cert
         );
+    }
+
+    #[tokio::test]
+    async fn test_configure_stream_sets_timeouts() {
+        let (listener, port) = find_available_port().await;
+        let accept = tokio::spawn(async move { listener.accept().await });
+        let client = TcpStream::connect(format!("127.0.0.1:{port}"))
+            .await
+            .unwrap();
+        let client = configure_stream(client, true);
+        let _server = accept.await.unwrap().unwrap();
+
+        let fd = client.as_raw_fd();
+        assert_eq!(getsockopt_int(fd, libc::SOL_SOCKET, libc::SO_KEEPALIVE), 1);
+        // macOS names the idle option TCP_KEEPALIVE.
+        #[cfg(target_os = "linux")]
+        let keepalive_idle_opt = libc::TCP_KEEPIDLE;
+        #[cfg(target_os = "macos")]
+        let keepalive_idle_opt = libc::TCP_KEEPALIVE;
+        assert_eq!(
+            getsockopt_int(fd, libc::IPPROTO_TCP, keepalive_idle_opt),
+            KEEPALIVE_IDLE.as_secs() as libc::c_int
+        );
+        assert_eq!(
+            getsockopt_int(fd, libc::IPPROTO_TCP, libc::TCP_KEEPINTVL),
+            KEEPALIVE_INTERVAL.as_secs() as libc::c_int
+        );
+        assert_eq!(
+            getsockopt_int(fd, libc::IPPROTO_TCP, libc::TCP_KEEPCNT),
+            KEEPALIVE_RETRIES as libc::c_int
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            getsockopt_int(fd, libc::IPPROTO_TCP, libc::TCP_USER_TIMEOUT),
+            USER_TIMEOUT.as_millis() as libc::c_int
+        );
+    }
+
+    #[tokio::test]
+    async fn test_configure_stream_no_timeouts_leaves_keepalive_off() {
+        let (listener, port) = find_available_port().await;
+        let accept = tokio::spawn(async move { listener.accept().await });
+        let client = TcpStream::connect(format!("127.0.0.1:{port}"))
+            .await
+            .unwrap();
+        let client = configure_stream(client, false);
+        let _server = accept.await.unwrap().unwrap();
+
+        let fd = client.as_raw_fd();
+        assert_eq!(getsockopt_int(fd, libc::SOL_SOCKET, libc::SO_KEEPALIVE), 0);
     }
 }

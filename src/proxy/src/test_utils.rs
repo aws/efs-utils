@@ -6,7 +6,6 @@
 
 use crate::{
     aws::cw_publisher::{CloudWatchClient, LogLevel},
-    aws::s3_client::S3ClientError,
     awsfile_prot::{
         self, AwsFileChannelInitArgs, AwsFileChannelInitRes, BindClientResponse, BindResponse,
         ScaleUpConfig,
@@ -18,20 +17,18 @@ use crate::{
     error::RpcError,
     nfs::{
         nfs4_1_xdr,
-        nfs4_1_xdr::{awsfile_bypass_data_locator, nfs_fh4},
         nfs_compound::{NfsMetadata, RefNfsCompoundInfo},
     },
     proxy_identifier::ProxyIdentifier,
-    read_bypass::read_bypass_agent::{ReadBypassAgentError, S3Reader},
     status_reporter::create_status_channel,
     tls::{create_config_builder, InsecureAcceptAllCertificatesHandler, TlsConfig},
-    util::read_bypass_request_context::ReadBypassRequestContext,
 };
 use anyhow::Result;
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use rand::{Rng, RngCore};
 use s2n_tls::config::Config;
 use std::net::SocketAddr;
+use std::os::unix::io::RawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -48,6 +45,23 @@ const XID: u32 = 1;
 
 pub fn get_test_config() -> ProxyConfig {
     ProxyConfig::from_path(Path::new(TEST_CONFIG_PATH)).expect("Could not parse test config.")
+}
+
+/// Proxy config with read bypass requested and enabled, or neither.
+pub fn create_proxy_config(read_bypass_enabled: bool) -> ProxyConfig {
+    let mut config = ProxyConfig::default();
+    config.nested_config.read_bypass_config.requested = read_bypass_enabled;
+    config.nested_config.read_bypass_config.enabled = read_bypass_enabled;
+    config
+}
+
+/// A connected loopback TCP pair: (accepted stream, connecting stream).
+pub async fn create_tcp_stream() -> (TcpStream, TcpStream) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let writer_stream = TcpStream::connect(addr).await.unwrap();
+    let (reader_stream, _addr) = listener.accept().await.unwrap();
+    (reader_stream, writer_stream)
 }
 
 pub async fn get_client_config() -> Result<Config> {
@@ -79,6 +93,30 @@ pub async fn find_available_port() -> (TcpListener, u16) {
         }
     }
     panic!("Failed to find port");
+}
+
+/// Reads an `int`-valued socket option via `libc::getsockopt` — used to assert that options
+/// set by `configure_stream` (keepalive, `TCP_USER_TIMEOUT`, etc.) landed on the kernel socket.
+pub fn getsockopt_int(fd: RawFd, level: libc::c_int, name: libc::c_int) -> libc::c_int {
+    let mut value: libc::c_int = 0;
+    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    // SAFETY: fd is a live socket; value/len are correctly sized stack locals.
+    let ret = unsafe {
+        libc::getsockopt(
+            fd,
+            level,
+            name,
+            std::ptr::addr_of_mut!(value).cast::<libc::c_void>(),
+            &mut len,
+        )
+    };
+    assert_eq!(
+        ret,
+        0,
+        "getsockopt failed: {}",
+        std::io::Error::last_os_error()
+    );
+    value
 }
 
 /// generate_rpc_msg_fragments: Generates message fragments for tests
@@ -388,25 +426,4 @@ pub async fn make_signaling_controller() -> (
         consecutive_connect_failures: 0,
     };
     (addr, controller, rx)
-}
-
-// Read-bypass testing utils
-//
-
-/// Mock S3Reader whose reads always fail with a fixed S3 error class.
-pub struct FailingS3Reader {
-    pub make_error: fn() -> S3ClientError,
-}
-
-#[async_trait::async_trait]
-impl S3Reader for FailingS3Reader {
-    async fn read_data(
-        &self,
-        _read_bypass_request_context: Arc<ReadBypassRequestContext>,
-        _s3_data_locator: awsfile_bypass_data_locator,
-        _filehandle: nfs_fh4,
-        _file_size: u64,
-    ) -> Result<Option<Bytes>, ReadBypassAgentError> {
-        Err(ReadBypassAgentError::S3Error((self.make_error)()))
-    }
 }

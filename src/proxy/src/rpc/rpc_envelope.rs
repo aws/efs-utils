@@ -269,14 +269,14 @@ pub type RpcEnvelopeBatch = EnvelopeBatch<RpcEnvelope>;
 
 pub struct EnvelopeBatch<E>
 where
-    E: for<'a> TryFrom<BytesMut, Error = RpcParseErrorKind>,
+    E: TryFrom<BytesMut, Error = RpcParseErrorKind>,
 {
     pub envelopes: Vec<E>,
 }
 
 impl<E> TryFrom<RpcBatch> for EnvelopeBatch<E>
 where
-    E: for<'a> TryFrom<BytesMut, Error = RpcParseErrorKind>,
+    E: TryFrom<BytesMut, Error = RpcParseErrorKind>,
 {
     type Error = RpcParseError;
 
@@ -316,7 +316,7 @@ where
 ///
 impl<E> From<EnvelopeBatch<E>> for RpcBatch
 where
-    E: for<'a> TryFrom<BytesMut, Error = RpcParseErrorKind> + Envelope<BytesMut>,
+    E: TryFrom<BytesMut, Error = RpcParseErrorKind> + Envelope<BytesMut>,
 {
     fn from(batch: EnvelopeBatch<E>) -> Self {
         let mut rpcs = Vec::with_capacity(batch.envelopes.len());

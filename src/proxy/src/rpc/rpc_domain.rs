@@ -148,9 +148,10 @@ impl ClientSocketReader for RpcClientReader {
                 }
             };
 
+            // SendError means the receiving connection task has exited (teardown), so restart.
             if let Err(e) = self.dispatcher.dispatch(rpc_batch).await {
                 error!("Error sending message batch to dispatcher {:?}", e);
-                shutdown_reason = Some(ShutdownReason::UnexpectedError);
+                shutdown_reason = Some(ShutdownReason::NeedsRestart);
                 break;
             }
         }
@@ -212,9 +213,10 @@ impl<S: ProxyStream> ServerSocketReader<S> for RpcServerReader {
                 }
             };
 
+            // SendError means the receiving connection task has exited (teardown), so restart.
             if let Err(e) = self.dispatcher.dispatch(rpc_batch).await {
                 error!("Error sending message batch to dispatcher {:?}", e);
-                shutdown_reason = Some(ShutdownReason::UnexpectedError);
+                shutdown_reason = Some(ShutdownReason::NeedsRestart);
                 break;
             }
         }
@@ -416,6 +418,52 @@ mod tests {
             (rx.recv().await).is_none(),
             "Expected None response since stream is empty"
         );
+    }
+
+    #[tokio::test]
+    async fn test_rpc_client_reader_dispatch_send_error_triggers_needs_restart() {
+        let (tx, rx) = mpsc::channel(32);
+        drop(rx);
+        let partition_senders = Arc::new(Mutex::new(vec![tx]));
+        let mut client_reader = RpcClientReader {
+            dispatcher: RpcClientDispatcher::new(partition_senders),
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut nfs_client = TcpStream::connect(addr).await.unwrap();
+        let (proxy, _addr) = listener.accept().await.unwrap();
+        let (read_half, _write_half) = proxy.into_split();
+
+        let (buffer, _) = generate_rpc_msg_fragments(RPC_MIN_SIZE, 1);
+        nfs_client.write_all(&buffer).await.unwrap();
+
+        let (shutdown, mut waiter) = ShutdownHandle::new(CancellationToken::new());
+        client_reader
+            .run(read_half, Arc::new(AtomicU64::new(0)), shutdown)
+            .await;
+
+        assert_eq!(waiter.recv().await, Some(ShutdownReason::NeedsRestart));
+    }
+
+    #[tokio::test]
+    async fn test_rpc_server_reader_dispatch_send_error_triggers_needs_restart() {
+        let (tx, rx) = mpsc::channel(32);
+        drop(rx);
+        let mut socket_reader = RpcServerReader {
+            dispatcher: RpcServerDispatcher { sender: tx },
+        };
+
+        let (client, mut server) = tokio::io::duplex(1024);
+        let (read_half, _write_half) = split(client);
+
+        let (buffer, _) = generate_rpc_msg_fragments(RPC_MIN_SIZE, 1);
+        server.write_all(&buffer).await.unwrap();
+
+        let (shutdown, mut waiter) = ShutdownHandle::new(CancellationToken::new());
+        ServerSocketReader::run(&mut socket_reader, read_half, shutdown).await;
+
+        assert_eq!(waiter.recv().await, Some(ShutdownReason::NeedsRestart));
     }
 
     #[test]

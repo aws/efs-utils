@@ -1,3 +1,9 @@
+# v3.3.5
+- Send the web identity STS call to the FIPS endpoint when FIPS mode is enabled
+- Fix concurrent mounts racing
+- Support 64 KiB page sizes on arm64
+- Pin tokio below 1.54.0
+
 # v3.3.4
 - Document Rust 1.94.1 as the minimum build version
 - Improve state file recovery when mounts die

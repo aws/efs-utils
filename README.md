@@ -34,6 +34,9 @@ Efs-utils for EFS file systems is supported on the following macOS distributions
 | macOS Sequoia  | `launchd`     |
 | macOS Tahoe    | `launchd`     |
 
+Only the latest version of efs-utils will continue to receive new features, fixes, and security patches. Please update
+to the latest version to receive continued support.
+
 ## README Contents
 - [Installation](#installation)
   - [For Amazon Linux distributions](#for-amazon-linux-distributions)

@@ -1,6 +1,4 @@
-//! ### CloudWatch metrics and logs emission
-//!
-
+use super::*;
 use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::sync::Arc;
 use crate::{
@@ -15,29 +13,11 @@ use aws_sdk_cloudwatchlogs::{
 use log::{info, warn};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Metrics names and namespaces
-///
-pub const CW_NAMESPACE_S3FILES: &str = "efs-utils/S3Files";
-pub const CW_NAMESPACE_EFS: &str = "efs-utils/EFS";
-
-pub const S3_BUCKET_IS_REACHABLE: &str = "S3BucketReachable";
-pub const S3_BUCKET_IS_PERMITTED: &str = "S3BucketAccessible";
-pub const NFS_CONNECTION_ACCESSIBLE: &str = "NFSConnectionAccessible";
-
-pub const DEFAULT_EFS_CLOUDWATCH_LOG_GROUP: &str = "/aws/efs/utils";
-
 /// Dimensions
 ///
 const BUCKET_DIMENSION: &str = "Bucket";
 const INSTANCE_DIMENSION: &str = "InstanceId";
 const FS_ID_DIMENSION: &str = "FileSystemId";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogLevel {
-    Error,
-    Warn,
-    Info,
-}
 
 impl LogLevel {
     fn as_str(&self) -> &str {
@@ -147,16 +127,6 @@ impl CWLogsHelper for CWLogsClient {
             .map(|_| ())
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
-}
-
-/// Trait for CloudWatch operations (logs and metrics), enabling testability.
-/// All methods are fire-and-forget (non-blocking) — they spawn background tasks
-/// and return immediately.
-pub trait CloudWatchClient: Send + Sync {
-    fn emit_log(&self, level: LogLevel, message: &str);
-    fn publish_s3_reachable(&self, bucket: &str, is_reachable: bool);
-    fn publish_s3_permitted(&self, bucket: &str, is_permitted: bool);
-    fn publish_nfs_reachability(&self, is_reachable: bool, fs_id: &str);
 }
 
 /// CloudWatch-backed publisher for metrics and logs.
@@ -551,6 +521,16 @@ impl CloudWatchClient for CloudWatchPublisher {
     }
 }
 
+/// The publisher for `namespace`, configured from `proxy_config`.
+pub async fn new_publisher(
+    proxy_config: &ProxyConfig,
+    namespace: &str,
+) -> Option<Arc<dyn CloudWatchClient>> {
+    Some(Arc::new(
+        CloudWatchPublisher::new_from_config(proxy_config, None, namespace).await,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -791,6 +771,24 @@ mod tests {
         let publisher =
             CloudWatchPublisher::new_from_config(&proxy_config, None, CW_NAMESPACE_EFS).await;
         assert!(publisher.logs_client.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_new_publisher_builds_a_publisher() {
+        use crate::config_parser::{EfsConfig, ProxyConfig};
+
+        let mut proxy_config = ProxyConfig {
+            nested_config: EfsConfig::default(),
+            ..Default::default()
+        };
+        proxy_config
+            .nested_config
+            .telemetry_config
+            .cloud_watch_logs_enabled = false;
+
+        assert!(new_publisher(&proxy_config, CW_NAMESPACE_EFS)
+            .await
+            .is_some());
     }
 
     // Tests for ensure_log_group_and_stream

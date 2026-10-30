@@ -45,3 +45,20 @@ def test_restart_tls_tunnel_with_certificate_path(mocker, tmpdir):
     watchdog.restart_tls_tunnel([], state, state_file.dirname, state_file.basename)
 
     utils.assert_not_called(start_tls_tunnel_call)
+
+
+def test_restart_tls_tunnel_spawn_timeout_keeps_state_for_retry(mocker, tmpdir):
+    mocker.patch(
+        "watchdog.start_tls_tunnel",
+        side_effect=watchdog.SpawnTimeoutError("did not exec"),
+    )
+
+    state = {"pid": 9999, "cmd": ""}
+    state_file = tmpdir.join(tempfile.mkstemp()[1])
+    state_file.write(json.dumps(state), ensure=True)
+
+    watchdog.restart_tls_tunnel([], state, state_file.dirname, state_file.basename)
+
+    assert 9999 == state["pid"]
+    with state_file.open() as f:
+        assert 9999 == json.load(f)["pid"]

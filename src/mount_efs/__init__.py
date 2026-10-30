@@ -45,6 +45,8 @@ from efs_utils_common.config_utils import (
 from efs_utils_common.constants import (
     CONFIG_FILE,
     EFS_SERVICE_NAME,
+    LEGACY_STUNNEL_MODE_WARNING_OCSP,
+    LEGACY_STUNNEL_MODE_WARNING_STUNNEL_OPTION,
     LEGACY_STUNNEL_MOUNT_OPTION,
     MOUNT_TYPE_EFS,
     PROXY_MODE_STUNNEL,
@@ -53,7 +55,11 @@ from efs_utils_common.constants import (
 from efs_utils_common.context import MountContext
 from efs_utils_common.error_reporting import fatal_error
 from efs_utils_common.file_utils import usage
-from efs_utils_common.metadata import legacy_stunnel_mode_enabled
+from efs_utils_common.metadata import (
+    get_target_region,
+    legacy_stunnel_mode_enabled,
+    warn_if_region_has_no_fips_endpoints,
+)
 from efs_utils_common.mount_options import (
     check_options_validity,
     check_unsupported_options,
@@ -161,12 +167,15 @@ def main():
 
     # Use stunnel instead of efs-proxy for tls mounts,
     # and attach non-tls mounts directly to the mount target.
-    if (
-        LEGACY_STUNNEL_MOUNT_OPTION in options
-        or check_if_platform_is_mac()
-        or is_ocsp_enabled(config, options)
-    ):
+    # macOS has no efs-proxy build, so it is checked first and does not warn.
+    if check_if_platform_is_mac():
         context.proxy_mode = PROXY_MODE_STUNNEL
+    elif LEGACY_STUNNEL_MOUNT_OPTION in options:
+        context.proxy_mode = PROXY_MODE_STUNNEL
+        logging.warning(LEGACY_STUNNEL_MODE_WARNING_STUNNEL_OPTION)
+    elif is_ocsp_enabled(config, options):
+        context.proxy_mode = PROXY_MODE_STUNNEL
+        logging.warning(LEGACY_STUNNEL_MODE_WARNING_OCSP)
 
     logging.info("version=%s options=%s", VERSION, options)
 
@@ -177,6 +186,10 @@ def main():
 
     init_system = get_init_system()
     check_network_status(fs_id, init_system)
+    warn_if_region_has_no_fips_endpoints(
+        config=config,
+        region=get_target_region(config, options),
+    )
 
     dns_name, fallback_ip_address = get_dns_name_and_fallback_mount_target_ip_address(
         config, fs_id, options
