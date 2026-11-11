@@ -26,6 +26,7 @@ class MountContext:
             self.cloudwatch_agent = None
             self.instance_identity = None
             self.instance_az_id_metadata = None
+            self.imds_retry_deadline = None
             self.unsupported_options = []
             self.proxy_mode = None
             self.service = None
@@ -39,6 +40,7 @@ class MountContext:
         self.cloudwatch_agent = None
         self.instance_identity = None
         self.instance_az_id_metadata = None
+        self.imds_retry_deadline = None
         self.unsupported_options = []
         self.proxy_mode = None
         self.service = None

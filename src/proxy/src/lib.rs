@@ -33,6 +33,7 @@ pub mod inherited_listener;
 pub mod log_encoder;
 pub mod logger;
 pub mod nfs;
+pub mod peer_owner;
 pub mod proxy;
 pub mod proxy_builder;
 pub mod proxy_task;

@@ -7,6 +7,7 @@
 # the License.
 
 
+import errno
 import json
 import logging
 import os
@@ -61,6 +62,8 @@ from efs_utils_common.constants import (
     ECS_FARGATE_TASK_METADATA_ENDPOINT_URL_EXTENSION,
     FIPS_REGION_PREFIXES,
     FIPS_REGIONS_HELP_URL,
+    IMDS_OUTAGE_RETRY_FIRST_DELAY_SEC,
+    IMDS_OUTAGE_RETRY_WINDOW_SEC,
     INSTANCE_METADATA_SERVICE_AZ_ID_URL,
     INSTANCE_METADATA_SERVICE_URL,
     INSTANCE_METADATA_TOKEN_URL,
@@ -348,6 +351,7 @@ def get_aws_ec2_metadata_token(
     timeout=DEFAULT_URL_REQUEST_TIMEOUT_SEC,
     max_retries=DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT,
     retry_delay=0.5,
+    failures=None,
 ):
     """
     Retrieves the AWS EC2 metadata token. Typically, the token is fetched
@@ -361,6 +365,7 @@ def get_aws_ec2_metadata_token(
         timeout (float): The timeout in seconds for each request.
         max_retries (int): The maximum number of retries.
         retry_delay (int): The delay in seconds between retries.
+        failures (list): If given, each failed attempt's exception is appended to it.
 
     Returns:
         The AWS EC2 metadata token str or None if it cannot be retrieved.
@@ -390,17 +395,20 @@ def get_aws_ec2_metadata_token(
     while retries < max_retries:
         try:
             return get_token(timeout=timeout)
-        except socket.timeout:
+        except socket.timeout as e:
+            _record_token_failure(failures, e)
             logging.debug(
                 "Timeout when getting the aws ec2 metadata token. Attempt: %s/%s"
                 % (retries + 1, max_retries)
             )
         except HTTPError as e:
+            _record_token_failure(failures, e)
             logging.debug(
                 "Failed to fetch token due to %s. Attempt: %s/%s"
                 % (e, retries + 1, max_retries)
             )
         except Exception as e:
+            _record_token_failure(failures, e)
             logging.debug(
                 "Unknown error when fetching aws ec2 metadata token, %s. Attempt: %s/%s"
                 % (e, retries + 1, max_retries)
@@ -415,6 +423,11 @@ def get_aws_ec2_metadata_token(
                 "Unable to retrieve AWS EC2 metadata token. Maximum number of retries reached."
             )
             return None
+
+
+def _record_token_failure(failures, error):
+    if failures is not None:
+        failures.append(error)
 
 
 def get_dns_name_suffix(config, region):
@@ -442,6 +455,53 @@ def is_instance_metadata_url(url):
 
 
 def url_request_helper(config, url, unsuccessful_resp, url_error_msg, headers={}):
+    start = time.monotonic()
+    delay = IMDS_OUTAGE_RETRY_FIRST_DELAY_SEC
+    token_retries = DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT
+    while True:
+        resp, outage = _url_request_once(
+            config, url, unsuccessful_resp, url_error_msg, headers, token_retries
+        )
+        if not (outage and is_instance_metadata_url(url)):
+            return resp
+        if not _imds_outage_retry_allowed(start, delay):
+            return resp
+        logging.info(
+            "Instance metadata at %s is briefly unavailable, retrying in %s seconds",
+            url,
+            delay,
+        )
+        time.sleep(delay)
+        delay *= 2
+        # The window paces the retries, so the token gets one attempt each.
+        token_retries = 1
+
+
+def _imds_outage_retry_allowed(start, delay):
+    context = MountContext()
+    if context.imds_retry_deadline is None:
+        context.imds_retry_deadline = start + IMDS_OUTAGE_RETRY_WINDOW_SEC
+    return time.monotonic() + delay <= context.imds_retry_deadline
+
+
+def _is_imds_outage(error):
+    """Refused, reset or 5xx; not a timeout, which is what a host without IMDS sees."""
+    if isinstance(error, HTTPError):
+        return error.code >= 500
+    if isinstance(error, ConnectionResetError):
+        return True
+    return getattr(getattr(error, "reason", None), "errno", None) in (
+        errno.ECONNREFUSED,
+        errno.ECONNRESET,
+    )
+
+
+def _url_request_once(
+    config, url, unsuccessful_resp, url_error_msg, headers, token_retries
+):
+    """Returns the response object, or None, and whether the failure is an outage."""
+    outage = False
+    token_failures = []
     try:
         req = Request(url)
         for k, v in headers.items():
@@ -457,16 +517,24 @@ def url_request_helper(config, url, unsuccessful_resp, url_error_msg, headers={}
             # IMDSv2 is a session-oriented method to access instance metadata
             # We expect the token retrieve will fail in bridge networking environment (e.g. container) since the default hop
             # limit for getting the token is 1. If the token retrieve does timeout, we fallback to use IMDSv1 instead
-            token = get_aws_ec2_metadata_token(timeout=timeout)
+            token = get_aws_ec2_metadata_token(
+                timeout=timeout, max_retries=token_retries, failures=token_failures
+            )
             if token:
                 req.add_header("X-aws-ec2-metadata-token", token)
 
         request_resp = urlopen(req, timeout=timeout)
 
-        return get_resp_obj(request_resp, url, unsuccessful_resp)
+        return get_resp_obj(request_resp, url, unsuccessful_resp), False
     except socket.timeout:
         err_msg = "Request timeout"
     except HTTPError as e:
+        # A 401 after an outage-shaped token failure likely means IMDS came back between the PUT and the GET.
+        outage = _is_imds_outage(e) or (
+            e.code == 401
+            and bool(token_failures)
+            and _is_imds_outage(token_failures[-1])
+        )
         # For instance enable with IMDSv2 and fetch token disabled, Unauthorized 401 error will be thrown
         if (
             e.code == 401
@@ -485,11 +553,18 @@ def url_request_helper(config, url, unsuccessful_resp, url_error_msg, headers={}
             e.reason,
         )
     except URLError as e:
+        outage = _is_imds_outage(e)
         err_msg = "Unable to reach the url at %s, reason is %s" % (url, e.reason)
+    except ConnectionResetError as e:
+        # A reset mid-response, including http.client.RemoteDisconnected; raised as before unless IMDS.
+        if not is_instance_metadata_url(url):
+            raise
+        outage = True
+        err_msg = "Connection to %s was reset: %s" % (url, e)
 
     if err_msg:
         logging.debug("%s %s", url_error_msg, err_msg)
-    return None
+    return None, outage
 
 
 def get_resp_obj(request_resp, url, unsuccessful_resp):

@@ -51,6 +51,28 @@ fn reconnect_backoff(failures: u32) -> Duration {
     }
 }
 
+/// Run `verifier` off the async worker. Rejects if the listen address cannot be
+/// read or the verifier task fails.
+async fn verify_peer(
+    verifier: fn(std::net::SocketAddr, std::net::SocketAddr) -> crate::peer_owner::PeerVerdict,
+    peer: std::net::SocketAddr,
+    listen: std::io::Result<std::net::SocketAddr>,
+) -> crate::peer_owner::PeerVerdict {
+    let listen = match listen {
+        Ok(addr) => addr,
+        Err(e) => {
+            return crate::peer_owner::PeerVerdict::Reject(format!(
+                "cannot read the proxy listen address: {e}"
+            ))
+        }
+    };
+    tokio::task::spawn_blocking(move || verifier(peer, listen))
+        .await
+        .unwrap_or_else(|e| {
+            crate::peer_owner::PeerVerdict::Reject(format!("peer-owner check task failed: {e}"))
+        })
+}
+
 pub const DEFAULT_SCALE_UP_CONFIG: ScaleUpConfig = ScaleUpConfig {
     max_multiplexed_connections: 5,
     scale_up_bytes_per_sec_threshold: 300 * 1024 * 1024,
@@ -129,6 +151,9 @@ pub struct Controller<S: ProxyStream> {
     pub reachability_emit_period: Duration,
     // Consecutive failed connects, driving reconnect_backoff.
     pub consecutive_connect_failures: u32,
+    // Decides whether a loopback peer is the kernel NFS client.
+    pub peer_verifier:
+        fn(std::net::SocketAddr, std::net::SocketAddr) -> crate::peer_owner::PeerVerdict,
 }
 
 impl<S: ProxyStream> Controller<S> {
@@ -174,6 +199,7 @@ impl<S: ProxyStream> Controller<S> {
             last_reachability_emit_at: None,
             reachability_emit_period: METRICS_EMISSION_PERIOD,
             consecutive_connect_failures: 0,
+            peer_verifier: crate::peer_owner::verify_loopback_peer,
         }
     }
 
@@ -187,7 +213,7 @@ impl<S: ProxyStream> Controller<S> {
         // Main Proxy incarnation management loop
         loop {
             info!("Starting new incarnation of proxy");
-            let nfs_client = match self.listener.accept().await {
+            let (nfs_client, peer_addr) = match self.listener.accept().await {
                 Ok((client, socket_addr)) => {
                     self.proxy_id.increment();
                     info!(
@@ -195,7 +221,7 @@ impl<S: ProxyStream> Controller<S> {
                         socket_addr, self.proxy_id
                     );
                     // Loopback to the kernel NFS client — liveness is the NFS client's timeo/retrans job.
-                    configure_stream(client, false)
+                    (configure_stream(client, false), socket_addr)
                 }
                 Err(e) => {
                     error!("Failed to establish connection to NFS client. {e}");
@@ -233,6 +259,15 @@ impl<S: ProxyStream> Controller<S> {
                 Ok(Ok(_)) => {
                     // The NFS client sent data; proceed to establish the upstream connection.
                 }
+            }
+
+            // Admit only the kernel NFS client, before forwarding any data.
+            let verdict =
+                verify_peer(self.peer_verifier, peer_addr, self.listener.local_addr()).await;
+            if let crate::peer_owner::PeerVerdict::Reject(why) = verdict {
+                warn!("Rejecting connection on the loopback port from {peer_addr}: {why}");
+                drop(nfs_client);
+                continue;
             }
 
             // Set init_deadline to be 1 second less than the `proxy_init_timeout_sec`, as we
@@ -712,6 +747,7 @@ mod tests {
             // Smaller than the 10s status-loop tick so every tick clears the dedupe window.
             reachability_emit_period: Duration::from_secs(1),
             consecutive_connect_failures: 0,
+            peer_verifier: |_, _| crate::peer_owner::PeerVerdict::Admit,
         };
 
         // Build a minimal proxy
@@ -916,6 +952,46 @@ mod tests {
         assert!(
             matches!(reached, Ok(Some(()))),
             "NFS client connecting after the idle socket was dropped was not served"
+        );
+    }
+
+    // verify_peer rejects on an unreadable listen address or a failed verifier.
+    #[tokio::test]
+    async fn verify_peer_fails_closed() {
+        use crate::peer_owner::PeerVerdict;
+        let peer: std::net::SocketAddr = "127.0.0.1:50000".parse().unwrap();
+        let listen: std::net::SocketAddr = "127.0.0.1:20049".parse().unwrap();
+
+        let admit = verify_peer(|_, _| PeerVerdict::Admit, peer, Ok(listen)).await;
+        assert_eq!(admit, PeerVerdict::Admit);
+
+        let no_addr = verify_peer(
+            |_, _| PeerVerdict::Admit,
+            peer,
+            Err(std::io::Error::from_raw_os_error(libc::EBADF)),
+        )
+        .await;
+        assert!(matches!(no_addr, PeerVerdict::Reject(_)));
+
+        let panicked = verify_peer(|_, _| panic!("verifier failed"), peer, Ok(listen)).await;
+        assert!(matches!(panicked, PeerVerdict::Reject(_)));
+    }
+
+    // A rejected peer is dropped and never served.
+    #[tokio::test(start_paused = true)]
+    async fn rejected_peer_is_not_served() {
+        let (addr, mut controller, mut rx) = make_signaling_controller().await;
+        controller.peer_verifier =
+            |_, _| crate::peer_owner::PeerVerdict::Reject("test reject".to_string());
+        let _handle = spawn_run(controller);
+
+        let mut peer = TcpStream::connect(addr).await.unwrap();
+        peer.write_all(&[0x80, 0, 0, 0]).await.unwrap();
+
+        tokio::time::sleep(PEEK_FIRST_BYTE_TIMEOUT + Duration::from_secs(5)).await;
+        assert!(
+            rx.try_recv().is_err(),
+            "a rejected peer was served: establish_connection was reached"
         );
     }
 }

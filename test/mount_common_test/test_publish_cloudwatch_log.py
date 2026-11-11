@@ -163,6 +163,10 @@ def test_cloudwatchlog_agent_none_when_botocore_agent_is_none(mocker):
     config = _get_mock_config(
         DEFAULT_CLOUDWATCH_ENABLED, DEFAULT_CLOUDWATCH_LOG_GROUP, DEFAULT_RETENTION_DAYS
     )
+    mocker.patch(
+        "efs_utils_common.cloudwatch.get_instance_identity_info_from_instance_metadata",
+        return_value=INSTANCE,
+    )
     get_botocore_client_mock = mocker.patch(
         "efs_utils_common.cloudwatch.get_botocore_client", return_value=None
     )
@@ -170,6 +174,42 @@ def test_cloudwatchlog_agent_none_when_botocore_agent_is_none(mocker):
     utils.assert_called_once(get_botocore_client_mock)
 
     assert cloudwatchlog_agent == None
+
+
+def test_bootstrap_reads_instance_metadata_before_building_the_client(mocker):
+    # botocore tries the instance role credentials once, so the outage-tolerant read goes first.
+    config = _get_mock_config(
+        DEFAULT_CLOUDWATCH_ENABLED, DEFAULT_CLOUDWATCH_LOG_GROUP, DEFAULT_RETENTION_DAYS
+    )
+    calls = MagicMock()
+    calls.identity.return_value = INSTANCE
+    calls.client.return_value = None
+    mocker.patch(
+        "efs_utils_common.cloudwatch.get_instance_identity_info_from_instance_metadata",
+        side_effect=calls.identity,
+    )
+    mocker.patch(
+        "efs_utils_common.cloudwatch.get_botocore_client", side_effect=calls.client
+    )
+
+    cloudwatch.bootstrap_cloudwatch_logging(config, {}, FS_ID)
+
+    assert [c[0] for c in calls.mock_calls] == ["identity", "client"]
+
+
+def test_bootstrap_reads_no_instance_metadata_without_botocore(mocker):
+    config = _get_mock_config(
+        DEFAULT_CLOUDWATCH_ENABLED, DEFAULT_CLOUDWATCH_LOG_GROUP, DEFAULT_RETENTION_DAYS
+    )
+    mocker.patch.object(cloudwatch, "BOTOCORE_PRESENT", False)
+    mocker.patch.object(metadata, "BOTOCORE_PRESENT", False)
+    identity_mock = mocker.patch(
+        "efs_utils_common.cloudwatch.get_instance_identity_info_from_instance_metadata",
+        return_value=INSTANCE,
+    )
+
+    assert cloudwatch.bootstrap_cloudwatch_logging(config, {}, FS_ID) is None
+    utils.assert_not_called(identity_mock)
 
 
 """

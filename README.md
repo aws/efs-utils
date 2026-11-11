@@ -37,6 +37,18 @@ Efs-utils for EFS file systems is supported on the following macOS distributions
 Only the latest version of efs-utils will continue to receive new features, fixes, and security patches. Please update
 to the latest version to receive continued support.
 
+### CVE Patching SLA
+efs-utils, including the efs-proxy component and the third-party libraries it bundles, is regularly scanned for known vulnerabilities (CVEs). Fixes for CVEs affecting efs-utils are released within the following timelines, measured from the CVE's published date:
+
+| Severity | SLA      |
+|----------|----------|
+| Critical | 15 days  |
+| High     | 30 days  |
+| Medium   | 100 days |
+| Low      | 100 days |
+
+CVE fixes are only included in future releases; previously released versions are not patched. To pick up a fix, upgrade to the latest release. A new release reaches each [installation](#installation-instructions) channel on that channel's own release schedule.
+
 ## README Contents
 - [Installation](#installation)
   - [For Amazon Linux distributions](#for-amazon-linux-distributions)
@@ -667,6 +679,8 @@ sed -i "s/fips_mode_enabled = false/fips_mode_enabled = true/" /etc/amazon/efs/e
 sed -i "s/fips_mode_enabled = false/fips_mode_enabled = true/" /etc/amazon/efs/s3files-utils.conf
 ```
 This enables any potential API call from efs-utils to use FIPS endpoints and cause proxy to enter FIPS mode. Efs-utils is configured to compile with AWS-LC FIPS module by default. For more information on AWS-LC FIPS module see [AWS-LC FIPS README](https://github.com/aws/aws-lc/blob/main/crypto/fipsmodule/FIPS.md).
+
+With FIPS mode on, efs-utils creates its botocore clients with FIPS endpoints, which needs botocore 1.23.0 or newer; with an older botocore, a mount that creates one fails. The clients are for CloudWatch Logs, which S3 Files mounts publish to by default, and for retrieving the mount target IP address. If your botocore is older, follow the [upgrade botocore section](#Upgrade-botocore).
 
 ## License Summary
 
