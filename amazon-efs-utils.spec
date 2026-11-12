@@ -41,7 +41,7 @@
 %{?!include_vendor_tarball:%define include_vendor_tarball true}
 
 Name      : amazon-efs-utils
-Version   : 3.3.5
+Version   : 3.4.0
 Release   : 1%{platform}
 Summary   : This package provides utilities for simplifying the use of EFS file systems
 
@@ -224,6 +224,12 @@ fi
 %clean
 
 %changelog
+* Tue Nov 10 2026 Zachary Maguire <maguirza@amazon.com> - 3.4.0
+- Reject connections to the efs-proxy loopback port from any peer other than the local kernel NFS client
+- Add kernel_nfs_client_teardown_max_wait_sec, which keeps an unmounted mount's tunnel while the kernel NFS client is torn down (off by default)
+- Retry a brief IMDS outage when reading instance metadata
+- Document the CVE patching SLA and the botocore 1.23.0 minimum for FIPS mode
+
 * Thu Oct 29 2026 David Xu <hengweix@amazon.com> - 3.3.5
 - Send the web identity STS call to the FIPS endpoint when FIPS mode is enabled
 - Fix concurrent mounts racing

@@ -37,12 +37,17 @@ def bootstrap_cloudwatch_logging(config, options, fs_id=None):
     if not check_if_cloudwatch_log_enabled(config):
         return None
 
+    if not BOTOCORE_PRESENT:
+        logging.error("Failed to import botocore, please install botocore first.")
+        return None
+
+    # Before the client: botocore tries the instance role credentials only once.
+    cloudwatchlog_config = get_cloudwatchlog_config(config, fs_id)
+
     cloudwatchlog_client = get_botocore_client(config, "logs", options)
 
     if not cloudwatchlog_client:
         return None
-
-    cloudwatchlog_config = get_cloudwatchlog_config(config, fs_id)
 
     log_group_name = cloudwatchlog_config.get("log_group_name")
     log_stream_name = cloudwatchlog_config.get("log_stream_name")

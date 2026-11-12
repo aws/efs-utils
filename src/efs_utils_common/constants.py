@@ -11,7 +11,7 @@ import os
 import pwd
 import re
 
-VERSION = "3.3.5"
+VERSION = "3.4.0"
 
 AMAZON_LINUX_2_RELEASE_ID = "Amazon Linux release 2 (Karoo)"
 AMAZON_LINUX_2_PRETTY_NAME = "Amazon Linux 2"
@@ -39,6 +39,9 @@ DEFAULT_UNKNOWN_VALUE = "unknown"
 DEFAULT_TIMEOUT = 0.05
 DEFAULT_MACOS_VALUE = "macos"
 DEFAULT_GET_AWS_EC2_METADATA_TOKEN_RETRY_COUNT = 3
+# Outage retries end this long after the first failed IMDS read of a mount began.
+IMDS_OUTAGE_RETRY_WINDOW_SEC = 5
+IMDS_OUTAGE_RETRY_FIRST_DELAY_SEC = 0.5
 DEFAULT_NFS_MOUNT_COMMAND_RETRY_COUNT = 3
 DEFAULT_NFS_MOUNT_COMMAND_TIMEOUT_SEC = 15
 DISABLE_FETCH_EC2_METADATA_TOKEN_ITEM = "disable_fetch_ec2_metadata_token"

@@ -360,6 +360,7 @@ pub async fn make_test_controller(
         last_reachability_emit_at: None,
         reachability_emit_period: emit_period,
         consecutive_connect_failures: 0,
+        peer_verifier: |_, _| crate::peer_owner::PeerVerdict::Admit,
     }
 }
 
@@ -424,6 +425,7 @@ pub async fn make_signaling_controller() -> (
         last_reachability_emit_at: None,
         reachability_emit_period: Duration::from_secs(1),
         consecutive_connect_failures: 0,
+        peer_verifier: |_, _| crate::peer_owner::PeerVerdict::Admit,
     };
     (addr, controller, rx)
 }

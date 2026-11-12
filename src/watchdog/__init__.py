@@ -59,7 +59,7 @@ AMAZON_LINUX_2_RELEASE_VERSIONS = [
     AMAZON_LINUX_2_RELEASE_ID,
     AMAZON_LINUX_2_PRETTY_NAME,
 ]
-VERSION = "3.3.5"
+VERSION = "3.4.0"
 SERVICE = "elasticfilesystem"
 FS_PREFIX = "fs-"
 
@@ -224,6 +224,23 @@ UNMOUNT_DIFF_TIME = 30
 
 # Default unmount count for consistency
 DEFAULT_UNMOUNT_COUNT_FOR_CONSISTENCY = 5
+
+# One line per kernel NFS client: "NV SERVER PORT USE HOSTNAME", address and port in hex.
+NFS_CLIENTS_PROC_FILE = "/proc/fs/nfsfs/servers"
+LOCALHOST_HEX_ADDR = "7f000001"
+# The kernel drops an NFS client from NFS_CLIENTS_PROC_FILE before it sends the client's
+# DESTROY_SESSION and DESTROY_CLIENTID, so a tunnel is kept this long after its client is gone
+# for those to reach the server.
+KERNEL_NFS_CLIENT_SETTLE_SEC = 5
+# After the unmount grace period, keep the tunnel while the kernel still has an NFS client on its
+# port, for at most this many seconds, so the client's DESTROY_SESSION and DESTROY_CLIENTID can
+# reach the server. 0, the default, disables the wait.
+KERNEL_NFS_CLIENT_TEARDOWN_MAX_WAIT_ITEM = "kernel_nfs_client_teardown_max_wait_sec"
+DEFAULT_KERNEL_NFS_CLIENT_TEARDOWN_MAX_WAIT_SEC = 0
+# State file keys: when the watchdog first saw no kernel NFS client on the mount's port, and
+# whether it logged that it keeps the tunnel past the grace period.
+KERNEL_NFS_CLIENT_GONE_TIME = "kernel_nfs_client_gone_time"
+KERNEL_NFS_CLIENT_WAIT_LOGGED = "kernel_nfs_client_wait_logged"
 
 MAC_OS_PLATFORM_LIST = ["darwin"]
 SYSTEM_RELEASE_PATH = "/etc/system-release"
@@ -1657,6 +1674,129 @@ def restart_tls_tunnel(child_procs, state, state_file_dir, state_file):
     rewrite_state_file(state, state_file_dir, state_file)
 
 
+def get_local_nfs_client_ports(proc_file=NFS_CLIENTS_PROC_FILE):
+    """Return the set of 127.0.0.1 ports the kernel has an NFS client for, or None if unknown."""
+    ports = set()
+    try:
+        with open(proc_file) as f:
+            for line in f:
+                fields = line.split()
+                if len(fields) < 3 or not fields[0].startswith("v"):
+                    continue
+                if fields[1].lower() != LOCALHOST_HEX_ADDR:
+                    continue
+                try:
+                    ports.add(int(fields[2], 16))
+                except ValueError:
+                    continue
+    except (IOError, OSError) as e:
+        if e.errno != errno.ENOENT:
+            logging.debug("Unable to read %s: %s", proc_file, e)
+        return None
+    return ports
+
+
+def get_port_from_state_file_name(state_file):
+    try:
+        return int(state_file.rsplit(".", 1)[-1])
+    except ValueError:
+        return None
+
+
+def get_kernel_nfs_client_teardown_max_wait_sec(config):
+    if not config.has_option(CONFIG_SECTION, KERNEL_NFS_CLIENT_TEARDOWN_MAX_WAIT_ITEM):
+        return DEFAULT_KERNEL_NFS_CLIENT_TEARDOWN_MAX_WAIT_SEC
+    try:
+        value = config.getint(CONFIG_SECTION, KERNEL_NFS_CLIENT_TEARDOWN_MAX_WAIT_ITEM)
+    except ValueError:
+        value = -1
+    if value < 0:
+        logging.warning(
+            "Invalid %s, using %d",
+            KERNEL_NFS_CLIENT_TEARDOWN_MAX_WAIT_ITEM,
+            DEFAULT_KERNEL_NFS_CLIENT_TEARDOWN_MAX_WAIT_SEC,
+        )
+        return DEFAULT_KERNEL_NFS_CLIENT_TEARDOWN_MAX_WAIT_SEC
+    return value
+
+
+def track_kernel_nfs_client(state, state_file_dir, state_file, current_time, present):
+    """Record when the kernel NFS client was first seen gone; return that time, or None."""
+    if present:
+        if KERNEL_NFS_CLIENT_GONE_TIME in state:
+            del state[KERNEL_NFS_CLIENT_GONE_TIME]
+            rewrite_state_file(state, state_file_dir, state_file)
+        return None
+    if KERNEL_NFS_CLIENT_GONE_TIME not in state:
+        state[KERNEL_NFS_CLIENT_GONE_TIME] = current_time
+        rewrite_state_file(state, state_file_dir, state_file)
+    return state[KERNEL_NFS_CLIENT_GONE_TIME]
+
+
+def is_unmount_grace_period_over(
+    state,
+    state_file_dir,
+    state_file,
+    current_time,
+    unmount_grace_period_sec,
+    nfs_client_ports,
+    max_wait_sec,
+):
+    """Return True once an unmounted mount's tunnel can be removed.
+
+    The tunnel is kept for the whole grace period, as it always was. Past it, it is kept while the
+    kernel has an NFS client on the mount's port, and for KERNEL_NFS_CLIENT_SETTLE_SEC after the
+    client is gone, for at most max_wait_sec. The grace period alone applies when the client list
+    cannot speak for the mount: no wait configured, no port, or no list (nfs_client_ports is
+    None).
+    """
+    port = get_port_from_state_file_name(state_file)
+    known = max_wait_sec > 0 and port is not None and nfs_client_ports is not None
+    if known:
+        present = port in nfs_client_ports
+        gone_time = track_kernel_nfs_client(
+            state, state_file_dir, state_file, current_time, present
+        )
+
+    grace_end = state["unmount_time"] + unmount_grace_period_sec
+    if current_time <= grace_end:
+        return False
+    if not known:
+        logging.info("Unmount grace period expired for %s", state_file)
+        return True
+
+    if current_time >= grace_end + max_wait_sec:
+        if present:
+            logging.warning(
+                "Kernel NFS client on port %d still present %d sec after the unmount grace "
+                "period of %s, removing the tunnel anyway",
+                port,
+                max_wait_sec,
+                state_file,
+            )
+        logging.info("Unmount grace period expired for %s", state_file)
+        return True
+
+    if present or current_time - gone_time < KERNEL_NFS_CLIENT_SETTLE_SEC:
+        if not state.get(KERNEL_NFS_CLIENT_WAIT_LOGGED):
+            logging.info(
+                "Unmount grace period expired for %s, keeping the tunnel until the kernel NFS "
+                "client on port %d is torn down",
+                state_file,
+                port,
+            )
+            state[KERNEL_NFS_CLIENT_WAIT_LOGGED] = True
+            rewrite_state_file(state, state_file_dir, state_file)
+        return False
+
+    logging.info(
+        "Unmount grace period expired for %s, and the kernel NFS client on port %d is gone",
+        state_file,
+        port,
+    )
+    return True
+
+
 def check_efs_mounts(
     config,
     child_procs,
@@ -1672,6 +1812,11 @@ def check_efs_mounts(
         'Current state files in "%s": %s', state_file_dir, list(state_files.values())
     )
 
+    max_wait_sec = get_kernel_nfs_client_teardown_max_wait_sec(config)
+    # Read at most once per pass: at the first unmounted mount, and not at all without one.
+    nfs_client_ports = None
+    nfs_client_ports_read = False
+
     for mount, state_file in state_files.items():
         state_file_path = os.path.join(state_file_dir, state_file)
         with open(state_file_path) as f:
@@ -1686,8 +1831,18 @@ def check_efs_mounts(
 
         current_time = time.time()
         if "unmount_time" in state:
-            if state["unmount_time"] + unmount_grace_period_sec < current_time:
-                logging.info("Unmount grace period expired for %s", state_file)
+            if max_wait_sec > 0 and not nfs_client_ports_read:
+                nfs_client_ports = get_local_nfs_client_ports()
+                nfs_client_ports_read = True
+            if is_unmount_grace_period_over(
+                state,
+                state_file_dir,
+                state_file,
+                current_time,
+                unmount_grace_period_sec,
+                nfs_client_ports,
+                max_wait_sec,
+            ):
                 clean_up_mount_state(
                     state_file_dir,
                     state_file,
